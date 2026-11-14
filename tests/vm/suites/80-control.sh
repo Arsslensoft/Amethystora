@@ -723,8 +723,9 @@ if [[ "${SUITE_PHASE}" == 8 ]] && preinstall_ready; then
     card_ok "the apps this image comes with, installed now: ${CARD}"
     [[ ${STATUS} == 0 ]] || echo "# flatpak then: $(pgrep -a flatpak | cut -c1-150 | paste -sd ';') | $(flatpak list --app --columns=application | grep -i thunderbird | paste -sd ' ')"
 
-    in_card 600 'Prune all Podman images and volumes\?' y '?Docker images and volumes\?|Proceed with these changes' y \
-        '?Proceed with these changes' y -- clean
+    # Then Docker's (only where it is), Flatpak's (only with something unused), rpm-ostree's and Homebrew's, each as it comes
+    more="?Docker images and volumes\?|Proceed with these changes|rpm-ostree.s caches|Remove what Homebrew lists"
+    in_card 600 'Prune all Podman images and volumes\?' y "${more}" y "${more}" y "${more}" y "${more}" y -- clean
     card_ok "free disk space, every question answered yes: ${CARD}"
 
     reboot_and_continue
