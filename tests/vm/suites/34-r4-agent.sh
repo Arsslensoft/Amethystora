@@ -107,7 +107,7 @@ cleanup() {
     ev "global.force_animations = true; 'reset'" >/dev/null 2>&1
     user_bus systemctl --user stop vmlab-mcp-a vmlab-mcp-b vmlab-mcp-c vmlab-mcp-d vmlab-mcp-e vmlab-notes vmlab-other >/dev/null 2>&1
     tester "amethystora-agent stop; amethystora-agent off" >/dev/null 2>&1
-    for key in ask-selection pill; do gs reset "${AGENT_UI}" "${key}"; done
+    for key in ask-selection ask-questions pill; do gs reset "${AGENT_UI}" "${key}"; done
     for key in force-quit frozen-dialog; do gs reset "${QUIT_UI}" "${key}"; done
     # The agent's changes below set Fade; a later run's must be a change again
     gs reset org.gnome.shell.extensions.amethystora-transitions style
@@ -231,10 +231,16 @@ printf '{"id":"'"${R2}"'","time":%s,"tool":"change","result":"ok","entry":"theme
     "$(date +%s)" >>"${LOG}"
 sleep 2
 same "8 a way back that is not the inverse gets no Undo" "$(ev "${A}.changes.status.changes.find(c => c.id === '${R2}')?.undo")" false
-# A hand-off: a command in a terminal, waiting for the person, and the terminal brought forward by Show
+# A hand-off: a command in a terminal, waiting for the person, and the terminal brought forward by Show. With the pill's own
+# question on (ask-questions, round 7) the yes is asked in the pill first, and no terminal opens before it: the terminal's way
+# is what is checked here
+gs set "${AGENT_UI}" ask-questions false
 mcp_bg b 'run {"argv": ["true"], "reason": "vmlab waits"}' 'pause 60'
 asking() { [[ "$(ev "${UI}.get('pill').state().text")" == "Agent asks you" ]]; }
 check "9 a hand-off waits: Agent asks you" wait_for 30 asking
+# The terminal opens a moment after the record says so
+shown() { [[ "$(ev "${A}.changes.status.show")" == true ]]; }
+wait_for 30 shown
 same "9 ... on the warning plate, with Show while its terminal is open" \
     "$(ev "${UI}.get('pill').clock.actor._plate.has_style_class_name('amethystora-pill-plate-agent-ask')") $(ev "${A}.changes.status.show")" "true true"
 printf '{"id":"'"${R3}"'","time":%s,"tool":"run","result":"opened","argv":["systemctl","restart","bluetooth"],"root":true,"mode":"terminal","server":%s}\n' \
@@ -243,6 +249,7 @@ root_asking() { [[ "$(ev "${UI}.get('pill').state().text")" == "Agent asks for r
 check "9 a root command waiting in its terminal: Agent asks for root" wait_for 10 root_asking
 printf '{"id":"'"${R3}"'","time":%s,"tool":"run","result":"declined","argv":["systemctl","restart","bluetooth"],"root":true,"mode":"terminal"}\n' \
     "$(date +%s)" >>"${LOG}"
+gs reset "${AGENT_UI}" ask-questions
 # A server that ended leaves its record as it was, and nobody is asked for anything
 printf '{"id":"'"${R3}"'x","time":%s,"tool":"run","result":"opened","argv":["true"],"root":true,"mode":"terminal","server":4194000}\n' \
     "$(date +%s)" >>"${LOG}"
