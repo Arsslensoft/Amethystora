@@ -505,6 +505,7 @@ fn run(args: &Args) -> Result<(), u8> {
 }
 
 fn main() -> ExitCode {
+    amethystora_vault_service::quiet_client();
     let mut args = Args::read();
     let result = run(&args);
     for (_, value) in &mut args.options {

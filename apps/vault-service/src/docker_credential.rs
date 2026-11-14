@@ -72,6 +72,7 @@ fn list() -> Result<String, Refusal> {
 }
 
 fn main() -> ExitCode {
+    amethystora_vault_service::quiet_client();
     let action = std::env::args().nth(1).unwrap_or_default();
     let result = match action.as_str() {
         "get" => get().map(|answer| Some(answer.unwrap_or_else(|| NOT_FOUND.to_string()))),

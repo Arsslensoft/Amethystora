@@ -34,6 +34,7 @@ fn get() -> Result<(), Refusal> {
 }
 
 fn main() -> ExitCode {
+    amethystora_vault_service::quiet_client();
     let action = std::env::args_os().nth(1);
     if action.as_deref() != Some(std::ffi::OsStr::new("get")) {
         // Read to the end, so that git's write never meets a closed pipe
