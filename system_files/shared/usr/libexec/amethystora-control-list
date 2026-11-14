@@ -391,7 +391,7 @@ read_in_background grub amethystora-grub-theme status
 read_in_background agent amethystora-agent status
 read_in_background agents amethystora-agent list
 read_in_background policy amethystora-agent policy --json
-read_in_background plugins amethystora-plugins list --json
+read_in_background plugins /usr/libexec/amethystora-plugins list --json
 read_in_background webapps amethystora-webapp list --json
 read_in_background image /usr/bin/amethystora-rollback-helper --choices
 read_in_background bling amethystora-bling status
@@ -3296,22 +3296,9 @@ item system image choice "${ gettext "Image"; }" \
     "${ gettext "The system this machine runs. Switching downloads it, checks its signature, and takes effect at the next restart."; }" \
     "${IMAGE_NAME}" streams#switching-streams-and-images
 
-while read -r stream; do
-    [[ -n "${stream}" ]] || continue
-    case "${stream}" in
-        stable) choice stable "${ gettext "Stable"; }" "${ gettext "Built every week"; }" true ame system rebase "${IMAGE_NAME}" stable ;;
-        stable-daily) choice stable-daily "${ gettext "Stable, daily"; }" "${ gettext "The same, built every day"; }" true \
-            ame system rebase "${IMAGE_NAME}" stable-daily ;;
-        latest) choice latest "${ gettext "Latest"; }" "${ gettext "The newest Fedora, for testers"; }" true \
-            ame system rebase "${IMAGE_NAME}" latest ;;
-        stable-sealed) choice stable-sealed "${ gettext "Sealed"; }" "${ gettext "Stable, with every file checked as it is read"; }" true \
-            ame system rebase "${IMAGE_NAME}" stable-sealed ;;
-        *) choice "${stream}" "${stream}" "" true ame system rebase "${IMAGE_NAME}" "${stream}" ;;
-    esac
-done < <(jq -r '.streams[]' <<<"${CHOICES_JSON}")
-[[ "${SEALED}" == true ]] && REASON="${ gettext "This machine is sealed, so it follows the sealed stream only."; }"
+# If it's lost, it says whose it is (R7-71): written in a terminal, which says first who can read it. Before the stream's
+# choices, since an entry takes every choice made since the last one
 GROUP="${ gettext "The system"; }"
-# If it's lost, it says whose it is (R7-71): written in a terminal, which says first who can read it
 COMMAND=(ame system if-found)
 TERMINAL=true
 BUTTON="${ gettext "Write the line"; }"
@@ -3329,6 +3316,22 @@ USAGE="ame backup restore-from"
 item system start-from-backup action "${ gettext "Start from your backup"; }" \
     "${ gettext "On a new computer, or after the old one was lost: your files, apps and setup, and your Vault, from a backup, with the recovery key you wrote down."; }" \
     "" backups
+GROUP="${ gettext "The system"; }"
+
+while read -r stream; do
+    [[ -n "${stream}" ]] || continue
+    case "${stream}" in
+        stable) choice stable "${ gettext "Stable"; }" "${ gettext "Built every week"; }" true ame system rebase "${IMAGE_NAME}" stable ;;
+        stable-daily) choice stable-daily "${ gettext "Stable, daily"; }" "${ gettext "The same, built every day"; }" true \
+            ame system rebase "${IMAGE_NAME}" stable-daily ;;
+        latest) choice latest "${ gettext "Latest"; }" "${ gettext "The newest Fedora, for testers"; }" true \
+            ame system rebase "${IMAGE_NAME}" latest ;;
+        stable-sealed) choice stable-sealed "${ gettext "Sealed"; }" "${ gettext "Stable, with every file checked as it is read"; }" true \
+            ame system rebase "${IMAGE_NAME}" stable-sealed ;;
+        *) choice "${stream}" "${stream}" "" true ame system rebase "${IMAGE_NAME}" "${stream}" ;;
+    esac
+done < <(jq -r '.streams[]' <<<"${CHOICES_JSON}")
+[[ "${SEALED}" == true ]] && REASON="${ gettext "This machine is sealed, so it follows the sealed stream only."; }"
 GROUP="${ gettext "The system"; }"
 USAGE="ame system rebase IMAGE STREAM"
 item system stream choice "${ gettext "Stream"; }" "${ gettext "How new the builds this machine follows are."; }" \
