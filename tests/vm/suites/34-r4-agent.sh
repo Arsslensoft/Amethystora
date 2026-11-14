@@ -277,8 +277,9 @@ check "10 a server killed outright is found gone when the card opens" wait_for 1
 ev "${UI}.get('pill').clock._closeCard(); 'closed'" >/dev/null
 user_bus systemctl --user stop vmlab-mcp-a vmlab-mcp-c vmlab-mcp-d >/dev/null 2>&1
 tester "ame agent pill off" >/dev/null
-not_watching() { [[ "$(ast '.watching')" == false ]]; }
-check "11 ame agent pill off: nothing watched, nothing in the pill" wait_for 4 not_watching
+# The changes are no longer watched; what the agent reads still is while `doing` is on (R7-13), so the watcher may stay
+not_watching() { [[ "$(ev "String(${A}._changes?.what.changes ?? false)")" == false ]]; }
+check "11 ame agent pill off: no change watched, nothing in the pill" wait_for 4 not_watching
 same "11 ... the pill back to the clock" "$(ev "${UI}.get('pill').state().activity")" idle
 refused="$(user_bus systemd-run --user --pipe --wait --quiet --collect --setenv=WAYLAND_DISPLAY=wayland-0 -- /usr/bin/python3 "${OWN}/mcp.py" \
     'change {"id": "agent-pill", "value": "off"}' \
@@ -420,6 +421,9 @@ cycles() {
             original &&= !CloseDialog.CloseDialog.prototype._initDialog.toString().includes('_dress');
             ext.enableExtension('${UUID}');
             await until(1);
+            // The modules start a few at a time after the enable (extension.js's pump): this one's own are waited for
+            for (let n = 0; n < 100 && !(${UI}?.get('agent') && ${UI}?.get('quit') && ${UI}?.get('pill')); n++)
+                await new Promise(r => setTimeout(r, 50));
             await new Promise(r => setTimeout(r, 400));
         }
         ${A}.card?.destroy();
