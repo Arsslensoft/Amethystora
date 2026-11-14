@@ -46,6 +46,9 @@ podman exec vmlab-dc samba-tool user create alice ${ALICE_PASSWORD}
 podman exec vmlab-dc samba-tool user setexpiry alice --noexpiry
 podman exec vmlab-dc touch /dc-ready
 touch ${WORK}/dc-ready
+# The container's conmon runs in this unit's cgroup, and the container ended with it: the unit stays until the cleanup
+# stops it
+exec sleep infinity
 EOF
 systemctl reset-failed vmlab-dc-setup.service 2>/dev/null
 systemd-run --unit=vmlab-dc-setup --collect --quiet -p "StandardOutput=file:${WORK}/dc.log" \
@@ -465,7 +468,8 @@ if join sssd; then
     # its run's start, so the time is taken with no run under way.
     drift_now >/dev/null
     t="$(date +%s)"
-    runuser -u "alice@${DOMAIN}" -- sh -c 'mkdir -p ~/.local/bin && printf "#!/bin/sh\nexec /usr/bin/sudo \"\$@\"\n" >~/.local/bin/sudo && chmod 0755 ~/.local/bin/sudo'
+    # Its own words each run: the watcher says a file once for what it holds, and a run before may have left one
+    runuser -u "alice@${DOMAIN}" -- sh -c 'mkdir -p ~/.local/bin && printf "#!/bin/sh\n# vmlab %s\nexec /usr/bin/sudo \"\$@\"\n" "$1" >~/.local/bin/sudo && chmod 0755 ~/.local/bin/sudo' _ "${t}"
     drift_now >/dev/null
     if jq -e -s --argjson t "${t}" 'any(.[]; .time >= $t and .key == "user-paths" and (.text | contains("alice@ad.test/.local/bin/sudo")))' \
         /var/log/amethystora-security-events.jsonl >/dev/null; then
