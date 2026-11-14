@@ -56,7 +56,10 @@ const SUPER_KEYS = [Clutter.KEY_Super_L, Clutter.KEY_Super_R];
 // them, so the box lets them through
 const RESULT_KEYS = [...OPENING_KEYS, Clutter.KEY_space, Clutter.KEY_KP_Space, Clutter.KEY_Up, Clutter.KEY_Down,
     Clutter.KEY_Left, Clutter.KEY_Right, Clutter.KEY_Tab, Clutter.KEY_ISO_Left_Tab, Clutter.KEY_Page_Up, Clutter.KEY_Page_Down, Clutter.KEY_Home,
-    Clutter.KEY_End, Clutter.KEY_Menu];
+    Clutter.KEY_End, Clutter.KEY_Menu,
+    // A modifier pressed alone, before Shift+Tab or Ctrl and a digit: the result keeps the keyboard
+    Clutter.KEY_Shift_L, Clutter.KEY_Shift_R, Clutter.KEY_Control_L, Clutter.KEY_Control_R, Clutter.KEY_Alt_L, Clutter.KEY_Alt_R,
+    Clutter.KEY_Meta_L, Clutter.KEY_Meta_R, Clutter.KEY_ISO_Level3_Shift, Clutter.KEY_Caps_Lock, Clutter.KEY_Num_Lock];
 const KEY_EVENTS = [Clutter.EventType.KEY_PRESS, Clutter.EventType.KEY_RELEASE];
 const POINTER_EVENTS = [Clutter.EventType.BUTTON_PRESS, Clutter.EventType.BUTTON_RELEASE,
     Clutter.EventType.TOUCH_BEGIN, Clutter.EventType.TOUCH_END];
@@ -489,8 +492,8 @@ export class Search {
             return Clutter.EVENT_STOP;
         }
 
-        // Any other key that a result had no use for (a letter, a modifier, a shortcut) sends the keyboard back to the
-        // field, and goes no further
+        // Any other key that a result had no use for (a letter, a shortcut) sends the keyboard back to the field, and goes
+        // no further
         const text = this._lent.entry.clutter_text;
         if (global.stage.get_key_focus() === text || RESULT_KEYS.includes(symbol))
             return Clutter.EVENT_PROPAGATE;
