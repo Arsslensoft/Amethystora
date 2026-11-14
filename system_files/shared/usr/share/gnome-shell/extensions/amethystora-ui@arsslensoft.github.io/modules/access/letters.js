@@ -22,6 +22,9 @@ import {giveBackTextInput} from '../emoji/paste.js';
 const HELPER = '/usr/libexec/amethystora-letters';
 // The home row first: the letters easiest to reach go on the first controls
 const ALPHABET = 'asdfjklghqweruiopzxcvbnmty';
+const MODIFIERS = new Set([Clutter.KEY_Shift_L, Clutter.KEY_Shift_R, Clutter.KEY_Control_L, Clutter.KEY_Control_R,
+    Clutter.KEY_Alt_L, Clutter.KEY_Alt_R, Clutter.KEY_Super_L, Clutter.KEY_Super_R, Clutter.KEY_Meta_L, Clutter.KEY_Meta_R,
+    Clutter.KEY_Hyper_L, Clutter.KEY_Hyper_R, Clutter.KEY_ISO_Level3_Shift, Clutter.KEY_Caps_Lock]);
 // The program has this long to say where the controls are
 const ANSWER_MS = 8000;
 const MOST_LINE = 256 * 1024;
@@ -168,6 +171,9 @@ export class Letters {
             this.hide();
             return Clutter.EVENT_STOP;
         }
+        // A modifier pressed alone (Shift before a letter, the shortcut's own keys still held) changes nothing
+        if (MODIFIERS.has(symbol))
+            return Clutter.EVENT_STOP;
         if (symbol === Clutter.KEY_BackSpace) {
             this._typed = this._typed.slice(0, -1);
             this._mark();
