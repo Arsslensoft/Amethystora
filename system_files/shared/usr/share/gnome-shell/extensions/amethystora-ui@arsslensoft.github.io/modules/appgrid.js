@@ -471,28 +471,34 @@ export class AppGrid {
                         seenFolders.add(folder);
                         folder.connect('destroy', () => goneFolders.add(folder));
                     }
-                    folder.add_style_class_name(TILE_CLASS);
+                    // A class changed here restyles the icon GNOME is replacing, which it has just destroyed: only a
+                    // folder new to the grid gets it here, the ones drawn already before they are drawn again
+                    if (!folder.has_style_class_name(TILE_CLASS))
+                        folder.add_style_class_name(TILE_CLASS);
                 }
             } catch (e) {
                 console.error(`Amethystora UI: appgrid: a folder's tile: ${e.message}`);
             }
             return icon;
         });
-        this._redrawFolders();
+        this._redrawFolders(true);
     }
 
     _unfolders() {
         this._injections?.clear();
         this._injections = null;
-        this._redrawFolders();
+        this._redrawFolders(false);
     }
 
-    // The folders already drawn, drawn again by whichever createFolderIcon is in place now
-    _redrawFolders() {
+    // The folders already drawn, drawn again by whichever createFolderIcon is in place now, their tile's class set first
+    _redrawFolders(tiled) {
         for (const item of this._appDisplay?._orderedItems ?? []) {
             if (!(item instanceof AppDisplay.FolderIcon))
                 continue;
-            item.remove_style_class_name(TILE_CLASS);
+            if (tiled)
+                item.add_style_class_name(TILE_CLASS);
+            else
+                item.remove_style_class_name(TILE_CLASS);
             item.icon?.update?.();
         }
     }
