@@ -82,7 +82,7 @@ fn main() -> ExitCode {
         "mcp" => {
             // Named in the account's runtime folder while it runs, for the live pill and Stop
             let _session = history::Session::start();
-            let server = Server::default();
+            let server = Server::default().serving_agent();
             let stdin = std::io::stdin();
             let served = mcp::serve(&server, BufReader::new(stdin.lock()), std::io::stdout().lock());
             // The agent ended: so does the root helper of its session
