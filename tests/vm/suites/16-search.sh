@@ -377,14 +377,15 @@ search "vmlab-clip"
 same "12 no clipboard section without clip:" "$(q '[.sections[].id] | index("amethystora-clipboard")')" null
 search "clip:"
 same "12 clip: shows the history" "$(q '[.sections[] | select(.id == "amethystora-clipboard")][0].rows[0].title')" "vmlab-clip-${RUN}"
-search "clip: vmlab-clip"
+# Words from inside this run's text: the history also keeps what an earlier run of the suite copied
+search "clip: clip-${RUN}"
 same "12 clip: WORDS keeps what holds them" "$(section_rows amethystora-clipboard)" "vmlab-clip-${RUN}"
 close_card
 user_bus systemd-run --user --collect --unit=vmlab-16-editor flatpak run org.gnome.TextEditor --new-window >/dev/null
 editor_up() { user_bus python3 "${HERE}/atspi.py" gnome-text-editor has "New Document" >/dev/null 2>&1; }
 editor_focused() { [[ "$(ev "global.display.focus_window?.get_wm_class()")" == *TextEditor* ]]; }
 if wait_for 60 editor_up && soon 10 editor_focused; then
-    search "clip: vmlab-clip"
+    search "clip: clip-${RUN}"
     keys return
     pasted() { user_bus python3 "${HERE}/atspi.py" gnome-text-editor text 2>/dev/null | grep -q "vmlab-clip-${RUN}"; }
     check "12 Enter pastes it into the document" wait_for 5 pasted
@@ -449,10 +450,16 @@ user_bus gdbus call --session --dest org.freedesktop.DBus --object-path /org/fre
 # Files (50.4) answers nothing the first time it is asked a text with a hyphen in it, as the suite sets one whole (a
 # person typing reaches it through the shorter texts before), and GNOME keeps an answer for as long as the text stays the
 # same: each try asks with a word the two pictures' names both hold, and another one the next time
+# Files 51 answers nothing to the first question after it starts, whatever the text: asked once here, as a person's first
+# letters do. Each try is a new search (the field emptied first), since GNOME asks a provider only within its last answer
+# when the text grows from the last one, and an empty answer stays empty that way
+user_bus gdbus call --session --dest org.gnome.Nautilus --object-path /org/gnome/Nautilus/SearchProvider \
+    --method org.gnome.Shell.SearchProvider2.GetInitialResultSet "['vmlab']" >/dev/null 2>&1
 FILES_TRIES=0
 files_found() {
     local text=glance
     ((++FILES_TRIES % 2)) || text=glanc
+    ev "Main.overview.searchEntry.set_text(''); 'emptied'" >/dev/null
     search "${text}"
     [[ "$(q '[.sections[].rows[].title | select(startswith("vmlab-glance"))] | length')" == 2 ]]
 }
