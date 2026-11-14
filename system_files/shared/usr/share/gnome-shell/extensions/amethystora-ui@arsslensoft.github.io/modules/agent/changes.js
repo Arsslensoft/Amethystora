@@ -508,7 +508,17 @@ export class AgentChanges {
 
     pill() {
         if (!this._content) {
-            this._content = new St.BoxLayout({style_class: 'amethystora-pill-content amethystora-agent-pill'});
+            const content = new St.BoxLayout({style_class: 'amethystora-pill-content amethystora-agent-pill'});
+            this._content = content;
+            // The pill may destroy it on its own (a fade, the extension stopping): nothing here touches it after that
+            content.connect('destroy', () => {
+                if (this._content !== content)
+                    return;
+                this._content = null;
+                this._label = null;
+                this._icon = null;
+                this._breathing = false;
+            });
             this._icon = new St.Icon({gicon: this._gicon, icon_size: 13, y_align: Clutter.ActorAlign.CENTER});
             this._content.add_child(this._icon);
             this._label = new St.Label({text: this.text, y_align: Clutter.ActorAlign.CENTER});
