@@ -68,8 +68,10 @@ function stagedApp(staging) {
                     continue;
                 const commit = GLib.Variant.new_from_bytes(new GLib.VariantType(COMMIT_TYPE),
                     new GLib.Bytes(bytes), false);
-                const metadata = commit.get_child_value(0).recursiveUnpack();
-                for (const ref of metadata['ostree.ref-binding'] ?? []) {
+                // The one key read: the rest of the metadata holds Flatpak's sizes as big-endian 64-bit numbers, which
+                // GJS warns about one by one when they are unpacked
+                const binding = commit.get_child_value(0).lookup_value('ostree.ref-binding', new GLib.VariantType('as'));
+                for (const ref of binding?.get_strv() ?? []) {
                     const parts = String(ref).split('/');
                     if (parts[0] === 'app' && parts[1])
                         return parts[1];
