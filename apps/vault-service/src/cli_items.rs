@@ -544,7 +544,9 @@ pub fn pdf(args: &Args) -> Result<(), u8> {
         .stdin(Stdio::null())
         .status()
         .map_err(|_| 6u8)?;
-    if !done.success() {
+    // pdfsig writes the file and ends well also when the key's signature never came (a no to the question, the vault closed
+    // meanwhile): the signature it made is read back, and a copy whose new signature is empty or does not hold is not left
+    if !done.success() || !signature_holds(&database, &output) {
         let _ = std::fs::remove_file(&output);
         return Err(1);
     }
@@ -552,6 +554,20 @@ pub fn pdf(args: &Args) -> Result<(), u8> {
     // The root this machine signs under, trusted for signatures in this account's readers, if it is not already: the copy is made either way
     let _ = trust_root_for_signatures();
     Ok(())
+}
+
+/// Whether the last signature of a PDF holds, as pdfsig reads it (its certificate not judged: the account may not trust the root yet)
+fn signature_holds(database: &str, pdf: &Path) -> bool {
+    let Ok(read) = Command::new("pdfsig").args(["-nssdir", database, "-nocert", "-no-ocsp"]).arg(pdf).stdin(Stdio::null()).stderr(Stdio::null()).output()
+    else {
+        return false;
+    };
+    last_signature_holds(&String::from_utf8_lossy(&read.stdout))
+}
+
+/// In pdfsig's report, the block of the last signature says it is valid
+fn last_signature_holds(report: &str) -> bool {
+    report.rsplit_once("Signature #").is_some_and(|(_, last)| last.contains("Signature Validation: Signature is Valid"))
 }
 
 // --- What this machine's readers and browsers trust, in the account's own NSS database ---------------------------------------
@@ -655,5 +671,22 @@ pub fn tls(args: &Args) -> Result<(), u8> {
             Ok(())
         }
         _ => Err(USAGE),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::last_signature_holds;
+
+    #[test]
+    fn only_a_last_signature_that_holds_counts() {
+        let good = "Digital Signature Info of: a.pdf\nSignature #1:\n  - Signature Validation: Signature is Valid.\n";
+        assert!(last_signature_holds(good));
+        // Poppler 26.08 after a key that never signed: the field is there, the signature string is not
+        let empty = "Syntax Error (0): Invalid or missing Signature string\nSignature #1:\n  - Signature Validation: Signature has not yet been verified.\n";
+        assert!(!last_signature_holds(empty));
+        // A valid earlier signature does not stand for the new one
+        assert!(!last_signature_holds(&format!("{good}Signature #2:\n  - Signature Validation: Signature is Invalid.\n")));
+        assert!(!last_signature_holds(""));
     }
 }
