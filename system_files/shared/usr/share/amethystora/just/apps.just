@@ -203,7 +203,12 @@ android ACTION="":
             waydroid session stop 2>/dev/null || true
             sudo systemctl disable --now waydroid-container.service
             close_devices
-            sudo rm -rf /var/lib/waydroid
+            # The container's mounts of Android's images go a moment after its service stops: any still there are taken
+            # off first, and rm stays on the one file system, so that it never reaches into a mount
+            mounts() { findmnt -rn -o TARGET | grep '^/var/lib/waydroid/' | sort -r || true; }
+            for _ in $(seq 20); do [[ -n "$(mounts)" ]] || break; sleep 0.5; done
+            for mount in $(mounts); do sudo umount "${mount}" 2>/dev/null || sudo umount -l "${mount}" || true; done
+            sudo rm -rf --one-file-system /var/lib/waydroid
             # What Android saved in the home belongs to the container's own users, not to you
             sudo rm -rf -- "${XDG_DATA_HOME:-${HOME}/.local/share}/waydroid"
             rm -f "${XDG_DATA_HOME:-${HOME}/.local/share}"/applications/waydroid.*.desktop
