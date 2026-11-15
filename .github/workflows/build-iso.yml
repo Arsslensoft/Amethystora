@@ -196,7 +196,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cpio isomd5sum xorriso
-          (cd iso/product && find . -mindepth 1 | LC_ALL=C sort | cpio --quiet -o -H newc -R 0:0 | gzip -9) > product.img
+          # The web installer says what it installs by the installer's own os-release, generic-release's
+          # ("Generic"): the product image carries one that names the image as it names itself, and keeps
+          # the ID, ID_LIKE and VERSION_ID that Anaconda picks its profile and kickstart version by
+          cp -a iso/product product
+          mkdir -p product/etc
+          # shellcheck disable=SC2016
+          sudo podman run --rm --entrypoint /usr/bin/bash "ghcr.io/arsslensoft/${IMAGE}@${DIGEST}" -c \
+            '. /usr/lib/os-release && printf "NAME=\"%s\"\nVERSION=\"%s\"\nID=generic\nID_LIKE=fedora\nVERSION_ID=%s\nPRETTY_NAME=\"%s\"\n" \
+              "${NAME//\"/}" "${VERSION_ID}" "${VERSION_ID}" "${PRETTY_NAME//\"/}"' > product/etc/os-release
+          grep -qx 'VERSION_ID=[0-9][0-9]*' product/etc/os-release
+          (cd product && find . -mindepth 1 | LC_ALL=C sort | cpio --quiet -o -H newc -R 0:0 | gzip -9) > product.img
           mkdir upload
           # replay keeps the boot records bootc-image-builder wrote: BIOS, UEFI and the hybrid MBR/GPT.
           # LICENSE, NOTICE and the installer's package list go beside the installer: NOTICE names what
