@@ -343,16 +343,17 @@ if [[ "${SUITE_PHASE}" == 6 ]]; then
             not_ok "it did not open in a terminal" "$(findmnt "${PRIVATE}" 2>&1)"
         fi
     done
-    # A suspend without the screen locking: closed before the machine sleeps (the kernel's own test of a suspend,
-    # to its devices, which wakes it after 5 seconds: the lab's VM has no sleep a timer could end)
-    if grep -qw devices /sys/power/pm_test 2>/dev/null; then
+    # A suspend without the screen locking: closed before the machine sleeps (the kernel's own test of a suspend, which
+    # wakes it after 5 seconds: the lab's VM has no sleep a timer could end). Its freezer level: logind's PrepareForSleep
+    # comes all the same, and the devices level made the lab's virtio port answer one request behind (7.3, suite 74)
+    if grep -qw freezer /sys/power/pm_test 2>/dev/null; then
         user_bus gsettings set org.gnome.desktop.screensaver lock-enabled false
         open_in_terminal
         if mounted; then
             in_session "gio open '${PRIVATE}'" >/dev/null 2>&1
             wait_for 30 files_shows "file://${PRIVATE}"
             before="$(date +%s)"
-            echo devices >/sys/power/pm_test
+            echo freezer >/sys/power/pm_test
             systemctl suspend
             wait_for 180 sh -c "journalctl -b --since @${before} --no-pager -o cat | grep -q 'PM: suspend exit'"
             echo none >/sys/power/pm_test

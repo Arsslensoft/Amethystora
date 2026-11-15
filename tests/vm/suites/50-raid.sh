@@ -779,9 +779,10 @@ case "${SUITE_PHASE}" in
 
 10)
     # A suspend while every copy is read: the next run resumes it. systemd's suspend and the kernel's, every task
-    # frozen and every device suspended, then woken by the kernel itself after 5 s (pm_test): the lab's VM has no
-    # S3 (QEMU's disable_s3), and the RTC's alarm did not wake it from s2idle (2026-10-19)
-    if ! grep -qw devices /sys/power/pm_test 2>/dev/null; then
+    # frozen, then woken by the kernel itself after 5 s (pm_test): the lab's VM has no S3 (QEMU's disable_s3), and the
+    # RTC's alarm did not wake it from s2idle (2026-10-19). The freezer level, which is what cancels a scrub: at the
+    # devices level the lab's virtio port gave this phase's answer to the next request (7.3, suite 74)
+    if ! grep -qw freezer /sys/power/pm_test 2>/dev/null; then
         skip "a suspend during a scrub: this kernel has no test of its suspend (pm_test)"
     else
         # Slow enough for the suspend to come while it reads: a scrub of data's few gigabytes ends in seconds
@@ -790,7 +791,7 @@ case "${SUITE_PHASE}" in
         wait_for 60 pgrep -f 'btrfs scrub start -B -R /var/mnt/data'
         sleep 3
         echo "# the scrub before the suspend: $(btrfs scrub status /var/mnt/data | grep -E 'Status|scrubbed' | paste -sd ' ')"
-        echo devices >/sys/power/pm_test
+        echo freezer >/sys/power/pm_test
         before="$(date +%s)"
         systemctl suspend
         wait_for 180 sh -c "journalctl -b --since @${before} --no-pager -o cat | grep -q 'PM: suspend exit'"
