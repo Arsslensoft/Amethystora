@@ -217,9 +217,8 @@ jobs:
   # a live system into a UEFI-only ISO; the live system is the published image with the live boot, the
   # live session and the installer added (iso/live), and a copy of the image itself, which is what gets
   # installed. Titanoboa is pinned to a commit of its main branch, newer than its last tag, from the first
-  # that takes nothing but that image: everything else is in the image. Its trick for the offline copy, an
-  # image store in /usr/lib/containers/storage, does not work with Fedora 45's podman 6
-  # (ublue-os/titanoboa#151), which this job will need an answer to before the stable image moves to 45.
+  # that takes nothing but that image: everything else is in the image, the offline copy in the image store
+  # /usr/lib/containers/storage, which iso/live/build.sh fills around podman 6's refusal (ublue-os/titanoboa#151).
   live-iso:
     name: Live ISO
     needs: [image]

@@ -21,14 +21,35 @@ mkdir -p "$(realpath /root)"
 # Into the read-only image store that containers-common lists for root (additionalimagestores), where
 # the installer's bootc install finds it by name. The storage settings are only for this pull. It is
 # pulled by digest, the one the live system is built from, and only then given the name it installs by.
+# podman 6 refuses to write into a store it also has as an additional one (ublue-os/titanoboa#151), and
+# Fedora 45's containers-common lists it in a drop-in for root, which only a drop-in of the same name in
+# /etc replaces: for the pull, each one is replaced by one without the store.
 cat >/etc/containers/storage.conf <<'EOF'
 [storage]
 driver = "overlay"
 runroot = "/run/containers/storage"
 graphroot = "/usr/lib/containers/storage"
 EOF
+vendor=(/usr/share/containers/storage.rootful.conf.d/*.conf)
+[[ -e "${vendor[0]}" ]] || vendor=()
+mkdir -p /etc/containers/storage.rootful.conf.d
+for conf in "${vendor[@]}"; do
+    printf '[storage.options]\nadditionalimagestores = []\n' >"/etc/containers/storage.rootful.conf.d/${conf##*/}"
+done
 podman pull "${BASE_IMAGE%:*}@${BASE_DIGEST}"
 podman tag "${BASE_IMAGE%:*}@${BASE_DIGEST}" "${BASE_IMAGE}"
+for conf in "${vendor[@]}"; do rm "/etc/containers/storage.rootful.conf.d/${conf##*/}"; done
+rmdir --ignore-fail-on-non-empty /etc/containers/storage.rootful.conf.d
+rm -rf /run/containers/storage
+# ...where the live session finds it, read-only, as the installer will: asked through a store of its own
+# in /var/tmp, which is not kept, with the vendor's drop-ins
+cat >/etc/containers/storage.conf <<'EOF'
+[storage]
+driver = "overlay"
+runroot = "/var/tmp/store-run"
+graphroot = "/var/tmp/store"
+EOF
+podman images --format '{{.Repository}}:{{.Tag}} {{.ReadOnly}}' | grep -qxF "${BASE_IMAGE} true"
 rm -f /etc/containers/storage.conf
 
 # --- The live boot and the installer ------------------------------------------------------------------
