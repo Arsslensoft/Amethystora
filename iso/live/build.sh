@@ -143,6 +143,8 @@ systemctl disable uupd.timer flatpak-preinstall.service fwupd-refresh.timer amet
     brew-setup.service
 systemctl --global disable amethystora-pkg-upgrade.timer amethystora-update-alert.service \
     amethystora-security-alert.service
+# ...and bootupd, which finds no boot disk to update in a session started from a stick, and fails
+systemctl mask bootloader-update.service
 
 # An installation takes long enough for GNOME to lock the screen and suspend the machine, and livesys
 # no longer stops either. Waking a live system from a USB stick can lose the stick, and the session
