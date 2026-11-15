@@ -135,6 +135,10 @@ jobs:
       # folder. Its successor, which `latest` is due to become, has them compiled in, so moving to it
       # means rewriting this step.
       #
+      # It looks for the image's repositories in /etc/yum.repos.d alone, where Fedora 45 keeps none of
+      # its own (osbuild/image-builder#2704): iso/builder-repos.py has its solver read what the image's
+      # dnf reads, overrides included, so that the installer still comes from Fedora's repositories only.
+      #
       # The builder will not start without the installed system's root filesystem type, which the
       # image does not declare in /usr/lib/bootc/install. It only writes it into a kickstart of its
       # own, and iso.toml brings one, so Anaconda still lays out the disk; btrfs is what it chooses.
@@ -166,8 +170,10 @@ jobs:
             --volume /var/lib/containers/storage:/var/lib/containers/storage \
             --volume ./output:/output \
             --volume ./iso/iso.toml:/config.toml:ro \
+            --volume ./iso/builder-repos.py:/builder-repos.py:ro \
             --entrypoint /bin/bash "${BUILDER}" -c '
               set -euo pipefail
+              python3 /builder-repos.py
               cd /usr/share/bootc-image-builder/defs
               for def in fedora-*.yaml; do
                 { cat "${def}"; printf "    - generic-logos\n    - generic-release\n"; } > "amethystora-${def#fedora-}"
