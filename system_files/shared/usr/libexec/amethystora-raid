@@ -506,9 +506,14 @@ scrubs() {
     done | jq -cs 'add // {}'
 }
 
+# The pools' units at work, by their cgroups: systemd has one for a unit only while it runs something, and asking it
+# over the bus (list-units) took 650 ms of the status's second in the lab
 units() {
-    systemctl list-units --plain --no-legend --state=activating,active,deactivating 'amethystora-raid-*' 2>/dev/null |
-        awk '$1 ~ /^amethystora-raid-/ { print $1 }'
+    local unit
+    for unit in "${SYS}"/fs/cgroup/system.slice/amethystora-raid-*.service; do
+        [[ -d "${unit}" ]] && printf '%s\n' "${unit##*/}"
+    done
+    return 0
 }
 
 # The md array of the system's /boot, from sysfs: "kname degraded raid_disks array_state member..." with each
