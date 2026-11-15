@@ -6072,6 +6072,30 @@ msgid "The system this machine runs. Switching downloads it, checks its signatur
 msgstr ""
 
 #: usr/libexec/amethystora-control-list
+msgid "Write the line"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "If it's lost, it says whose it is"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "One line of yours on the login and lock screens, for an honest finder. Anyone holding the computer can read it."
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Bring it all back…"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Start from your backup"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "On a new computer, or after the old one was lost: your files, apps and setup, and your Vault, from a backup, with the recovery key you wrote down."
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
 msgid "Stable"
 msgstr ""
 
@@ -6105,30 +6129,6 @@ msgstr ""
 
 #: usr/libexec/amethystora-control-list
 msgid "This machine is sealed, so it follows the sealed stream only."
-msgstr ""
-
-#: usr/libexec/amethystora-control-list
-msgid "Write the line"
-msgstr ""
-
-#: usr/libexec/amethystora-control-list
-msgid "If it's lost, it says whose it is"
-msgstr ""
-
-#: usr/libexec/amethystora-control-list
-msgid "One line of yours on the login and lock screens, for an honest finder. Anyone holding the computer can read it."
-msgstr ""
-
-#: usr/libexec/amethystora-control-list
-msgid "Bring it all back…"
-msgstr ""
-
-#: usr/libexec/amethystora-control-list
-msgid "Start from your backup"
-msgstr ""
-
-#: usr/libexec/amethystora-control-list
-msgid "On a new computer, or after the old one was lost: your files, apps and setup, and your Vault, from a backup, with the recovery key you wrote down."
 msgstr ""
 
 #: usr/libexec/amethystora-control-list
