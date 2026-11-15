@@ -129,6 +129,9 @@ echo "# step ${STEP}, phase ${SUITE_PHASE}"
 
 case "${STEP}" in
 setup)
+    # The boot menu's artwork draws GRUB on the screen alone (terminal_output gfxterm), and the lab chooses "Start with a disk
+    # missing" by what GRUB writes on the serial console: the plain menu for this suite, the artwork back at its end
+    /usr/bin/amethystora-grub-theme remove >/dev/null 2>&1 || true
     # The account, as 10-account.sh signs one in on the other machine
     if ! getent passwd "${TEST_USER}" >/dev/null; then
         useradd -m -G wheel -c "Test account" "${TEST_USER}"
@@ -377,6 +380,7 @@ replaced)
     ok "the system started by the TPM from the first disk and SPARE-4"
     holds "the system is fine" "$(system_json)" '.state == "ok" and .missing == 0 and .boot.members == 2'
     check "both halves of /boot are alike" md_alike
+    /usr/bin/amethystora-grub-theme install >/dev/null 2>&1 || true
     rm -f "${SUDOERS}"
     finish
     ;;
