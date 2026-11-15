@@ -31,6 +31,9 @@ case "${0##*/}" in
     findmnt)
         case "$*" in
             *"-t btrfs"*) cat "${STAND_IN}/mounts" ;;
+            *"-o SOURCE --mountpoint /var/mnt/data") echo /dev/dm-5 ;;
+            *"-o SOURCE --mountpoint /var/mnt/backup") echo /dev/dm-6 ;;
+            *"-o SOURCE --mountpoint /var/mnt/joined") echo /dev/sdn1 ;;
             *"--mountpoint /sysroot"*) echo "btrfs /dev/mapper/luks-c0[/root] ${ROOT}" ;;
             *"--mountpoint /boot"*OPTIONS*) echo "/dev/sda2 ext4 rw,relatime" ;;
             *"--mountpoint /boot"*) echo "/dev/sda2 ext4 b0000000-0000-4000-8000-000000000000" ;;
@@ -116,6 +119,8 @@ profile "${JOINED}" data single 80000000000
 profile "${JOINED}" data raid1 0
 profile "${JOINED}" metadata raid1 1073741824
 printf '1 /dev/sdn1\n2 /dev/sdo1\n' | show /var/mnt/joined
+# and mounted from a disk gone since, so that findmnt gives no UUID for it (below) and btrfs's own show does
+sed -i "1i Label: 'joined'  uuid: ${JOINED}" "${T}/show_var_mnt_joined"
 
 # hand: two copies someone made by hand, mounted from its first disk, in no fstab line of ours
 btrfs_fs "${HAND}" hand sdr1 sds1
@@ -131,7 +136,7 @@ ${ROOT} /sysroot ro,relatime
 ${ROOT} /var rw,relatime
 ${DATA} /var/mnt/data rw,relatime
 ${BACKUP} /var/mnt/backup rw,relatime
-${JOINED} /var/mnt/joined rw,relatime
+ /var/mnt/joined rw,relatime
 ${HAND} /mnt/hand rw,relatime
 EOF
 
@@ -214,7 +219,7 @@ jq -e '.layout == "raid1" and .metadata == "raid1" and .survives == 1
     and .devices[1].disk.path == "/dev/sdq"' <<<"$(pool backup)" >/dev/null
 # joined: combined is single by choice, fine, and survives nothing
 jq -e '.layout == "single" and .survives == 0 and (.degraded | not) and .problems == [] and .state == "ok"
-    and (.encrypted | not)' <<<"$(pool joined)" >/dev/null
+    and (.encrypted | not) and .target == "/var/mnt/joined"' <<<"$(pool joined)" >/dev/null
 # photos: expected, not mounted, its one disk that is there found by its partition's name
 jq -e '.managed and (.mounted | not) and .encrypted and .problems == ["unmounted"]
     and [.devices[].disk.path] == ["/dev/sdl"]' <<<"$(pool photos)" >/dev/null
@@ -225,6 +230,20 @@ jq -e '([.pools[].id] | sort) == ["backup", "data", "hand", "joined", "photos"] 
     and .scrub_timer == "enabled"' <<<"${STATUS}" >/dev/null
 grep -q "A disk is missing. Every file is still there" <<<"$("${RAID}" status)"
 "${RAID}" present
+
+# Each pool mounted is written down in libmount's utab under the disk the kernel names, as root alone: systemd
+# mounted it by its UUID, which libmount wrote down under another disk, and only then reads its x-systemd.device-bound=no
+mkdir -p "${AMETHYSTORA_RAID_ROOT}/run/mount"
+cat >"${AMETHYSTORA_RAID_ROOT}/run/mount/utab" <<EOF
+SRC=/dev/dm-5 TARGET=/var/mnt/data ROOT=/ OPTS=x-systemd.device-bound=no,x-gvfs-show,x-amethystora-raid
+ID=7 SRC=/dev/dm-6 TARGET=/var/mnt/backup ROOT=/ OPTS=x-systemd.device-bound=no,x-gvfs-show,x-amethystora-raid
+SRC=/dev/sdo1 TARGET=/var/mnt/joined ROOT=/ OPTS=x-systemd.device-bound=no,x-gvfs-show,x-amethystora-raid
+EOF
+if [[ ${EUID} -eq 0 ]]; then
+    "${RAID}" mounts
+    [[ "$(cat "${LOG}")" == "mount --fake -o ${OPTIONS#*nofail,} /dev/sdn1 /var/mnt/joined" ]]
+    : >"${LOG}"
+fi
 
 # The system's LUKS, which TPM unlocking enrols, is the one under its own btrfs, not a pool's
 [[ "$("${RAID}" root-luks)" == /dev/sda3 ]]

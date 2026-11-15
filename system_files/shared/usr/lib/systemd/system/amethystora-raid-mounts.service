@@ -1,0 +1,18 @@
+[Unit]
+Description=Keep the pools of disks mounted when the disk they were mounted from goes
+Documentation=file:///usr/share/amethystora/manual/hardware.md
+After=local-fs.target
+
+[Service]
+Type=oneshot
+# Skipped on a machine with no pool and no btrfs over several disks, which is most of them
+ExecCondition=/usr/libexec/amethystora-raid present
+# Each mounted pool's line in /run/mount/utab under the disk the kernel names for it, so that systemd reads
+# x-systemd.device-bound=no and does not unmount the pool when that disk goes. At the start, and again from
+# amethystora-raid-mounts.path whenever a mount writes that file (a pool that mounted late, or was opened since).
+ExecStart=/usr/libexec/amethystora-raid mounts
+ProtectClock=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target

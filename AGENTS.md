@@ -1301,7 +1301,11 @@ replaces, adds, opens and forgets them. Its plan, done and tested in the VM lab 
   (key in `/etc/cryptsetup-keys.d/raid-POOL.key`, one recovery key in every disk's slot 1), lines in
   `/etc/crypttab` and `/etc/fstab` with `nofail`, and the fstab line marked `x-amethystora-raid`, which
   is how the status knows of a pool that did not mount. A pool that lost a disk is mounted degraded only
-  by `ame system raid mount`, never by itself and never in fstab.
+  by `ame system raid mount`, never by itself and never in fstab. The line's `x-systemd.device-bound=no` keeps a pool
+  mounted when a disk goes only while systemd can pair libmount's utab line with the mount: systemd mounts by UUID, the
+  kernel names whichever disk btrfs took, and unpaired systemd unmounts the pool when that disk goes (unencrypted pools;
+  a LUKS mapping outlives its disk). `amethystora-raid-mounts.service`, and its `.path` on `/run/mount/utab`, write each
+  pool's line again under the kernel's name (`amethystora-raid mounts`, `mount --fake`).
 - **One source of state:** `amethystora-raid status --json`, which needs no root (sysfs, lsblk,
   findmnt, `btrfs filesystem show` on a mounted pool, and what the services write to
   `/var/lib/amethystora/raid`). Control's Disks group and the check read it; its sentences are each

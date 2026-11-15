@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep a pool of disks mounted once it is opened
+Documentation=file:///usr/share/amethystora/manual/hardware.md
+
+[Path]
+# libmount writes this file at every mount that carries options of its own, as a pool's do
+PathChanged=/run/mount/utab
+Unit=amethystora-raid-mounts.service
+
+[Install]
+WantedBy=paths.target

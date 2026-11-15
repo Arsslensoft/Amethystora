@@ -2130,7 +2130,7 @@ grep -q "^const PKEXEC = '/usr/bin/pkexec';" "${UI_EXTENSION}/modules/power/slep
 # No ProtectClock on the disk reading: it may shut smartctl out of the disks it reads, and nothing would say so
 [[ -z "$(grep '^ProtectClock' /usr/lib/systemd/system/amethystora-disk-health.service)" ]]
 grep -q 'udev/rules.d/90-amethystora-wake.rules' /usr/libexec/amethystora-security-watch
-for unit in amethystora-raid-check amethystora-raid-scrub; do
+for unit in amethystora-raid-check amethystora-raid-scrub amethystora-raid-mounts; do
     grep -q "^ExecCondition=/usr/libexec/amethystora-raid present$" "/usr/lib/systemd/system/${unit}.service"
 done
 grep -q "^ExecCondition=/usr/libexec/amethystora-raid present-system$" /usr/lib/systemd/system/amethystora-raid-boot.service
@@ -2173,7 +2173,7 @@ grep -qF 'custom.cfg' /usr/lib/bootupd/grub2-static/configs.d/41_custom.cfg
 bash /ctx/build_files/shared/test-boot-guard.sh
 systemd-analyze verify --man=no --recursive-errors=no /usr/lib/systemd/system/amethystora-boot-guard{,-good}.service
 systemd-analyze verify --man=no --recursive-errors=no /usr/lib/systemd/system/amethystora-raid-{check,scrub}.{service,timer} \
-    /usr/lib/systemd/system/amethystora-raid-{boot,mirror}.service
+    /usr/lib/systemd/system/amethystora-raid-{boot,mirror,mounts}.service /usr/lib/systemd/system/amethystora-raid-mounts.path
 # A mirror's first disk's /boot joins it while nothing holds /boot: before boot.mount, and only when one waits
 grep -q "^Before=boot.mount" /usr/lib/systemd/system/amethystora-raid-mirror.service
 grep -q "^ConditionPathExists=/var/lib/amethystora/raid/mirror.json$" /usr/lib/systemd/system/amethystora-raid-mirror.service

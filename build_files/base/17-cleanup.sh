@@ -52,6 +52,9 @@ systemctl enable amethystora-driver-check.timer
 # and no btrfs over several disks; `ame system raid scrub off` turns the scrub off.
 systemctl enable amethystora-raid-check.timer
 systemctl enable amethystora-raid-scrub.timer
+# A pool stays mounted when the disk the kernel names for it goes: its line in libmount's utab under that disk, at
+# the start and after each mount. Skipped the same way.
+systemctl enable amethystora-raid-mounts.service amethystora-raid-mounts.path
 # The warning before the system's disk fails: an hourly read of its health, `ame system disk-warning off` turns it off
 systemctl enable amethystora-disk-health.timer
 # The system over several disks, at every start: a mirror onto a new disk finished after its restart, and the
