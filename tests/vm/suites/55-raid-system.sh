@@ -40,6 +40,14 @@ remember() {
 step() { remember STEP "$1"; }
 
 spare() { readlink -f "/dev/disk/by-id/ata-QEMU_HARDDISK_SPARE-$1"; }
+# The SATA disks' names are not kept from one start to the next (SPARE-3 was sdd, then sdc): the new disk's partitions are
+# looked up again by their UUIDs each phase, where the disk is there
+for name in NEW_ESP NEW_BOOT NEW_ROOT; do
+    uuid_name="${name}_PARTUUID"
+    [[ -n "${!uuid_name:-}" && -e "/dev/disk/by-partuuid/${!uuid_name}" ]] &&
+        printf -v "${name}" '%s' "$(readlink -f "/dev/disk/by-partuuid/${!uuid_name}")"
+done
+[[ -n "${NEW_DISK:-}" && -e /dev/disk/by-id/ata-QEMU_HARDDISK_SPARE-3 ]] && NEW_DISK="$(spare 3)"
 status_json() { runuser -u "${TEST_USER}" -- "${RAID}" status --json; }
 system_json() { status_json | jq -c 'first(.pools[] | select(.system)) // empty'; }
 control_json() { as_user "LC_ALL=C.UTF-8 LANGUAGE= /usr/libexec/amethystora-control-list --json"; }
@@ -195,6 +203,8 @@ mirroring)
     remember NEW_ESP_PARTUUID "$(lsblk -ndo PARTUUID "${NEW_ESP}" | tr '[:upper:]' '[:lower:]')"
     remember NEW_BOOT "$(lsblk -nrpo PATH "${NEW_DISK}" | sed -n 3p)"
     remember NEW_ROOT "$(lsblk -nrpo PATH,TYPE "${NEW_DISK}" | awk '$2 == "part" { p = $1 } END { print p }')"
+    remember NEW_BOOT_PARTUUID "$(partuuid "${NEW_BOOT}")"
+    remember NEW_ROOT_PARTUUID "$(partuuid "${NEW_ROOT}")"
     remember NEW_LUKS "$(luks_of "${NEW_ROOT}")"
     remember FIRST_LUKS "$(luks_of "${FIRST_ROOT}")"
     holds "/boot is a RAID1 of two, with the new disk's half in it alone until the restart" \
