@@ -1,8 +1,9 @@
 #!/usr/bin/bash
 # Amethystora Vault (plans/done/PLAN-vault.md, Tests) as a person goes through it, on a booted image with SELinux enforcing, real polkit
 # and the real service under systemd. Everything here is something a build cannot start: cargo holds the formats, the crypto and the
-# protocol against separate programs, and build_files/shared/test-vault.sh holds what the image ships. In three phases (74 comes
-# after 72 and 73, which are the plugins'):
+# protocol against separate programs, and build_files/shared/test-vault.sh holds what the image ships. In four phases (74 comes
+# after 72 and 73, which are the plugins'), the second and third in one boot, since a phase that runs past half an hour loses
+# what it said:
 #
 #   1. the image as shipped (sockets, nothing running, nothing kept, no root CA), the cold start, setup in a terminal with polkit's
 #      question put to a text agent and the recovery key typed back, the boundaries (the folder, /proc, the network, another
@@ -10,9 +11,10 @@
 #      question in GNOME Shell's own dialog, left on the screen for the lab's screenshot
 #   2. the dialog's text and picture checked and answered, the ways it opens (the account's password through polkit, the TPM, no
 #      prompt, the fingerprint on a virtual reader), what closes it (the screen, a suspend, idle, the service killed, no core), what
-#      is idle (the service, an open vault), SSH, protected files, the machine's root and a signed PDF, the authenticator, a hidden
-#      vault, the sealed backup, forgetting and restoring, the network (and a Vaultwarden container), SELinux's denials
-#   3. after a restart: closed, the files and the root still there, and everything given back
+#      is idle (the service, an open vault), the authenticator, SSH
+#   3. protected files, the machine's root and a signed PDF, a hidden vault, the sealed backup, forgetting and restoring, the
+#      network (and a Vaultwarden container), SELinux's denials
+#   4. after a restart: closed, the files and the root still there, and everything given back
 #
 # Not run, and said so where each would be: a FIDO2 security key (cargo holds the slot against stand-ins), the camera, a picture's QR
 # through the window's file chooser, Bitwarden's browser extension against a Vaultwarden (the maintainer's, by hand), a second account with a seat of its own, and Bitwarden's own server
@@ -76,6 +78,7 @@ terminal() {
 # the vault's command is a wrapper bound over it: with VMLAB_AGENT set it becomes agent-exec, which registers polkit's own text agent for
 # its own process and waits until polkit has it, then becomes the command, the same process. ssh goes through agent-exec the same way.
 CLI=/usr/libexec/amethystora-vault-cli
+PDFSIG=/usr/bin/pdfsig
 agent_exec_install() {
     install -d -m 0755 "${WORK}" "${WORK}/cli"
     findmnt -n "${CLI}" >/dev/null && return 0
@@ -92,11 +95,16 @@ exec -a "$1" "${@:2}"
 EOF
     printf '#!/usr/bin/bash\n[[ -n "${VMLAB_AGENT:-}" ]] && exec %s %s %s "$@"\nexec -a %s %s "$@"\n' "${WORK}/agent-exec" "${CLI}" \
         "${WORK}/cli/amethystora-vault-cli" "${CLI}" "${WORK}/cli/amethystora-vault-cli" >"${WORK}/cli-wrapper"
-    chmod 0755 "${WORK}/agent-exec" "${WORK}/cli-wrapper" "${WORK}/cli/amethystora-vault-cli"
+    # pdfsig too: the PDF's signature is asked for by the module inside it, so polkit's question is about pdfsig's own process
+    cp "${PDFSIG}" "${WORK}/cli/pdfsig"
+    printf '#!/usr/bin/bash\n[[ -n "${VMLAB_AGENT:-}" ]] && exec %s %s %s "$@"\nexec -a %s %s "$@"\n' "${WORK}/agent-exec" "${PDFSIG}" \
+        "${WORK}/cli/pdfsig" "${PDFSIG}" "${WORK}/cli/pdfsig" >"${WORK}/pdfsig-wrapper"
+    chmod 0755 "${WORK}/agent-exec" "${WORK}/cli-wrapper" "${WORK}/cli/amethystora-vault-cli" "${WORK}/pdfsig-wrapper" "${WORK}/cli/pdfsig"
     mount --bind "${WORK}/cli-wrapper" "${CLI}"
+    mount --bind "${WORK}/pdfsig-wrapper" "${PDFSIG}"
 }
 agent_exec_install
-trap 'umount "${CLI}" 2>/dev/null' EXIT
+trap 'umount "${CLI}" "${PDFSIG}" 2>/dev/null' EXIT
 # av SECONDS [EXPECT SEND]... -- WORDS: `ame vault WORDS` in that terminal, with polkit's own text agent registered for the vault's
 # command, which prints what polkit asks (the sentence, as polkit made it from the service's, and what is asked) and takes the account's
 # password: the questions of GNOME's dialog, put where a suite can read them. `$$?` is systemd-run's escape for `$?`
@@ -462,12 +470,14 @@ loginctl unlock-session "${SESSION}"
 sleep 2
 if is_closed; then ok "unlocking does not open it again by itself"; else not_ok "the vault was open after the unlock"; fi
 open_by_password
-# A suspend, by the kernel's own test of one, which wakes it after a few seconds (the lab's VM has no sleep a timer could end)
-if grep -qw devices /sys/power/pm_test 2>/dev/null; then
+# A suspend, by the kernel's own test of one, which wakes it after a few seconds (the lab's VM has no sleep a timer could end). Its
+# freezer level: logind's PrepareForSleep, which is what closes the vault, comes all the same, and no device is suspended (with the
+# devices level, the lab's virtio port gave the answer to this phase's request to the next one, on 7.3)
+if grep -qw freezer /sys/power/pm_test 2>/dev/null; then
     user_bus gsettings set org.gnome.desktop.screensaver lock-enabled false
     like "while it is open the service holds a delay inhibitor, so that sleep waits for the wipe" "$(systemd-inhibit --list --no-pager 2>/dev/null | grep -i vault || true)" "delay"
     before="$(date +%s)"
-    echo devices >/sys/power/pm_test
+    echo freezer >/sys/power/pm_test
     systemctl suspend
     wait_for 180 sh -c "journalctl -b --since @${before} --no-pager -o cat | grep -q 'PM: suspend exit'"
     echo none >/sys/power/pm_test
@@ -512,12 +522,20 @@ AUTH="$(tester_session 'ame vault auth list' | awk -F'\t' '$2 ~ /Lab/ { print $1
 if [[ -n "${AUTH}" ]]; then
     ok "an authenticator account is added from its link"
     code_of() { av 90 "${PW[@]}" -- auth code Lab | grep -oE '^[0-9]{6}' | tail -n 1; }
+    # RFC 6238 worked out apart, by Python's own HMAC (the image has no oathtool): KEY and how many 30 s steps back
+    totp() {
+        python3 -c 'import base64, hmac, struct, sys, time
+key = base64.b32decode(sys.argv[1] + "=" * (-len(sys.argv[1]) % 8))
+digest = hmac.digest(key, struct.pack(">Q", int(time.time()) // 30 - int(sys.argv[2])), "sha1")
+at = digest[-1] & 15
+print("%06d" % ((struct.unpack(">I", digest[at:at + 4])[0] & 0x7fffffff) % 1000000))' "$1" "$2"
+    }
     mine="$(code_of)"
-    theirs="$(oathtool --totp -b "${TOTP_KEY}" 2>/dev/null)"
-    if [[ -n "${mine}" && ( "${mine}" == "${theirs}" || "${mine}" == "$(oathtool --totp -b "${TOTP_KEY}" -N "$(date -d '-30 seconds' '+%F %T')" 2>/dev/null)" ) ]]; then
-        ok "its code is oathtool's, for the same key and the same time"
+    theirs="$(totp "${TOTP_KEY}" 0)"
+    if [[ -n "${mine}" && ( "${mine}" == "${theirs}" || "${mine}" == "$(totp "${TOTP_KEY}" 1)" ) ]]; then
+        ok "its code is RFC 6238's, for the same key and the same time"
     else
-        not_ok "the code (${mine:-none}) is not oathtool's (${theirs:-no oathtool})"
+        not_ok "the code (${mine:-none}) is not RFC 6238's (${theirs})"
     fi
     out="$(av 90 "${PW[@]}" -- auth qr Lab)"
     like "the QR code to scan into another app asks first, saying who can make codes" "${out}" "Anyone who sees it can make your codes"
@@ -576,6 +594,12 @@ else
     skip "ame vault ssh on needs a vault on the account (a second one has none)"
 fi
 
+continue_phase
+fi
+
+# ====================================================================================================================================
+if ((SUITE_PHASE == 3)); then
+# ====================================================================================================================================
 # --- 12. Protected files and a command that uses one ---------------------------------------------------------------------------------
 as_tester sh -c "mkdir -p ~/.aws && printf '[default]\naws_access_key_id = AKIAVMLAB\naws_secret_access_key = %s\n' '${LAB_SECRET}' >~/.aws/credentials"
 CREDENTIALS="${HOME_DIR}/.aws/credentials"
@@ -584,7 +608,8 @@ if [[ ! -e "${CREDENTIALS}" ]]; then
     ok "a protected file is out of the home"
     like "...and says first what it cannot do" "${out}" "Old copies survive this"
     # A tool reaches it through ame vault run: the file is there for that command alone, and sealed again after it
-    out="$(av 120 "${PW[@]}" -- run "${CREDENTIALS}" -- sh -c "'cat ~/.aws/credentials; echo more >>~/.aws/credentials'")"
+    # Twice asked: to use it, then, as the command changed it, to change it
+    out="$(av 120 "${PW[@]}" "${PW[@]}" -- run "${CREDENTIALS}" -- sh -c "'cat ~/.aws/credentials; echo more >>~/.aws/credentials'")"
     like "a command run through the vault finds the file at its path" "${out}" "AKIAVMLAB"
     like "...and the vault says what its other programs can reach while it runs" "${out}" "other programs of this account can read"
     if [[ ! -e "${CREDENTIALS}" ]]; then ok "...and afterwards it is out of the home again"; else not_ok "the file stayed in the home after the command"; fi
@@ -604,7 +629,8 @@ if [[ ! -e "${CREDENTIALS}" ]]; then
     wait "${runner}" 2>/dev/null
     av 90 "${PW[@]}" -- run "${CREDENTIALS}" -- sudo -n true >/dev/null
     if (($? != 0)); then ok "there is no sudo inside a run"; else not_ok "sudo worked inside a run"; fi
-    av 90 "${PW[@]}" -- unprotect "${CREDENTIALS}" >/dev/null
+    # To use it, then to remove it
+    av 90 "${PW[@]}" "${PW[@]}" -- unprotect "${CREDENTIALS}" >/dev/null
     as_tester rm -rf "${HOME_DIR}/.aws"
 else
     not_ok "the file stayed in the home" "$(tail -n 8 <<<"${out}")"
@@ -765,8 +791,9 @@ if ame --show vault::backup >/dev/null 2>&1; then
         out="$(av 150 'type: FORGET' $'FORGET\r' "${PW[@]}" -- forget)"
         like "forget says what it removes" "${out}" "including any you cannot see"
         like "...and nothing is set up afterwards" "$(tester_session 'ame vault status')" "no vault"
-        out="$(av 180 '?Vault password or recovery key: ' "${RECOVERY}"$'\r' '?New vault password: ' "${VAULT_PASSWORD}"$'\r' '?Once more: ' "${VAULT_PASSWORD}"$'\r' \
-            "${PW[@]}" -- restore "'${BACKUP}'")"
+        # The recovery key, then polkit's question for making the vault again, then its new password twice
+        out="$(av 180 '?(Recovery key of the vault to bring back|Vault password or recovery key): ' "${RECOVERY}"$'\r' "${PW[@]}" \
+            '?New vault password: ' "${VAULT_PASSWORD}"$'\r' '?Once more: ' "${VAULT_PASSWORD}"$'\r' "${PW[@]}" -- restore "'${BACKUP}'")"
         if is_open || open_by_password; then
             like "restore with the recovery key brings everything back" "$(tester_session 'ame vault password list')" "lab-login"
         else
@@ -817,12 +844,13 @@ reboot_and_continue
 fi
 
 # ====================================================================================================================================
-if ((SUITE_PHASE == 3)); then
+if ((SUITE_PHASE == 4)); then
 # ====================================================================================================================================
 # --- 18. After a restart ---------------------------------------------------------------------------------------------------------------
 if wait_for 300 has_session; then ok "the account signs in again"; fi
-same "the vault is closed after a restart" "$(cli status | awk -F'\t' '$1 == "vault" { print $3 }' | head -n 1)" closed
+# Looked at before anything asks the service: a status is a connection to its socket, which starts it
 same "no service is running with nothing open" "$(systemctl is-active "${SERVICE}")" inactive
+same "the vault is closed after a restart" "$(cli status | awk -F'\t' '$1 == "vault" { print $3 }' | head -n 1)" closed
 same "the sockets listen again" "$(systemctl is-active amethystora-vault.socket amethystora-vault-ssh.socket | paste -sd ' ')" "active active"
 if open_by_password; then ok "the password still opens it"; else not_ok "the password no longer opens the vault"; fi
 like "its items are where they were" "$(tester_session 'ame vault password list')" "lab-login"
