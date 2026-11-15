@@ -21,6 +21,7 @@ behind it: a click on its workspace (the middle of the screen) leaves it, as a p
     keys.py click:0.5,0.5 super+ctrl+shift+c
 """
 import fcntl
+import glob
 import os
 import struct
 import sys
@@ -40,6 +41,7 @@ for row, start in (("qwertyuiop", 16), ("asdfghjkl", 30), ("zxcvbnm", 44)):
 
 UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_ABSBIT, UI_SET_RELBIT = 0x40045564, 0x40045565, 0x40045567, 0x40045566
 UI_DEV_CREATE, UI_DEV_DESTROY = 0x5501, 0x5502
+UI_GET_SYSNAME_64 = (2 << 30) | (64 << 16) | (ord("U") << 8) | 44
 EV_SYN, EV_KEY, EV_REL, EV_ABS = 0, 1, 2, 3
 REL_X, REL_Y = 0, 1
 ABS_X, ABS_Y, BTN_LEFT, BTN_MIDDLE = 0, 1, 0x110, 0x112
@@ -137,6 +139,43 @@ def shake(fd, x, y, dx, strokes, ms, held=""):
             emit(fd, EV_SYN, 0, 0)
 
 
+def taken(fd, most=30):
+    """Waits until GNOME Shell holds the device just made, MOST seconds at most: udev and the shell took 2 to 7 s for it
+    in a busy lab, and what was pressed before went nowhere (the shell opened the device only after it was gone)"""
+    name = bytearray(64)
+    try:
+        fcntl.ioctl(fd, UI_GET_SYSNAME_64, name)
+    except OSError:
+        time.sleep(2)
+        return
+    folder = "/sys/devices/virtual/input/" + name.split(b"\0", 1)[0].decode()
+    shells = [proc for proc in glob.glob("/proc/[0-9]*") if read(proc + "/comm") == "gnome-shell"]
+    if not shells:  # a text console's keys, which the kernel takes at once
+        time.sleep(2)
+        return
+    until = time.monotonic() + most
+    while time.monotonic() < until:
+        nodes = ["/dev/input/" + os.path.basename(event) for event in glob.glob(folder + "/event*")]
+        for proc in shells:
+            for held in glob.glob(proc + "/fd/*"):
+                try:
+                    if os.readlink(held) in nodes:
+                        time.sleep(0.3)
+                        return
+                except OSError:
+                    pass
+        time.sleep(0.1)
+    print(f"keys.py: GNOME Shell did not take {folder} within {most} s", file=sys.stderr)
+
+
+def read(path):
+    try:
+        with open(path) as file:
+            return file.read().strip()
+    except OSError:
+        return ""
+
+
 def relative_mouse():
     """A mouse of its own that moves by steps, made the first time rel: needs it"""
     fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
@@ -147,7 +186,7 @@ def relative_mouse():
     fcntl.ioctl(fd, UI_SET_RELBIT, REL_Y)
     os.write(fd, struct.pack("80sHHHHi", b"vmlab mouse", 3, 0x1234, 0x5679, 1, 0) + bytes(4 * 64 * 4))
     fcntl.ioctl(fd, UI_DEV_CREATE)
-    time.sleep(2)
+    taken(fd)
     return fd
 
 
@@ -176,7 +215,7 @@ def main(steps):
     fcntl.ioctl(fd, UI_DEV_CREATE)
     # The compositor finds the new device through udev first, and the first key it gets from one may still be
     # lost: Shift, which does nothing alone, is that key
-    time.sleep(2)
+    taken(fd)
     press(fd, [KEYS["shift"]])
     time.sleep(1)
     try:

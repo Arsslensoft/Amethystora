@@ -84,13 +84,25 @@ def showing(node):
         return True
 
 
+def on_screen(node):
+    try:
+        return node.get_state_set().contains(Atspi.StateType.SHOWING)
+    except Exception:
+        return False
+
+
 def find(app, text, role=None):
+    """The first widget named TEXT on the screen, else the first one only visible: a notification waiting behind
+    another's banner has its copy in the message list, visible but in a closed menu, and is found after the banner's"""
+    seen = None
     for node, _ in walk(app):
         if role and node.get_role_name() != role:
             continue
         if showing(node) and any(text in word for word in words(node)):
-            return node
-    return None
+            if on_screen(node):
+                return node
+            seen = seen or node
+    return seen
 
 
 PRESSES = ("click", "activate", "press", "toggle")
@@ -107,10 +119,13 @@ def actionable(node):
 def find_pressable(app, text):
     """The first widget named TEXT that can be pressed or toggled: a libadwaita switch row carries its title
     itself and in its label, but only the switch inside it toggles"""
+    seen = None
     for node, _ in walk(app):
         if showing(node) and any(text in word for word in words(node)) and actionable(node):
-            return node
-    return None
+            if on_screen(node):
+                return node
+            seen = seen or node
+    return seen
 
 
 def activate(node):
@@ -130,6 +145,9 @@ def pointer_click(node):
     from gi.repository import Gio, GLib
 
     box = Atspi.Component.get_extents(node, Atspi.CoordType.SCREEN)
+    # A widget in a closed menu has no place: the click would land in the corner and the suite go on as if it had pressed
+    if box.width <= 0 or box.height <= 0:
+        raise ValueError("it is not on the screen")
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 
     def call(path, interface, method, args=None):

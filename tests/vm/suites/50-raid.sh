@@ -166,6 +166,16 @@ ATSPI=/run/vmlab-raid/atspi.py
 install -D -m 0755 "$(dirname "$0")/atspi.py" "${ATSPI}"
 shell() { user_bus python3 "${ATSPI}" gnome-shell "$@"; }
 shell_app() { user_bus python3 "${ATSPI}" "$@"; }
+# The message list cleared, as a person would before waiting for news: the lab has no network, and uupd's failures
+# are banners queued in front of the check's, whose button then waits in the list, folded and off the screen
+clear_notifications() {
+    local at
+    at="$(shell where "$(date '+%a %b %-d')" 2>/dev/null)" || return 0
+    python3 "$(dirname "$0")/keys.py" "click:${at}" >/dev/null 2>&1
+    shell click Clear >/dev/null 2>&1
+    python3 "$(dirname "$0")/keys.py" esc >/dev/null 2>&1
+    return 0
+}
 
 # For a phase that cannot go on: what is left of the pools undone by hand, and the end of the suite
 abandon() {
@@ -723,11 +733,13 @@ case "${SUITE_PHASE}" in
     holds "the status: ${DAMAGED_SERIAL} is counting errors" "$(pool_json data)" \
         "any(.devices[]; .disk.serial == \"${DAMAGED_SERIAL}\" and .error_count > 0) and (.problems | index(\"errors\")) != null"
     echo "# SMART of the damaged disk: $(smartctl -H -j "$(readlink -f "/dev/disk/by-id/ata-QEMU_HARDDISK_${DAMAGED_SERIAL}")" | jq -c .smart_status)"
+    clear_notifications
     run_check
     check "the check tells ${TEST_USER}: A disk of the pool data is counting errors, naming ${DAMAGED_SERIAL}" \
         wait_for 60 notified "A disk of the pool data is counting errors" "${DAMAGED_SERIAL}"
-    # The notification's button, clicked as a person would, through GNOME Shell's accessibility tree
-    if shell click "Open Control" && wait_for 120 shell_app amethystora-control has "Disks"; then
+    # The notification's button, clicked as a person would, through GNOME Shell's accessibility tree, once its banner
+    # is on the screen (a click refuses a button that is not)
+    if wait_for 60 shell click "Open Control" && wait_for 120 shell_app amethystora-control has "Disks"; then
         ok "Open Control opens Control on its System page, at the Disks group"
         holds "Control says a disk of data counts errors, and offers Replace a disk…" "$(row_of "$(control_json)" data)" \
             '(.text | contains("A disk has counted read or write errors.")) and any(.actions[]; .id == "replace" and .title == "Replace a disk…")'
