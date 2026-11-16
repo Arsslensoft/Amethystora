@@ -1180,6 +1180,35 @@ get-through VALUE="":
             ;;
     esac
 
+# While you play: while a game is registered with GameMode (gamemoderun, Steam's launch option), banners wait, the power mode is
+# performance on mains and your timed backup and the containers' upgrade wait, six hours at most; all of it goes back when the game
+# ends (VALUE: on or off; without it, it flips). Off by default.
+[positional-arguments]
+while-playing VALUE="":
+    #!/usr/bin/bash
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source gettext.sh
+    schema=org.gnome.shell.extensions.amethystora-ui.power
+    value="${1:-}"
+    if [[ -z "${value}" ]]; then
+        if [[ "$(gsettings get "${schema}" while-playing)" == true ]]; then value=off; else value=on; fi
+    fi
+    case "${value}" in
+        on)
+            gsettings set "${schema}" while-playing true
+            echo "$(gettext "While a game is registered with GameMode, banners wait, the power mode is performance when you are plugged in, and your timed backup and the containers' upgrade wait, six hours at most. Calls, alarms and urgent banners still come through, and the system update is not held. All of it goes back when the game ends, or at Let them run in the pill.")"
+            ;;
+        off)
+            gsettings set "${schema}" while-playing false
+            echo "$(gettext "Nothing waits for a game: banners, the power mode and the backup go on as they do the rest of the time.")"
+            ;;
+        *)
+            echo "usage: ame desktop while-playing on|off"
+            exit 64
+            ;;
+    esac
+
 # Send to the TV: a tile in quick settings that opens GNOME Network Displays (VALUE: on or off; without it, it flips).
 # `setup` says what it fetches and, after a yes, installs that app from Flathub: the tile's Install runs it in a terminal.
 [positional-arguments]

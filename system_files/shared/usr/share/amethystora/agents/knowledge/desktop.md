@@ -61,6 +61,9 @@ these commands in the agent's own shell, as the user. Read before writing, chang
 - Do Not Disturb: `gsettings set org.gnome.desktop.notifications show-banners false` (true to end it).
 - Rest reminders are GNOME's own (`org.gnome.desktop.break-reminders`): `ame desktop breaks
   on|eyesight|movement|both|off`; their times are in Settings, Wellbeing.
+- While a game is registered with GameMode, banners wait, the power mode is performance on mains and the account's timed
+  backup and containers' upgrade wait (six hours at most, never the system update): off until the user asks,
+  `ame desktop while-playing on|off`. It is the pill's Playing mark, whose card has Let them run.
 
 ## The top bar and the calendar
 

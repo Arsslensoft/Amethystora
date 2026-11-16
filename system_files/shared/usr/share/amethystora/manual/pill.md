@@ -36,6 +36,7 @@ The first of these that is happening shows in the pill, and the second [beside i
 - **A disk still being written to**: see [A USB stick that tells the truth](#a-usb-stick-that-tells-the-truth).
 - **Printing**: see [Printing](#printing).
 - **A word that something just finished.**
+- **Playing**, while a game is registered with GameMode and the switch is on: see [While you play](games.md#while-you-play).
 - **Quiet**, and how many banners it holds: see [Quiet](notifications.md#quiet).
 
 ## Two at once

@@ -1570,6 +1570,22 @@ The modules, and what each replaced:
 - `power` (on): the battery's health, cycles and heaviest apps in its quick-settings menu (`battery-details`), and a chip
   naming an app that kept the processor at 70 % for two minutes (`busy-app`), at most once an hour, on the meters' own 5 s
   reading; a terminal is never offered Quit.
+- **While you play** (`power/playing.js`, `power/playingdata.js`, key `while-playing` of the power schema, off; `ame desktop while-playing on|off`, Control's Apps
+  page beside Games, the setup file's `power` table, `ame apps gaming` offers it once; manual `games.md#while-you-play`, hand tests `tests/real/checklist/62-while-playing.md`,
+  suite 77 with `gamemodestandin.py`). While the key is on the part watches only GameMode's bus name (`Gio.bus_watch_name`, never started from here) and **reads**
+  `ClientCount` on its signals (`GameRegistered`, `GameUnregistered`, `PropertiesChanged`); UPower's `OnBattery` and the profile's `ProfileReleased` are followed only
+  while a game counts, and no timer runs. While the count is above zero: banners are held as Present holds them (`pill.setPlaying` -> `Hold.setPlaying`, reason `playing`,
+  the Hold draws no mark of its own; calls, alarms and urgent banners pass); the power mode is held on `performance` through the profile daemon's own hold (tuned-ppd here),
+  on mains only, never on the battery, and not again for a game once the person changed the mode by hand; and `/usr/libexec/amethystora-metered playing on` writes
+  `$XDG_RUNTIME_DIR/amethystora/playing` (`PID EPOCH`), which makes the account's timed backup, the backup to the other computer and containers' upgrade wait (a backup to
+  this machine's disk too) while that pid is still `gnome-shell` and the mark is under six hours old: the cap is counted from the mark's own time, so a game that never
+  unregisters cannot stop them for good. The system update and the whole-machine scan are never held (root must not take a file an account writes as a reason to delay
+  updates), and a run a person started never waits. A timer skipped meanwhile is remembered (`playing-waited`) only when the game alone held it (one a metered connection or Get me through holds keeps their stamp and week and is not remembered), and started when the game ends (`playing off ended`: the last
+  game leaving, GameMode leaving the bus, Let them run, the key off) only if those timer-side waits (`wait_other`) would let it run then, since a skipped daily timer would not try again before its next day; the containers' upgrade started so is told (`playing-waited/started-containers`, removed by `done`) to make `amethystora-pkg`'s own network, battery, load and memory checks as its timer's run does. The helper's `on`/`off` runs are queued one at a time (`makeQueue`, module scope), so an `off` never overtakes the `on` before it. The key turned off during a game is an end like the game's (`Playing.keyOff()`, told by `power.js` just before it stops the part); a lock and the shell's end give
+  everything back without starting that (`playing off`); the unlock reads the count again. The pill's `playing` activity is a MARK after `through` in `ORDER` (never the
+  bubble; `test-pill-logic.mjs`); its card says only what is held and offers **Let them run**, which keeps everything given back until the count has been to zero once.
+  `modules/power` may start one program (`amethystora-metered`, `20-tests.sh` holds it to one `Subprocess.new`). The name's owner is not checked: any program of the account
+  can hold the account's own banners and backup for six hours, which is bounded and its own.
 - `workspaces/putaway.js` and `pill/putaway.js` (R7-34, `put-away`, on; `plans/ui-ideas/r7/spec-keep.md`): **Put this workspace away** in the workspace
   menu asks in the pill (`putaway`, then the mark `putaway-kept`, a MARK), closes the windows the way their close button does and seals the list (a saved set's
   shape, at most eight: names and app IDs, never a title or file) in the Vault (`modules/vault.js`, purpose `put-away`) into `put-away.avs`. The Vault is asked only

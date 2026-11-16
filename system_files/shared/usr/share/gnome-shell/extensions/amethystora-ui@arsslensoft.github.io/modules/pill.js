@@ -176,6 +176,7 @@ export class Pill {
         // The focus module tells the rule again when it starts, and the present module its mark
         this._focusRule = null;
         this._presentMark = null;
+        this._playingMark = null;
     }
 
     get _comfort() {
@@ -254,10 +255,11 @@ export class Pill {
         // The apps that always wait for the digest hold their banners also while the digest itself is off
         this._toggle('_hold', on('quiet') || on('quiet-night') || on('digest') ||
             this._settings.get_strv('digest-wait').length > 0 || on('later') || this._focusWants() ||
-            !!this._presentMark,
+            !!this._presentMark || !!this._playingMark,
             () => new Hold(this._settings, this._capture, this._activities, (...a) => this.notice(...a), () => this._glass()));
         this._hold?.setFocus(this._focusRule ?? null);
         this._hold?.setPresenting(!!this._presentMark);
+        this._hold?.setPlaying(!!this._playingMark);
         // A meeting about to start: a part of the live pill, while both keys are on
         const notice = (...a) => this.notice(...a);
         this._toggle('_meetings', !!this._clock && on('meetings'), () => new Meetings(this._activities, notice, this._settings));
@@ -304,6 +306,24 @@ export class Pill {
 
     presentChanged() {
         this._activities?.update('present');
+    }
+
+    // ---- While you play (modules/power/playing.js) ----
+
+    // Its mark in the pill (an activity, or null), and banners held while it is there
+    setPlaying(mark) {
+        if ((this._playingMark ?? null) === (mark ?? null))
+            return;
+        this._playingMark = mark ?? null;
+        this._activities?.set('playing', this._playingMark);
+        // Told before the hold may stop, so that what it held is said once ("N waiting in the list")
+        this._hold?.setPlaying(Boolean(this._playingMark));
+        if (this._settings)
+            this._sync();
+    }
+
+    playingChanged() {
+        this._activities?.update('playing');
     }
 
     // ---- A focus profile (modules/focus.js) ----
@@ -714,6 +734,7 @@ export class Pill {
             news: this._news?.shown ? this._news.news : null,
             resume: this._resume?.shown ?? false,
             saving: this._saving?.shown ?? false,
+            playing: this._activities?.get('playing') ? true : false,
             osd: this._osd?.state ?? null,
             timer: {running: this._timer?.running ?? false, paused: this._timer?.paused ?? false, left: Math.round(this._timer?.left ?? 0)},
             timer2: {running: this._timer2?.running ?? false, left: Math.round(this._timer2?.left ?? 0)},

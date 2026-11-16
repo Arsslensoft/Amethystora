@@ -2894,6 +2894,14 @@ if [[ "${GAMES}" == on ]]; then
         "${ gettext "Heroic, for Epic, GOG and Amazon, and Lutris, for games from anywhere else."; }" "" games#games
 fi
 
+# While a game is registered with GameMode: banners wait, performance on mains, the account's timed backup waits (off by default)
+[[ "${ ended power; }" == 0 ]] || REASON="${ gettext "Amethystora UI is not installed."; }"
+switch_choices false ame desktop while-playing
+USAGE="ame desktop while-playing on|off"
+item apps while-playing switch "${ gettext "While you play"; }" \
+    "${ gettext "While a game is registered with GameMode, banners wait, the power mode is performance when you are plugged in, and your timed backup and the containers' upgrade wait, six hours at most. Everything goes back when the game ends."; }" \
+    "${ power_onoff while-playing; }" games#while-you-play
+
 # waydroid-container.service is enabled when Android is set up: the recipe's own test reads root's files
 if [[ "${ said waydroid-enabled; }" == enabled ]]; then
     ANDROID=on

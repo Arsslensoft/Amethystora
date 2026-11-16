@@ -33,6 +33,11 @@
       <summary>Not yet, from the keyboard</summary>
       <description>While the flat-battery card is on the screen, this key says Not yet. It is bound only then, so it takes nothing from your typing the rest of the time.</description>
     </key>
+    <key name="while-playing" type="b">
+      <default>false</default>
+      <summary>While you play</summary>
+      <description>While a game is registered with GameMode, banners wait (calls, alarms and urgent ones still come through), the power mode is performance while plugged in, never on the battery, and your timed backup and the containers' upgrade wait, six hours at most. The system update and the whole-machine scan are never held, and what you start yourself still runs. Everything is given back when the game ends, when the screen locks, or at Let them run in the pill. ame desktop while-playing and Control write it.</description>
+    </key>
     <key name="sleep-report" type="b">
       <default>true</default>
       <summary>What happened while it slept</summary>

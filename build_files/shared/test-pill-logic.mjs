@@ -9,6 +9,7 @@ const {SETTLE_MS, ringPieces, springAt} = await import(`${UI}/pill/spring.js`);
 const {readTimer} = await import(`${UI}/search/timer.js`);
 const {HOLD_LONGEST, LONGEST, QUIET, agedOut, fractionOf, givesWay, listenToMoving, partialName, reportMoving} = await import(`${UI}/pill/movinglist.js`);
 const {albumColour, barsOf, contrast, plateTint} = await import(`${UI}/pill/tint.js`);
+const {CAP_SECONDS, lines, makeQueue, plan, underCap} = await import(`${UI}/power/playingdata.js`);
 
 const say = globalThis.print ?? console.log;
 const failures = [];
@@ -40,7 +41,7 @@ same('the second in ORDER sits beside the first', list('media', 'timer').second.
 same('...and the first is the one first in ORDER', list('media', 'timer').top.id, 'timer');
 for (const alone of ['call', 'recording', 'present'])
     same(`${alone} keeps the place alone`, list(alone, 'timer', 'media').second, null);
-for (const mark of ['saving', 'quiet', 'focus'])
+for (const mark of ['saving', 'quiet', 'focus', 'playing'])
     same(`${mark} is never the bubble`, list('media', mark).second, null);
 same('a mark is passed over for what happens', list('timer', 'focus', 'media').second.id, 'media');
 {
@@ -54,7 +55,7 @@ same('a mark is passed over for what happens', list('timer', 'focus', 'media').s
 same('the others stay what they were', list('timer', 'media', 'update', 'focus', 'quiet').others.map(a => a.id), ['media', 'update', 'quiet']);
 for (const [first, then] of [['call', 'recording'], ['recording', 'present'], ['present', 'meeting'], ['meeting', 'link'],
     ['link', 'code'], ['code', 'battery'], ['waiting', 'drop'], ['drop', 'hello'], ['hello', 'stick'], ['stick', 'reading'], ['timer', 'timer2'],
-    ['media', 'moving'], ['moving', 'update'], ['focus', null]]) {
+    ['media', 'moving'], ['moving', 'update'], ['through', 'playing'], ['playing', 'chargeby'], ['focus', null]]) {
     // What the sturdy group adds (a flat battery's 'flat', right after a call and a recording) is not in these pairs
     const order = ORDER.filter(id => id !== 'flat');
     const at = order.indexOf(first);
@@ -77,6 +78,51 @@ for (const [first, then] of [['call', 'recording'], ['recording', 'present'], ['
     same('something added last never comes before a call or a recording', ORDER.indexOf('call') < ORDER.indexOf('quiet'), true);
     if (!flat)
         ORDER.splice(ORDER.indexOf('flat'), 1);
+}
+
+// --- While you play: its place, and what it holds -------------------------------------------------------------------
+same('playing comes after a call and Present and before saving data', ORDER.indexOf('call') < ORDER.indexOf('playing') && ORDER.indexOf('present') < ORDER.indexOf('playing') && ORDER.indexOf('playing') < ORDER.indexOf('saving'), true);
+same('playing never takes the place from what happens', list('playing', 'timer').top.id, 'timer');
+same('...and sits in the pill alone', list('playing').top.id, 'playing');
+same('...with nothing in the bubble', list('playing', 'focus').second, null);
+same('a game registered holds banners, the work and, on mains, the power mode',
+    plan({count: 1, onBattery: false}), {playing: true, banners: true, waits: true, performance: true});
+same('on the battery the power mode is left alone', plan({count: 2, onBattery: true}).performance, false);
+same('...and so when it is not known', plan({count: 1, onBattery: null}).performance, false);
+same('...but the rest is held', plan({count: 1, onBattery: true}), {playing: true, banners: true, waits: true, performance: false});
+same('no game holds nothing', plan({count: 0, onBattery: false}), {playing: false, banners: false, waits: false, performance: false});
+same('a count that is no number holds nothing', plan({count: Number.NaN, onBattery: false}).playing, false);
+same('a negative count holds nothing', plan({count: -1, onBattery: false}).playing, false);
+same('Let them run gives all of it back', plan({count: 3, onBattery: false, letRun: true}).playing, false);
+same('a power mode chosen by hand is not taken again', plan({count: 1, onBattery: false, declined: true}), {playing: true, banners: true, waits: true, performance: false});
+same('the card says only what is held', lines({banners: true, performance: true, waits: true, onBattery: false}), ['banners', 'performance', 'waits']);
+same('...the battery, when the mode is left alone', lines({banners: true, performance: false, waits: false, onBattery: true}), ['banners', 'battery']);
+same('...nothing at all, when nothing is', lines({banners: false, performance: false, waits: false, onBattery: false}), []);
+same('the cap is six hours', CAP_SECONDS, 21600);
+same('a mark an hour old still holds', underCap(1000, 1000 + 3600), true);
+same('...and one of six hours does not', underCap(1000, 1000 + 6 * 3600), false);
+same('...a mark with no time does not either', underCap(Number.NaN, 5), false);
+
+// The helper's runs go one at a time, in order: an `off` that is quick never finishes before the slow `on` before it
+{
+    const queued = makeQueue();
+    const log = [];
+    const later = (ms, name) => () => new Promise(resolve => setTimeout(() => {
+        log.push(name);
+        resolve(name);
+    }, ms));
+    const first = queued(later(40, 'on'));
+    const second = queued(later(0, 'off'));
+    const third = queued(() => {
+        throw new Error('a job that fails');
+    });
+    const fourth = queued(later(0, 'off again'));
+    same('a queued job gives its own answer', await first, 'on');
+    await second;
+    await third.catch(() => {});
+    await fourth;
+    same('a quick job waits for the slow one before it', log, ['on', 'off', 'off again']);
+    same('a job that failed stopped nothing after it', log.length, 3);
 }
 
 // --- R7-17: the spring ----------------------------------------------------------------------------------------------

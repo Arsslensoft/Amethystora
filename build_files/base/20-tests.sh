@@ -939,12 +939,25 @@ fi
 # them), the module between today's and the dock, its recipe; it quits an app only by asking it (request_quit), and runs
 # nothing. The flat battery's own files block nothing (its rule is checked by node, with the saved sets, below).
 POWER=org.gnome.shell.extensions.amethystora-ui.power
-[[ "$(GSETTINGS_BACKEND=memory gsettings list-keys "${POWER}" | sort | paste -sd ' ')" == "battery-details busy-app charge-by-leaving device-batteries flat-battery flat-hold sleep-report" ]]
+[[ "$(GSETTINGS_BACKEND=memory gsettings list-keys "${POWER}" | sort | paste -sd ' ')" == "battery-details busy-app charge-by-leaving device-batteries flat-battery flat-hold sleep-report while-playing" ]]
 # Not yet from the keyboard, bound only while the flat battery's card shows: a key nobody else binds
 [[ "$(GSETTINGS_BACKEND=memory gsettings get "${POWER}" flat-hold)" == "['<Super><Shift>n']" ]]
 for key in battery-details busy-app device-batteries flat-battery sleep-report; do
     [[ "$(GSETTINGS_BACKEND=memory gsettings get "${POWER}" "${key}")" == true ]]
 done
+# While you play: offered and off. Its data has no GNOME in it (node checks it with the pill's sums), and its one program is the
+# mark of amethystora-metered
+[[ "$(GSETTINGS_BACKEND=memory gsettings get "${POWER}" while-playing)" == false ]]
+test -s "${UI_EXTENSION}/modules/power/playing.js"
+[[ -z "$(grep -E "gi://|resource://" "${UI_EXTENSION}/modules/power/playingdata.js")" ]]
+[[ "$(grep -c "Subprocess.new" "${UI_EXTENSION}/modules/power/playing.js")" == 1 ]]
+grep -qF "Subprocess.new([METERED, 'playing'," "${UI_EXTENSION}/modules/power/playing.js"
+[[ -z "$(grep -nE 'Gio\.Settings|run_dispose|use_markup *= *true|file_get_contents|\.communicate' "${UI_EXTENSION}/modules/power/playing.js")" ]]
+# It watches GameMode's name without starting it, and holds the power mode on mains only
+grep -q "NO_AUTO_START" "${UI_EXTENSION}/modules/power/playing.js"
+grep -q "Gio.BusNameWatcherFlags.NONE" "${UI_EXTENSION}/modules/power/playing.js"
+grep -q "'performance'" "${UI_EXTENSION}/modules/power/playing.js"
+bash /ctx/build_files/shared/test-while-playing.sh /usr/libexec/amethystora-metered
 for file in modules/power.js modules/power/apps.js modules/power/battery.js modules/power/busy.js modules/power/devices.js     modules/power/flat.js modules/power/flatdata.js modules/pill/flat.js stylesheets/power.css; do
     test -s "${UI_EXTENSION}/${file}"
 done
@@ -954,7 +967,7 @@ test -s /usr/share/amethystora/themed/shell-power.css.tpl
 [[ "$(grep -oE "^    \['(today|power|dock)'," "${UI_EXTENSION}/extension.js" | paste -sd ' ')" == \
     "    ['today',     ['power',     ['dock'," ]]
 grep -q '^power \*ARGS:' /usr/share/amethystora/just/desktop.just
-[[ -z "$(grep -rnE --exclude=slept.js 'Subprocess|Util\.spawn|spawn_command_line|GLib\.spawn|kill\(|SIGKILL|force_exit' \
+[[ -z "$(grep -rnE --exclude=slept.js --exclude=playing.js 'Subprocess|Util\.spawn|spawn_command_line|GLib\.spawn|kill\(|SIGKILL|force_exit' \
     "${UI_EXTENSION}/modules/power.js" "${UI_EXTENSION}/modules/power")" ]]
 grep -q "request_quit()" "${UI_EXTENSION}/modules/power/busy.js"
 [[ -z "$(grep -rnE 'use_markup = true|use_markup: true|set_markup\(' "${UI_EXTENSION}/modules/power.js" \

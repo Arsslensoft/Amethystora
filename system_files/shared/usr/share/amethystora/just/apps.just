@@ -104,6 +104,18 @@ gaming ACTION="":
             echo "  mangohud %command%                $(gettext "the overlay with frame rate and temperatures")"
             echo "  gamemoderun %command%             $(gettext "the CPU's performance mode while the game runs")"
             echo "  gamescope -f -- %command%         $(gettext "the game in gamescope, full screen")"
+            # Offered once, and only while it is off: what waits while a game runs (ame desktop while-playing)
+            offered="${XDG_STATE_HOME:-${HOME}/.local/state}/amethystora/while-playing-offered"
+            if [[ ! -e "${offered}" && "$(gsettings get org.gnome.shell.extensions.amethystora-ui.power while-playing 2>/dev/null || true)" == false ]]; then
+                mkdir -p -- "$(dirname -- "${offered}")"
+                : >"${offered}"
+                echo
+                echo "$(gettext "While a game runs with gamemoderun, banners can wait, the power mode can be performance when you are plugged in, and your timed backup and the containers' upgrade can wait, six hours at most. All of it goes back when the game ends. Calls, alarms and urgent banners still come through.")"
+                if gum confirm "$(gettext "Turn on While you play?")"; then
+                    gsettings set org.gnome.shell.extensions.amethystora-ui.power while-playing true
+                    echo "$(gettext "Turned on. ame desktop while-playing off turns it off.")"
+                fi
+            fi
             ;;
         "${add_launcher}" | "Add another launcher" | launchers)
             mapfile -t chosen < <(printf '%s\n' "${!LAUNCHERS[@]}" | sort | gum choose --no-limit --header "$(gettext "Install which?")" || true)
