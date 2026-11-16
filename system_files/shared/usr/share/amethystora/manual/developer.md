@@ -7,7 +7,8 @@ machines, VSCodium, and the profiling tools to find out why something is slow.
 
 Toolchains, language runtimes and databases live in containers described in the project's own repository,
 so the project builds the same on your machine, a colleague's Mac and in CI, and the system underneath
-stays clean enough to update without a second thought.
+stays clean enough to update without a second thought. A database, a cache or a mail catcher for a project is one
+line, `ame dev service add postgres` ([Services for a project](dev-services.md)), on every image, not only this one.
 
 ## Turning it on
 

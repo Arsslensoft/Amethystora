@@ -293,6 +293,18 @@
       "matchDepTypes": ["pkg-template"],
       "groupName": "amethystora-pkg templates"
     },
+    // A service or a check image follows its tag's digest. Moving it to the next
+    // major release (PostgreSQL 19) changes the data a volume holds and what the
+    // template says, so that is done by hand.
+    {
+      "matchDepTypes": ["dev-image"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
+    },
+    {
+      "matchDepTypes": ["dev-image"],
+      "groupName": "amethystora dev images"
+    },
     // The apps' crates (apps/, cargo). gtk-rs releases gtk4 and libadwaita
     // together, and ICU4X its crates, which only work at matching versions,
     // so each moves as one pull request, whose build runs every app's tests

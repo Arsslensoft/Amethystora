@@ -1,0 +1,12 @@
+{
+    "name": "mariadb",
+    "title": "MariaDB 11.8",
+    "aliases": ["mysql"],
+    "image": "docker.io/library/mariadb@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707",
+    "tag": "11.8",
+    "size_mb": 106,
+    "ports": [{"port": 3306}],
+    "volume": "/var/lib/mysql",
+    "env": {"MARIADB_DATABASE": "dev", "MARIADB_USER": "dev", "MARIADB_PASSWORD": "${PASSWORD}", "MARIADB_ROOT_PASSWORD": "${PASSWORD}"},
+    "connect": "mysql://dev@127.0.0.1:${PORT}/dev"
+}

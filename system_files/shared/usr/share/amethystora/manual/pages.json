@@ -33,7 +33,7 @@
   },
   {
     "section": "Software",
-    "pages": ["software.md", "containers.md", "windows-programs.md", "terminal.md", "setup.md", "games.md", "developer.md", "own-image.md"]
+    "pages": ["software.md", "containers.md", "windows-programs.md", "terminal.md", "setup.md", "games.md", "kits.md", "developer.md", "dev-services.md", "own-image.md"]
   },
   {
     "section": "Updates",

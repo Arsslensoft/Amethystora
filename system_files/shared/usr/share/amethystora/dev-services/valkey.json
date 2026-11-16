@@ -1,0 +1,15 @@
+{
+    "name": "valkey",
+    "title": "Valkey 9, which answers to Redis clients",
+    "aliases": ["redis"],
+    "image": "docker.io/valkey/valkey@sha256:bf09d58e96d6b4524a15396b65b242bbe18beebbcc15a04d8ee75ddac62fae0b",
+    "tag": "9-alpine",
+    "size_mb": 19,
+    "ports": [{"port": 6379}],
+    "volume": "/data",
+    "env": {},
+    "files": [{"name": "valkey.conf", "target": "/etc/valkey/valkey.conf", "content": "bind 0.0.0.0\nprotected-mode no\ndir /data\nappendonly yes\nrequirepass ${PASSWORD}\n"}],
+    "entrypoint": ["valkey-server"],
+    "exec": ["/etc/valkey/valkey.conf"],
+    "connect": "redis://127.0.0.1:${PORT}, with the password from its file"
+}

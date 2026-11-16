@@ -353,12 +353,14 @@ const SHELL = ['usr/libexec/amethystora-security-status', 'usr/libexec/amethysto
     'usr/libexec/amethystora-plugins',
     // What `ame pill` runs: a script live in the pill (R7-03)
     'usr/libexec/amethystora-pill',
+    // The kits: the apps for a line of work (their own words are read from usr/share/amethystora/kits/about, below)
+    'usr/libexec/amethystora-kit',
     // The text shortcuts' helper, in Python, whose _("...") is read as an extension's is
     ...PYTHON,
     'usr/share/gnome-shell/extensions/amethystora-logo-menu@arsslensoft.github.io/extension.js',
     // Amethystora Clipboard's text actions, Amethystora's own file in it, in domain amethystora
     'usr/share/gnome-shell/extensions/amethystora-clipboard@arsslensoft.github.io/textActions.js',
-    ...['agent', 'apps', 'backup', 'changelog', 'desktop', 'pill', 'plugin', 'report', 'security', 'system', 'update', 'vault'].map((group) => `usr/share/amethystora/just/${group}.just`),
+    ...['agent', 'apps', 'backup', 'changelog', 'desktop', 'dev', 'pill', 'plugin', 'report', 'security', 'system', 'update', 'vault'].map((group) => `usr/share/amethystora/just/${group}.just`),
     // Amethystora UI: every module, however deep it is split
     ...jsFiles('usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io')];
 

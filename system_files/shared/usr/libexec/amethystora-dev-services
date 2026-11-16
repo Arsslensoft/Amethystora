@@ -1,0 +1,568 @@
+#!/usr/bin/python3 -I
+"""amethystora-dev-services: a database or a mail catcher for a project in one line (`ame dev service`), and which program holds which
+port (`ame dev ports`). It runs as the account and never as root. A service is a rootless podman container made by a quadlet, a file of
+the account's own in ~/.config/containers/systemd, which podman turns into a user unit; the image comes from a template shipped in
+/usr/share/amethystora/dev-services, pinned by digest, and listens on the loopback address only.
+
+    amethystora-dev-services add [NAME [AS]] [--port N] [--at-login]   make the service (NAME of a template, AS what you call it)
+    amethystora-dev-services start|stop AS                              run it, or stop it
+    amethystora-dev-services remove AS                                  take it away; the data only after you say so, in a terminal
+    amethystora-dev-services list [--json]                              the services, whether they run, and where they listen
+    amethystora-dev-services ports [--json]                             every port the account's programs and containers listen on
+
+AMETHYSTORA_DEV_TEMPLATES (the templates' folder) and AMETHYSTORA_DEV_PROC (a stand-in /proc) are for build_files/shared/test-dev-services.sh,
+which puts podman, systemctl and ss in the path as stand-ins."""
+
+import gettext
+import json
+import os
+import re
+import secrets
+import subprocess
+import sys
+import tempfile
+
+_translation = gettext.translation("amethystora", fallback=True)
+_ = _translation.gettext
+
+TEMPLATES = os.environ.get("AMETHYSTORA_DEV_TEMPLATES", "/usr/share/amethystora/dev-services")
+PROC = os.environ.get("AMETHYSTORA_DEV_PROC", "/proc")
+HOME = os.path.expanduser("~")
+QUADLETS = os.path.join(HOME, ".config", "containers", "systemd")
+SECRETS = os.path.join(HOME, ".config", "amethystora", "dev-services")
+PREFIX = "amethystora-dev-"
+LABEL = "amethystora.dev.service"
+# What a service is called: it becomes a file name, a unit name, a container name and a volume name
+NAME = re.compile(r"^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+# An image is its repository and its digest alone: podman takes a tag beside a digest only in some of its commands, so the tag it follows
+# (for Renovate) is a field of its own
+IMAGE = re.compile(r"^[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$")
+TAG = re.compile(r"^[A-Za-z0-9._-]+$")
+VARIABLE = re.compile(r"\$\{(PASSWORD|PORT)\}")
+SECONDS = 20
+UNSAFE = re.compile(r"[^\x20-\x7e -\U0010ffff]")
+
+
+def say(text):
+    print(text)
+
+
+def fail(text, status=1):
+    print(text, file=sys.stderr)
+    sys.exit(status)
+
+
+def clean(text):
+    """Text somebody else wrote (a program's name, a container's label) never reaches a terminal with a control character in it"""
+    return UNSAFE.sub("?", str(text))[:200]
+
+
+def run(*argv, seconds=SECONDS):
+    """What a program printed, or None when it could not run or failed"""
+    try:
+        done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=seconds, text=True, errors="replace",
+                              env={**os.environ, "LC_ALL": "C.UTF-8", "LANGUAGE": ""}, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def volume_state(volume):
+    """present, absent, or unknown when podman could not say (it failed, or took too long): what it cannot say is never taken for absent"""
+    try:
+        done = subprocess.run(["podman", "volume", "exists", volume], stdin=subprocess.DEVNULL, capture_output=True, timeout=SECONDS, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return {0: "present", 1: "absent"}.get(done.returncode, "unknown")
+
+
+def terminal():
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+# --- Templates ----------------------------------------------------------------------------------------------------
+
+def templates():
+    """{name: template} of the shipped ones, each held to the shape this program writes from"""
+    found = {}
+    try:
+        names = sorted(os.listdir(TEMPLATES))
+    except OSError:
+        return found
+    for file in names:
+        if not file.endswith(".json") or not NAME.match(file[:-5]):
+            continue
+        try:
+            with open(os.path.join(TEMPLATES, file), encoding="utf-8") as handle:
+                template = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        ports = template.get("ports")
+        if (template.get("name") != file[:-5] or not IMAGE.match(str(template.get("image", ""))) or not TAG.match(str(template.get("tag", ""))) or not isinstance(ports, list) or not ports
+                or not all(isinstance(p, dict) and isinstance(p.get("port"), int) and 0 < p["port"] < 65536 for p in ports)
+                or not str(template.get("volume", "")).startswith("/") or not isinstance(template.get("env", {}), dict)):
+            continue
+        found[file[:-5]] = template
+    return found
+
+
+def find_template(word, known):
+    """The template a name asks for: its own name, or one it answers to (redis is Valkey)"""
+    if word in known:
+        return known[word]
+    for template in known.values():
+        if word in template.get("aliases", []):
+            return template
+    return None
+
+
+# --- What is already there ----------------------------------------------------------------------------------------
+
+def unit_of(name):
+    return f"{PREFIX}{name}.service"
+
+
+def quadlet_of(name):
+    return os.path.join(QUADLETS, f"{PREFIX}{name}.container")
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
+def lines_of(text, key):
+    """The values of every `KEY=value` line of a quadlet"""
+    return [line.split("=", 1)[1].strip() for line in text.splitlines() if line.startswith(key + "=")]
+
+
+def mine():
+    """The services of this account: {name: quadlet text}, only quadlets that carry the label this program writes"""
+    found = {}
+    try:
+        names = sorted(os.listdir(QUADLETS))
+    except OSError:
+        return found
+    for file in names:
+        if not (file.startswith(PREFIX) and file.endswith(".container")):
+            continue
+        name = file[len(PREFIX):-len(".container")]
+        text = read(os.path.join(QUADLETS, file))
+        if NAME.match(name) and lines_of(text, "Label") and f"{LABEL}={name}" in lines_of(text, "Label"):
+            found[name] = text
+    return found
+
+
+def taken_ports():
+    """Ports something listens on now, and ports a service of this account is made to publish"""
+    taken = set()
+    for line in (run("ss", "-Htln") or "").splitlines():
+        fields = line.split()
+        if len(fields) >= 4 and fields[3].rpartition(":")[2].isdigit():
+            taken.add(int(fields[3].rpartition(":")[2]))
+    for text in mine().values():
+        for publish in lines_of(text, "PublishPort"):
+            parts = publish.split(":")
+            if len(parts) >= 2 and parts[-2].isdigit():
+                taken.add(int(parts[-2]))
+    return taken
+
+
+def free_port(want, taken):
+    port = want
+    while port in taken and port < want + 100 and port < 65535:
+        port += 1
+    return port
+
+
+def write(path, text, mode):
+    """A file made whole or not at all, never readable by more than its mode says even for a moment"""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, mode=0o700 if folder.startswith(SECRETS) else 0o755, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=folder, prefix=".new-")
+    try:
+        os.fchmod(handle, mode)
+        with os.fdopen(handle, "w", encoding="utf-8") as file:
+            file.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def reload_units():
+    run("systemctl", "--user", "daemon-reload")
+
+
+# --- add ----------------------------------------------------------------------------------------------------------
+
+def secret_env(name):
+    """The values an earlier service of this name kept (the data it made may still hold the password), as {KEY: value}"""
+    values = {}
+    for line in read(os.path.join(SECRETS, f"{name}.env")).splitlines():
+        key, equals, value = line.partition("=")
+        if equals and re.match(r"^[A-Z][A-Z0-9_]*$", key):
+            values[key] = value
+    return values
+
+
+def fill(text, password, port):
+    return VARIABLE.sub(lambda match: password if match.group(1) == "PASSWORD" else str(port), text)
+
+
+def add(args):
+    known = templates()
+    at_login = False
+    wanted = None
+    words = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--at-login":
+            at_login = True
+        elif arg == "--port" and index + 1 < len(args) and args[index + 1].isdigit():
+            wanted = int(args[index + 1])
+            index += 1
+        elif arg.startswith("-") or len(words) == 2:
+            fail(_("usage: ame dev service add [NAME [AS]] [--port N] [--at-login]"), 64)
+        else:
+            words.append(arg)
+        index += 1
+    if not words:
+        say(_("Services you can add: ame dev service add NAME [AS]"))
+        for name, template in known.items():
+            say("  {name:<10} {title}  ({ports})".format(name=name, title=clean(template.get("title", name)),
+                                                       ports=", ".join(str(p["port"]) for p in template["ports"])))
+        return 0
+    template = find_template(words[0], known)
+    if template is None:
+        fail(_("There is no service called {name}. ame dev service add lists them.").format(name=clean(words[0])), 64)
+    name = words[1] if len(words) > 1 else words[0]
+    if not NAME.match(name):
+        fail(_("A service's name is lowercase letters, digits and dashes, and starts with a letter."), 64)
+    if name in mine() or os.path.exists(quadlet_of(name)):
+        fail(_("{name} is already there. ame dev service list shows it; ame dev service remove {name} takes it away.").format(name=name))
+    if wanted is not None and not 1024 <= wanted <= 65535:
+        fail(_("A port is a number from 1024 to 65535."), 64)
+
+    taken = taken_ports()
+    ports = []
+    for place, port in enumerate(template["ports"]):
+        host = wanted if place == 0 and wanted is not None else free_port(port["port"], taken)
+        if host in taken:
+            fail(_("Port {port} is taken: ame dev ports says by what.").format(port=host))
+        taken.add(host)
+        ports.append((host, port["port"]))
+
+    kept = secret_env(name)
+    # A volume kept by an earlier service of this name holds that template's data: another template cannot use it
+    other = kept.get("DEV_TEMPLATE")
+    if other and other != template["name"] and volume_state(f"{PREFIX}{name}") == "present":
+        fail(_("The volume {volume} still holds the data of a {other} service that was called {name}, which {this} cannot use. Delete it with podman volume rm {volume}, or call this one something else.").format(
+            volume=f"{PREFIX}{name}", other=clean(other), name=name, this=clean(template["name"])))
+    password = kept.get("DEV_PASSWORD") or secrets.token_hex(16)
+    env = {key: fill(str(value), password, ports[0][0]) for key, value in template.get("env", {}).items()}
+    uses_password = any("${PASSWORD}" in str(value) for value in template.get("env", {}).values()) or any(
+        "${PASSWORD}" in str(file.get("content", "")) for file in template.get("files", []))
+
+    quadlet = [
+        "# Made by ame dev service add. It is yours to edit; ame dev service remove deletes it.",
+        "[Unit]",
+        "Description=" + "Dev service {name}: {title}".format(title=template.get("title", name), name=name),
+        "",
+        "[Container]",
+        "Image=" + template["image"],
+        f"ContainerName={PREFIX}{name}",
+        f"Label={LABEL}={name}",
+        "Label=amethystora.dev.template=" + template["name"],
+    ]
+    quadlet += [f"PublishPort=127.0.0.1:{host}:{inside}" for host, inside in ports]
+    quadlet.append(f"Volume={PREFIX}{name}:{template['volume']}")
+    if env:
+        quadlet.append("EnvironmentFile=" + os.path.join(SECRETS, f"{name}.env"))
+    for file in template.get("files", []):
+        quadlet.append("Volume={path}:{target}:ro,Z".format(path=os.path.join(SECRETS, f"{name}.{file['name']}"), target=file["target"]))
+    if template.get("entrypoint"):
+        quadlet.append("Entrypoint=" + " ".join(template["entrypoint"]))
+    if template.get("exec"):
+        quadlet.append("Exec=" + " ".join(template["exec"]))
+    quadlet += ["", "[Service]", "Restart=on-failure", "TimeoutStartSec=900"]
+    if at_login:
+        quadlet += ["", "[Install]", "WantedBy=default.target"]
+
+    # Secrets first, the quadlet last: a unit never points at a file that is not there
+    if env or uses_password:
+        # DEV_PASSWORD is the record of the password and DEV_TEMPLATE of what made the data: a service made again takes the first back, and
+        # refuses the data of another template
+        write(os.path.join(SECRETS, f"{name}.env"), "".join(f"{key}={value}\n" for key, value in sorted({**env, "DEV_TEMPLATE": template["name"], **({"DEV_PASSWORD": password} if uses_password else {})}.items())), 0o600)
+    for file in template.get("files", []):
+        write(os.path.join(SECRETS, f"{name}.{file['name']}"), fill(file["content"], password, ports[0][0]), 0o600)
+    write(quadlet_of(name), "\n".join(quadlet) + "\n", 0o644)
+    reload_units()
+
+    say(_("{name} is made, from {title}. Nothing runs yet: ame dev service start {name}").format(name=name, title=clean(template.get("title", ""))))
+    if kept.get("DEV_PASSWORD"):
+        say(_("It keeps the password it had before, since the data it made still holds it."))
+    if at_login:
+        say(_("It starts when you log in."))
+    for host, inside in ports:
+        if host != inside and host != template["ports"][0]["port"] and len(ports) == 1:
+            say(_("Port {port} is its own: the usual one was taken.").format(port=host))
+    return 0
+
+
+# --- start, stop, remove ------------------------------------------------------------------------------------------
+
+def need(name):
+    if not NAME.match(name or ""):
+        fail(_("usage: ame dev service start|stop|remove AS"), 64)
+    services = mine()
+    if name not in services:
+        fail(_("There is no service called {name} here. ame dev service list shows them.").format(name=clean(name)))
+    return services[name]
+
+
+def connect_line(name, text):
+    """How to reach it, from its template, without the password"""
+    template = templates().get(find_template_of(text) or "")
+    if not template or not template.get("connect"):
+        return ""
+    publish = lines_of(text, "PublishPort")
+    port = publish[0].split(":")[-2] if publish else ""
+    return str(template["connect"]).replace("${PORT}", port)
+
+
+def find_template_of(text):
+    for label in lines_of(text, "Label"):
+        if label.startswith("amethystora.dev.template="):
+            return label.split("=", 1)[1]
+    return None
+
+
+def start(name):
+    text = need(name)
+    image = (lines_of(text, "Image") or [""])[0]
+    if image and run("podman", "image", "exists", image) is None:
+        template = templates().get(find_template_of(text) or "", {})
+        size = template.get("size_mb")
+        if size:
+            say(_("The first start pulls {image}, about {size} MB.").format(image=clean(image.split("@")[0] + ":" + str(template.get("tag", ""))), size=size))
+        else:
+            say(_("The first start pulls {image}.").format(image=clean(image.split("@")[0] + ":" + str(template.get("tag", "")))))
+    done = subprocess.run(["systemctl", "--user", "start", unit_of(name)], stdin=subprocess.DEVNULL, check=False)
+    if done.returncode != 0:
+        fail(_("It did not start. journalctl --user -u {unit} says why.").format(unit=unit_of(name)))
+    say(_("{name} runs.").format(name=name))
+    line = connect_line(name, text)
+    if line:
+        say("  " + line)
+    if secret_env(name).get("DEV_PASSWORD"):
+        say(_("  Its password is in {path}").format(path=os.path.join(SECRETS, f"{name}.env")))
+    return 0
+
+
+def stop(name):
+    need(name)
+    done = subprocess.run(["systemctl", "--user", "stop", unit_of(name)], stdin=subprocess.DEVNULL, check=False)
+    if done.returncode != 0:
+        fail(_("It did not stop. systemctl --user status {unit} says why.").format(unit=unit_of(name)))
+    say(_("{name} is stopped.").format(name=name))
+    return 0
+
+
+def remove(name):
+    need(name)
+    volume = f"{PREFIX}{name}"
+    subprocess.run(["systemctl", "--user", "stop", unit_of(name)], stdin=subprocess.DEVNULL, check=False)
+    erase = False
+    state = volume_state(volume)
+    has_data = state != "absent"
+    if state == "present" and terminal():
+        say(_("{name} keeps its data in the volume {volume}.").format(name=name, volume=volume))
+        say(_("Delete it too? That cannot be undone. Type DELETE to delete it; anything else keeps it."))
+        erase = input("> ").strip() == "DELETE"
+    try:
+        os.unlink(quadlet_of(name))
+    except OSError:
+        pass
+    reload_units()
+    if erase:
+        run("podman", "volume", "rm", "-f", volume)
+    if erase or not has_data:
+        # Nothing holds the password any more
+        for file in os.listdir(SECRETS) if os.path.isdir(SECRETS) else []:
+            if file == f"{name}.env" or file.startswith(f"{name}."):
+                try:
+                    os.unlink(os.path.join(SECRETS, file))
+                except OSError:
+                    pass
+    if erase:
+        say(_("{name} and its data are gone.").format(name=name))
+    elif state == "unknown":
+        say(_("{name} is gone, but podman could not say whether it has data in the volume {volume}, so the password is kept in {path}. Look with podman volume ls; podman volume rm {volume} deletes it.").format(
+            name=name, volume=volume, path=os.path.join(SECRETS, f"{name}.env")))
+    elif has_data:
+        say(_("{name} is gone. Its data is kept in the volume {volume}, and its password in {path}: ame dev service add makes it again with both.").format(
+            name=name, volume=volume, path=os.path.join(SECRETS, f"{name}.env")))
+        say(_("To delete the data: podman volume rm {volume}").format(volume=volume))
+    else:
+        say(_("{name} is gone.").format(name=name))
+    return 0
+
+
+# --- list ---------------------------------------------------------------------------------------------------------
+
+def listing(as_json):
+    rows = []
+    for name, text in mine().items():
+        state = (run("systemctl", "--user", "is-active", unit_of(name)) or "inactive").strip() or "inactive"
+        publish = []
+        for item in lines_of(text, "PublishPort"):
+            parts = item.split(":")
+            if len(parts) >= 3:
+                publish.append({"address": parts[0], "port": int(parts[1]) if parts[1].isdigit() else 0})
+        env = os.path.join(SECRETS, f"{name}.env")
+        rows.append({"name": name, "template": find_template_of(text), "state": state, "ports": publish,
+                     "at_login": "WantedBy=default.target" in text, "image": (lines_of(text, "Image") or [""])[0],
+                     "volume": f"{PREFIX}{name}", "env": env if secret_env(name).get("DEV_PASSWORD") else None, "connect": connect_line(name, text)})
+    if as_json:
+        print(json.dumps(rows))
+        return 0
+    if not rows:
+        say(_("No service yet. ame dev service add lists the ones you can add."))
+        return 0
+    for row in rows:
+        where = ", ".join("{address}:{port}".format(**item) for item in row["ports"])
+        login = _("at login") if row["at_login"] else _("by hand")
+        say(f"{row['name']:<14} {clean(row['template'] or '?'):<10} {clean(row['state']):<10} {where}  ({login})")
+        if row["connect"]:
+            say("    " + clean(row["connect"]))
+        if row["env"]:
+            say(_("    password: {path}").format(path=row["env"]))
+    return 0
+
+
+# --- ports --------------------------------------------------------------------------------------------------------
+
+def scope_of(address):
+    if address.startswith("127.") or address in ("::1", "::ffff:127.0.0.1") or address.endswith("%lo") or address.startswith("::ffff:127."):
+        return "loopback"
+    if address in ("*", "0.0.0.0", "::"):
+        return "every-address"
+    return "address"
+
+
+def containers():
+    """The account's containers that publish a port: [{name, labels, ports: {host port}}]"""
+    out = run("podman", "ps", "--format", "json", seconds=10)
+    found = []
+    try:
+        rows = json.loads(out or "[]")
+    except ValueError:
+        rows = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        published = set()
+        for port in row.get("Ports") or []:
+            if isinstance(port, dict) and isinstance(port.get("host_port"), int):
+                span = port.get("range") if isinstance(port.get("range"), int) and port.get("range") > 0 else 1
+                published.update(range(port["host_port"], port["host_port"] + span))
+        names = row.get("Names") or []
+        labels = row.get("Labels") if isinstance(row.get("Labels"), dict) else {}
+        found.append({"name": names[0] if names and isinstance(names[0], str) else "", "labels": labels, "ports": published})
+    return found
+
+
+def folder_of(pid):
+    """The folder a program of this account runs in, when it is inside the home and not the home itself: its project"""
+    try:
+        path = os.readlink(f"{PROC}/{pid}/cwd")
+    except OSError:
+        return None
+    if not path.startswith(HOME + "/"):
+        return None
+    return "~" + path[len(HOME):]
+
+
+def ports(as_json):
+    rows = []
+    seen = set()
+    held = containers()
+    for line in (run("ss", "-Htlnp") or "").splitlines():
+        fields = line.split()
+        if len(fields) < 5:
+            continue
+        address, _colon, port = fields[3].rpartition(":")
+        address = address.strip("[]") or "*"
+        if not port.isdigit():
+            continue
+        port = int(port)
+        match = re.search(r'users:\(\("([^"]*)",pid=(\d+)', line)
+        program = match.group(1) if match else None
+        pid = int(match.group(2)) if match else None
+        key = (port, scope_of(address), program)
+        if key in seen:
+            continue
+        seen.add(key)
+        container = next((c for c in held if port in c["ports"]), None)
+        rows.append({"port": port, "address": address, "scope": scope_of(address), "program": program, "pid": pid,
+                     "folder": folder_of(pid) if pid and not container else None,
+                     "container": {"name": container["name"], "labels": container["labels"], "service": container["labels"].get(LABEL)} if container else None,
+                     "other_account": program is None and container is None})
+    rows.sort(key=lambda row: (row["port"], row["address"]))
+    if as_json:
+        print(json.dumps(rows))
+        return 0
+    if not rows:
+        say(_("Nothing listens."))
+        return 0
+    say("{port:<6} {address:<15} {what}".format(port=_("PORT"), address=_("ADDRESS"), what=_("WHAT")))
+    for row in rows:
+        address = _("every address") if row["scope"] == "every-address" else clean(row["address"])
+        if row["container"]:
+            what = _("container {name}").format(name=clean(row["container"]["name"]))
+            if row["container"]["service"]:
+                what += _(", the service {name}").format(name=clean(row["container"]["service"]))
+            labels = [clean(f"{key}={value}") for key, value in sorted(row["container"]["labels"].items()) if key != LABEL][:3]
+            if labels:
+                what += "  [" + " ".join(labels) + "]"
+        elif row["other_account"]:
+            what = _("another account, or the system")
+        else:
+            what = clean(row["program"])
+            if row["folder"]:
+                what += "  " + clean(row["folder"])
+        say(f"{row['port']:<6} {address:<15} {what}")
+    return 0
+
+
+def main(argv):
+    action = argv[0] if argv else ""
+    rest = argv[1:]
+    if os.geteuid() == 0 and not os.environ.get("AMETHYSTORA_DEV_PROC"):
+        fail(_("This is for your own account: it never runs as root."), 77)
+    if action == "add":
+        return add(rest)
+    if action in ("start", "stop", "remove") and len(rest) == 1:
+        return {"start": start, "stop": stop, "remove": remove}[action](rest[0])
+    if action in ("list", "") and rest in ([], ["--json"]):
+        if action == "":
+            say(_("usage: ame dev service add [NAME [AS]] [--port N] [--at-login] | start|stop|remove AS | list [--json]"))
+        return listing(rest == ["--json"])
+    if action == "ports" and rest in ([], ["--json"]):
+        return ports(rest == ["--json"])
+    fail(_("usage: ame dev service add [NAME [AS]] [--port N] [--at-login] | start|stop|remove AS | list [--json]"), 64)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)
