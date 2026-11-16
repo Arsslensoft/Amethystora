@@ -163,7 +163,7 @@ export function agent(name, request, timeoutS = 120) {
 
 // The helper, and any other credentials asked for by name (cryptsetup.passphrase, cryptsetup.tpm2-pin), which
 // systemd-cryptsetup imports at boot, in the initramfs too
-function credentials(extra = {}) {
+export function credentials(extra = {}) {
   const b64 = (text) => Buffer.from(text).toString('base64');
   // Started with sysinit.target, so that it answers while a later part of the boot hangs
   const unit = ['[Unit]', 'Description=Amethystora VM lab helper', 'DefaultDependencies=no',

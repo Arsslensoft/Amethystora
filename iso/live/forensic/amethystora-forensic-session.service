@@ -1,0 +1,14 @@
+[Unit]
+Description=Forensic start: the installer taken out of the live session
+ConditionKernelCommandLine=amethystora.forensic=1
+# livesys makes the installer launchers and the welcome screen as it starts, so this comes after it
+After=amethystora-forensic.service livesys.service livesys-late.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amethystora-forensic session
+
+[Install]
+WantedBy=multi-user.target

@@ -41,7 +41,7 @@
   },
   {
     "section": "Security",
-    "pages": ["security.md", "security-switches.md", "security-settings.md", "what-leaves.md", "security-watcher.md", "new-threats.md", "app-integrity.md", "app-permissions.md", "viruses.md", "logins.md", "backups.md", "backup-other.md", "disk-encryption.md", "devices-security.md", "network-security.md", "screen-privacy.md"]
+    "pages": ["security.md", "security-switches.md", "security-settings.md", "what-leaves.md", "security-watcher.md", "new-threats.md", "app-integrity.md", "app-permissions.md", "viruses.md", "logins.md", "pull-the-key.md", "backups.md", "backup-other.md", "disk-encryption.md", "forensic-start.md", "devices-security.md", "network-security.md", "screen-privacy.md"]
   },
   {
     "section": "Vault",

@@ -4770,6 +4770,11 @@ done
 systemctl is-enabled amethystora-kargs.path amethystora-kargs-finalize.service >/dev/null
 grep -q 'amethystora-kargs status --json' /usr/libexec/amethystora-soft-reboot
 
+# The live ISO's forensic start (iso/live/forensic, manual: forensic-start.md) is that ISO's alone: none of it is in the image
+# the live ISO installs, whose disks it would otherwise keep read-only
+test ! -e /usr/bin/amethystora-forensic
+test -z "$(ls /usr/lib/systemd/system/amethystora-forensic* /usr/lib/systemd/user/amethystora-forensic* 2>/dev/null)"
+
 # The ssh the live ISO's Anaconda added to the Amethystora zone goes once, unless sshd is on or the zone has more of the owner's
 INSTALLER_SSH_TEST="$(mktemp -d)"
 mkdir -p "${INSTALLER_SSH_TEST}/etc/firewalld/zones" "${INSTALLER_SSH_TEST}/usr/lib/firewalld/zones"

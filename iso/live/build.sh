@@ -163,6 +163,47 @@ sleep-inactive-battery-type='nothing'
 EOF
 glib-compile-schemas /usr/share/glib-2.0/schemas
 
+# The forensic start (the third boot menu entry, manual: forensic-start.md): units that do nothing unless the kernel's
+# command line has amethystora.forensic=1. They are in this live system alone: the system it installs is the published
+# image, pulled above, which has none of this
+install -Dpm0755 "${LIVE}/forensic/amethystora-forensic" /usr/bin/amethystora-forensic
+for unit in amethystora-forensic amethystora-forensic-session; do
+    install -Dpm0644 "${LIVE}/forensic/${unit}.service" "/usr/lib/systemd/system/${unit}.service"
+done
+install -Dpm0644 "${LIVE}/forensic/amethystora-forensic-pill.service" /usr/lib/systemd/user/amethystora-forensic-pill.service
+systemctl enable amethystora-forensic.service amethystora-forensic-session.service
+systemctl --global enable amethystora-forensic-pill.service
+for tool in blockdev dconf logger udevadm findmnt swapon; do command -v "${tool}" >/dev/null; done
+bash -n /usr/bin/amethystora-forensic
+bash "${LIVE}/forensic/test.sh" /usr/bin/amethystora-forensic
+# ...and the rule files it makes empty are there under those names in this live system (a package that renames one would leave
+# arrays, volumes or caches put together by udev)
+for rule in $(/usr/bin/amethystora-forensic overrides); do
+    [[ -e "/usr/lib/udev/rules.d/${rule}" ]] || { echo "the forensic start empties ${rule}, which this system does not have" >&2; exit 1; }
+done
+# ...whose rule udev can read and whose units systemd can load
+forensic_rules="$(mktemp)"
+/usr/bin/amethystora-forensic rules >"${forensic_rules}"
+udevadm verify "${forensic_rules}"
+rm -f "${forensic_rules}"
+systemd-analyze verify /usr/lib/systemd/system/amethystora-forensic.service /usr/lib/systemd/system/amethystora-forensic-session.service
+for unit in amethystora-forensic amethystora-forensic-session; do
+    grep -qx 'ConditionKernelCommandLine=amethystora.forensic=1' "/usr/lib/systemd/system/${unit}.service"
+done
+grep -qx 'ConditionKernelCommandLine=amethystora.forensic=1' /usr/lib/systemd/user/amethystora-forensic-pill.service
+# ...and a boot entry for it that has every argument the helper says it needs, besides the live system's own
+forensic_entry="$(grep -B1 -A2 -F 'name: "Start without touching the disks' "${LIVE}/iso.yaml")"
+[[ -n "${forensic_entry}" ]] || { echo "iso/live/iso.yaml: no forensic boot entry" >&2; exit 1; }
+forensic_linux="$(grep -E '^ +linux: ' <<<"${forensic_entry}")"
+for arg in $(/usr/bin/amethystora-forensic args) rd.live.image root=live:CDLABEL=Amethystora-Live; do
+    grep -qE " ${arg}( |\")" <<<"${forensic_linux}" || { echo "iso/live/iso.yaml: the forensic boot entry lacks ${arg}" >&2; exit 1; }
+done
+# ...and no other entry has any of it: the first two start the disks as they always were
+if grep -E '^ +linux: ' "${LIVE}/iso.yaml" | grep -vF 'amethystora.forensic=1' | grep -qE ' (fstab=0|noresume|systemd\.swap=0)'; then
+    echo "iso/live/iso.yaml: a boot entry other than the forensic one has its arguments" >&2
+    exit 1
+fi
+
 # What Titanoboa makes the ISO from (the container-native ISO contract): its label and boot menu, every
 # entry of which carries the image's kernel arguments from kargs.d, which a live boot does not read
 install -Dpm0644 "${LIVE}/iso.yaml" /usr/lib/bootc-image-builder/iso.yaml

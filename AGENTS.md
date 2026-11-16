@@ -2233,6 +2233,30 @@ no driver. `test-gpu-compute.sh` (stand-ins for the card, `/dev`, the helpers, n
   Homebrew's names only, asks before each tap and each Flatpak remote the machine lacks, and checks every
   name as `ame setup` does. Its loops read on fd 3, so that what they run keeps the terminal to ask on.
 
+### The forensic start of the live ISO
+
+The live ISO's third menu entry, **Start without touching the disks** (`iso/live/iso.yaml`, `iso/live/forensic`, manual `forensic-start.md`), carries
+`amethystora.forensic=1` and the arguments `amethystora-forensic args` prints (`systemd.swap=0` only stops swap found by GPT type: `fstab=0` is what stops
+fstab's; `noswap` is livesys's own switch, which only turns on a swap file of the live medium; `systemd.zram=0`, `systemd.gpt_auto=0`, `noresume` (systemd resumes
+from the HibernateLocation EFI variable too), `rd.*=0`, `nodmraid noiswmd`; `rd.dm=0` is DM RAID only). It is **the live ISO's alone**: `build.sh` installs
+`amethystora-forensic` and its units, `20-tests.sh` fails if any is in the image. Titanoboa writes each entry as `menuentry '<name>'`, so there is no help text and no
+quote in a name: the name says "software read-only, not a hardware write blocker", and the manual says the same. **The read-only flag (`blockdev --setro`) stops
+write(2) on the node (EPERM) and read-write mounts only: the block layer's bio_check_ro() merely warns, so a driver that submits its own bios (swap, bcache, md and dm
+targets opened read-write, swapon) is not stopped. That is why nothing of those is started and what a person starts is started read-only.**
+`amethystora-forensic.service` (`ConditionKernelCommandLine=amethystora.forensic=1`) runs **before systemd-udevd** and writes `/run/udev/rules.d/01-amethystora-forensic.rules`
+(`ENV{UDISKS_IGNORE}`, `ENV{ANACONDA}`, `RUN+=` `amethystora-forensic guard` on add and change, `forget` on a disk's removal), links `64-md-raid-assembly.rules`, `69-dm-lvm.rules`
+and `69-bcache.rules` to /dev/null in the same folder (`overrides`: `build.sh` holds each to a file of the live system), sets LVM's event activation off and
+`AUTO -all` for mdadm, masks the units that touch disks with `--runtime` (the `MASK` list: add a new disk-touching unit of the image there), writes the automount and
+autorun keys, locked, in a dconf file, and records the loop and device-mapper devices that exist then (`own-devices`, major:minor, never a name). The guard leaves alone
+the live medium's whole disk only when it is removable, USB or optical (a built-in disk with the live partition on it is read-only like the rest), memory, the recorded
+devices, and a disk made writable on purpose (`amethystora-forensic writable`: needs `ID_SERIAL_SHORT`, known by it, forgotten when the disk leaves). `lvm-activate VG` is the
+only way the manual gives to open LVM: `vgchange -ay --config 'activation { read_only_volume_list = [ "VG" ] }'`, refusing a group with a snapshot waiting to be merged and
+putting back one whose active volume came up writable. `amethystora-forensic-session.service` runs after livesys (which makes the installer launchers at boot) and removes
+them. "Disks read-only" is the live pill (a user service holding `/usr/libexec/amethystora-pill`), no extension code; it is "A disk is writable" when `verify` finds one (a
+swap on a disk of the seized computer counts). `build.sh` runs `forensic/test.sh`, `udevadm verify` and `systemd-analyze verify`, and holds `iso.yaml` to the helper's arguments; the
+`live-iso` job reads the ISO's own grub.cfg. `tests/vm/forensic-live.sh` (not in `run.sh`) starts the ISO's kernel with the entry's arguments on a disk of
+ext4/XFS/btrfs/LVM (and a thin pool)/LUKS/swap/RAID1 and compares its checksum before and after.
+
 ### Your setup as a file
 
 `ame setup save|diff|apply` (`/usr/libexec/amethystora-setup`, the `setup.just` group) keeps the

@@ -1,0 +1,400 @@
+#!/usr/bin/bash
+# The forensic start of the live ISO ("Start without touching the disks", amethystora.forensic=1 on the kernel's
+# command line), which only the live ISO has: iso/live/build.sh installs this and its units. A software setting, not a
+# hardware write blocker: a disk's own firmware, a kernel bug, or root making a device writable again can still write.
+#
+#   start            early, as root (amethystora-forensic.service, before udev's coldplug): the udev rule that sets each
+#                    block device read-only as it appears, nothing assembled from the disks, the units that touch disks
+#                    masked, GNOME's automount and autorun off
+#   session          after livesys, before the display manager: the installer taken out of the session
+#   guard NODE [SERIAL]
+#                    what the udev rule runs for each block device: read-only, unless it is the live medium, memory, or
+#                    a disk the person made writable on purpose
+#   verify           every block device is read-only or exempt (exit status 1 and the names, if not)
+#   status           what is in force
+#   writable DISK    make one disk writable on purpose (for the findings' own drive): the guard leaves it alone while it is the same
+#                    disk, known by its serial number, which it must have
+#   lvm-activate VG  a volume group activated with every volume read-only, which a plain activation would not be
+#   forget NAME      what the udev rule runs when a disk leaves: its entry among the ones made writable goes
+#   pill             the account's user service: "Disks read-only" in the top bar, through the live pill
+#   rules, args, overrides
+#                    the udev rule, the kernel arguments and the rule files made empty, printed (what build.sh and the tests hold the ISO to)
+set -euo pipefail
+
+# The places it looks at, which a test may point at stand-ins
+STATE="${AMETHYSTORA_FORENSIC_STATE:-/run/amethystora/forensic}"
+RULES=/run/udev/rules.d/01-amethystora-forensic.rules
+WRITABLE="${STATE}/writable"
+SYS="${AMETHYSTORA_FORENSIC_SYS:-/sys/class/block}"
+LIVEDEV="${AMETHYSTORA_FORENSIC_LIVEDEV:-/run/initramfs/livedev}"
+SWAPS="${AMETHYSTORA_FORENSIC_SWAPS:-/proc/swaps}"
+
+# What the kernel command line must carry for this mode (iso/live/iso.yaml, which build.sh holds to the same words)
+ARGS=(amethystora.forensic=1 systemd.swap=0 fstab=0 noswap systemd.zram=0 systemd.gpt_auto=0 noresume
+    rd.auto=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.luks=0 rd.multipath=0 nodmraid noiswmd)
+
+# What touches a disk by itself (timers, services, the image's own checks and snapshots, LVM and MD's start-up units, an
+# fsck or a grown file system). Masked for this boot only, in /run
+MASK=(fstrim.timer fstrim.service btrfs-scrub@.timer btrfs-scrub@.service smartd.service
+    mdmonitor.service mdmonitor-oneshot.timer mdmonitor-oneshot.service mdcheck_start.timer mdcheck_start.service
+    mdcheck_continue.timer mdcheck_continue.service mdadm-last-resort@.timer mdadm-last-resort@.service
+    mdadm-grow-continue@.service lvm2-pvscan@.service lvm2-monitor.service lvm2-lvmpolld.socket lvm2-lvmpolld.service
+    lvm-devices-import.path lvm-devices-import.service dm-event.socket dm-event.service multipathd.service
+    systemd-zram-setup@.service systemd-growfs@.service systemd-growfs-root.service
+    systemd-repart.service systemd-repart.socket systemd-fsck@.service systemd-pstore.service
+    systemd-hibernate-resume.service
+    amethystora-raid-boot.service amethystora-raid-check.service amethystora-raid-check.timer amethystora-raid-mirror.service
+    amethystora-raid-mounts.service amethystora-raid-mounts.path amethystora-raid-scrub.service amethystora-raid-scrub.timer
+    amethystora-disk-health.service amethystora-disk-health.timer amethystora-home-snapshot.service amethystora-home-snapshot.timer
+    amethystora-integrity.service amethystora-integrity.timer amethystora-integrity.path amethystora-zram-recompress.service
+    amethystora-zram-recompress.timer amethystora-boot-guard.service amethystora-boot-guard-good.service
+    amethystora-update-check.service amethystora-update-check.timer amethystora-start-times.service
+    amethystora-clamav-scan.service amethystora-clamav-scan.timer)
+
+# What the live session shows of the installer, and the autostart entries that probe disks
+LAUNCHERS=(/usr/share/applications/liveinst.desktop /usr/share/applications/anaconda.desktop
+    /usr/share/applications/org.fedoraproject.welcome-screen.desktop /usr/share/applications/amethystora-install-sealed.desktop
+    /etc/xdg/autostart/liveinst-setup.desktop /etc/xdg/autostart/org.gnome.SettingsDaemon.DiskUtilityNotify.desktop)
+INSTALLERS=(/usr/bin/liveinst /usr/bin/amethystora-install-sealed /usr/libexec/liveinst-setup.sh)
+
+log() { logger -t amethystora-forensic -- "$*" 2>/dev/null || true; }
+
+# The whole disk a block device belongs to: itself, or the parent of a partition
+disk_of() {
+    local name="${1##*/}"
+    if [[ -e "${SYS}/${name}/partition" ]]; then
+        basename "$(readlink -f "${SYS}/${name}/..")"
+    else
+        echo "${name}"
+    fi
+}
+
+# The disk the live system was started from (dmsquash-live links its device there), and whether all of it is the live
+# medium's: a stick or an optical disc is, a disk that is built in is not, which has the live system's partition on it
+# beside someone else's
+live_dev() {
+    local dev
+    dev="$(readlink -f "${LIVEDEV}" 2>/dev/null || true)"
+    [[ -e "${dev}" ]] || dev="$(findmnt -n -o SOURCE /run/initramfs/live 2>/dev/null || true)"
+    [[ -e "${dev}" ]] || return 1
+    echo "${dev}"
+}
+live_disk() {
+    local dev disk
+    dev="$(live_dev)" || return 1
+    disk="$(disk_of "${dev}")"
+    if [[ "${disk}" == sr* || "$(cat "${SYS}/${disk}/removable" 2>/dev/null || echo 0)" == 1 ||
+        "$(readlink -f "${SYS}/${disk}" 2>/dev/null)" == */usb[0-9]*/* ]]; then
+        echo "${disk}"
+    else
+        return 1
+    fi
+}
+
+# The loop and device-mapper devices the live system made before this ran (major:minor, in ${STATE}/own-devices): its
+# squashfs, its overlay, its snapshots. The names mean nothing: a seized volume group can be called anything
+record_own() {
+    local sys
+    : >"${STATE}/own-devices"
+    for sys in "${SYS}"/loop* "${SYS}"/dm-*; do
+        [[ -e "${sys}" ]] || continue
+        case "${sys##*/}" in loop*) attached "${sys##*/}" || continue ;; esac
+        cat "${sys}/dev" >>"${STATE}/own-devices" 2>/dev/null || true
+    done
+}
+own() { [[ -r "${STATE}/own-devices" ]] && grep -qxF -- "$(cat "${SYS}/$1/dev" 2>/dev/null || echo none)" "${STATE}/own-devices"; }
+
+# The serial number that tells a disk from every other of its make: what the person made writable is known by it
+serial_of() {
+    local given="${2-}"
+    if [[ -n "${given}" ]]; then echo "${given}"; return; fi
+    udevadm info -q property -n "/dev/$1" 2>/dev/null | sed -n 's/^ID_SERIAL_SHORT=//p'
+}
+
+# 0 when the block device NAME is left as it is: the live medium, memory, the live system's own loop and
+# device-mapper devices, a disk made writable on purpose
+exempt() {
+    local name="$1" disk serial live
+    disk="$(disk_of "${name}")"
+    case "${name}" in zram* | ram*) return 0 ;; esac
+    if live="$(live_disk)" && [[ "${disk}" == "${live}" ]]; then return 0; fi
+    case "${name}" in loop* | dm-*) if own "${name}"; then return 0; fi ;; esac
+    if [[ -r "${WRITABLE}" ]]; then
+        serial="$(serial_of "${disk}" "${2-}")"
+        if [[ -n "${serial}" ]] && grep -qxF -- "${disk} ${serial}" "${WRITABLE}"; then return 0; fi
+    fi
+    return 1
+}
+
+# A sysfs file is never empty to test -s: a loop device has a file when what the kernel says of it is not empty
+attached() { [[ -n "$(cat "${SYS}/$1/loop/backing_file" 2>/dev/null)" ]]; }
+
+read_only() { [[ "$(cat "${SYS}/$1/ro" 2>/dev/null || echo 0)" == 1 ]]; }
+
+# blockdev --setro on a loop device with no file attached yet would be undone when one is: the guard runs again on the
+# change event that follows, which is when it counts
+guard() {
+    local node="${1:?guard NODE}" name serial="${2-}"
+    name="${node##*/}"
+    [[ -b "${node}" ]] || return 0
+    if exempt "${name}" "${serial}"; then return 0; fi
+    case "${name}" in loop*) attached "${name}" || return 0 ;; esac
+    if read_only "${name}"; then return 0; fi
+    blockdev --setro "${node}" || log "could not set ${node} read-only"
+    read_only "${name}" || log "${node} is writable"
+    return 0
+}
+
+# A disk that left takes its entry with it: the next disk of the same name is not the one made writable
+forget() {
+    local name="${1:?forget NAME}"
+    [[ -w "${WRITABLE}" ]] || return 0
+    grep -vE -- "^${name//[^A-Za-z0-9]/_} " "${WRITABLE}" >"${WRITABLE}.new" || true
+    mv -f "${WRITABLE}.new" "${WRITABLE}"
+}
+
+# Every block device is read-only or left alone on purpose, and no swap is on a disk that is not
+verify() {
+    local sys name dev bad=()
+    for sys in "${SYS}"/*; do
+        name="${sys##*/}"
+        case "${name}" in loop*) attached "${name}" || continue ;; esac
+        if exempt "${name}"; then continue; fi
+        read_only "${name}" || bad+=("${name}")
+    done
+    while read -r dev _; do
+        [[ "${dev}" == /dev/* && -e "${SYS}/${dev##*/}" ]] || continue
+        if ! exempt "${dev##*/}"; then bad+=("swap:${dev##*/}"); fi
+    done <"${SWAPS}"
+    if ((${#bad[@]})); then
+        printf '%s\n' "${bad[@]}"
+        return 1
+    fi
+}
+
+cmdline_has() { grep -qwF -- "$1" /proc/cmdline; }
+
+rules() {
+    cat <<'RULES'
+# Written by amethystora-forensic start: every block device read-only as it appears, and none for udisks or the desktop
+# to mount. ANACONDA is what mdadm's rules look at to leave arrays alone (64-md-raid-assembly.rules). A disk that leaves
+# takes its entry in the list of the ones made writable with it
+SUBSYSTEM!="block", GOTO="amethystora_forensic_end"
+ENV{ANACONDA}="amethystora-forensic"
+ENV{UDISKS_IGNORE}="1"
+ACTION=="add|change", RUN+="/usr/bin/amethystora-forensic guard $devnode $env{ID_SERIAL_SHORT}"
+ACTION=="remove", ENV{DEVTYPE}=="disk", RUN+="/usr/bin/amethystora-forensic forget $kernel"
+LABEL="amethystora_forensic_end"
+RULES
+}
+
+write_rules() {
+    mkdir -p /run/udev/rules.d
+    rules >"${RULES}.new"
+    mv -f "${RULES}.new" "${RULES}"
+}
+
+# The rule files that put arrays and volumes together and register caches, which the image's packages ship, made empty for this
+# boot: a file of the same name in /run replaces the one in /usr/lib. What they do is done by kernel drivers that write on
+# their own (a bcache journal replayed, a cache flushed to its backing disk, an array's superblocks), which the read-only flag
+# on a device does not stop. build.sh holds each name to a file that is there
+OVERRIDES=(64-md-raid-assembly.rules 69-dm-lvm.rules 69-bcache.rules)
+write_overrides() {
+    local rule
+    for rule in "${OVERRIDES[@]}"; do ln -sfn /dev/null "/run/udev/rules.d/${rule}"; done
+}
+
+# LVM does nothing from udev's events (the pvscan in 69-dm-lvm.rules then does nothing at all), and activates nothing by itself
+write_lvm() {
+    mkdir -p /etc/lvm
+    cat >>/etc/lvm/lvmlocal.conf <<'LVM'
+
+# Written by amethystora-forensic start
+global {
+	event_activation = 0
+}
+activation {
+	auto_activation_volume_list = [ ]
+}
+LVM
+}
+
+write_mdadm() {
+    mkdir -p /etc/mdadm.conf.d
+    echo 'AUTO -all' >/etc/mdadm.conf.d/00-amethystora-forensic.conf
+}
+
+# GNOME's own settings, locked: nothing mounts or starts by itself when a disk or a stick is plugged in
+write_dconf() {
+    local db=/etc/dconf/db/local.d
+    mkdir -p "${db}/locks"
+    cat >"${db}/90-amethystora-forensic" <<'DCONF'
+[org/gnome/desktop/media-handling]
+automount=false
+automount-open=false
+autorun-never=true
+
+[org/freedesktop/tracker3/miner/files]
+index-removable-devices=false
+index-optical-discs=false
+DCONF
+    cat >"${db}/locks/90-amethystora-forensic" <<'LOCKS'
+/org/gnome/desktop/media-handling/automount
+/org/gnome/desktop/media-handling/automount-open
+/org/gnome/desktop/media-handling/autorun-never
+LOCKS
+    dconf update
+}
+
+start() {
+    cmdline_has amethystora.forensic=1 || { echo "amethystora-forensic: not started with amethystora.forensic=1" >&2; exit 1; }
+    mkdir -p "${STATE}"
+    write_rules
+    write_overrides
+    record_own
+    write_lvm
+    write_mdadm
+    write_dconf
+    systemctl mask --runtime --no-reload "${MASK[@]}" || log "some units could not be masked"
+    systemctl daemon-reload
+    # udev, if it is running already (it is not, when this unit is early enough): the rule read again, the disks seen again
+    if systemctl -q is-active systemd-udevd.service; then
+        udevadm control --reload
+        udevadm trigger --subsystem-match=block --action=add
+        udevadm settle --timeout=30 || true
+    fi
+    : >"${WRITABLE}"
+    date -u +%FT%TZ >"${STATE}/started"
+    log "disks read-only: the udev rule is in place"
+}
+
+# The live session's installer: it formats disks, so it is not offered, started or probed
+session() {
+    local home
+    rm -f -- "${LAUNCHERS[@]}"
+    for home in /home/*/.config/autostart; do
+        rm -f -- "${home}/org.fedoraproject.welcome-screen.desktop" "${home}/liveinst-setup.desktop"
+    done
+    chmod 0000 -- "${INSTALLERS[@]}" 2>/dev/null || true
+    update-desktop-database /usr/share/applications 2>/dev/null || true
+    log "the installer is taken out of the session"
+}
+
+# One disk the findings may be written to: made writable now, and left so by the guard while it is the same disk
+writable() {
+    local dev="${1:?writable DISK, as in /dev/sdc}" name disk serial part
+    [[ -b "${dev}" ]] || { echo "amethystora-forensic: ${dev} is not a block device" >&2; exit 1; }
+    name="${dev##*/}"
+    disk="$(disk_of "${name}")"
+    serial="$(serial_of "${disk}")"
+    if [[ "${disk}" == "$(live_disk || true)" ]]; then
+        echo "amethystora-forensic: ${disk} is the disk this system started from" >&2
+        exit 1
+    fi
+    # Without a serial number it could not be told from another disk of its make, plugged in as the same name later
+    if [[ ! "${serial}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo "amethystora-forensic: ${disk} has no serial number that tells it from another drive of its make, so it is not made writable. Use a drive that has one." >&2
+        exit 1
+    fi
+    mkdir -p "${STATE}"
+    echo "${disk} ${serial}" >>"${WRITABLE}"
+    blockdev --setrw "/dev/${disk}"
+    for part in "${SYS}/${disk}"/"${disk}"*; do
+        if [[ -e "${part}/partition" ]]; then blockdev --setrw "/dev/${part##*/}"; fi
+    done
+    log "${disk} made writable on purpose"
+    echo "${disk} is writable. Every other disk is as it was."
+}
+
+status() {
+    local arg failed=0 bad
+    for arg in "${ARGS[@]}"; do
+        if cmdline_has "${arg}"; then
+            echo "kernel argument ${arg}: yes"
+        else
+            echo "kernel argument ${arg}: MISSING"
+            failed=1
+        fi
+    done
+    if [[ -e "${RULES}" ]]; then
+        echo "udev rule: yes"
+    else
+        echo "udev rule: MISSING"
+        failed=1
+    fi
+    echo "swap in use: $(swapon --noheadings --show=NAME | wc -l)"
+    echo "arrays assembled: $(grep -c '^md' /proc/mdstat 2>/dev/null || true)"
+    if bad="$(verify)"; then
+        echo "every disk read-only: yes"
+    else
+        echo "disks NOT read-only: ${bad//$'\n'/ }"
+        failed=1
+    fi
+    return "${failed}"
+}
+
+# A volume group activated read-only, as the manual says to: every volume of it with a read-only table, which opens the disks under it
+# without write access, so that no target of its (a thin pool committing its metadata, a RAID resynchronising) writes to them. A
+# snapshot waiting to be merged would be merged when its origin is activated: such a group is refused
+lvm_activate() {
+    local vg="${1:?lvm-activate VOLUMEGROUP}" name attr bad=()
+    [[ "${vg}" =~ ^[A-Za-z0-9+_.][A-Za-z0-9+_.-]*$ ]] || { echo "amethystora-forensic: ${vg} is not a volume group's name" >&2; exit 1; }
+    while read -r name attr; do
+        case "${attr:0:1}" in
+            O | S) echo "amethystora-forensic: ${vg}/${name} is a snapshot that is waiting to be merged, which activating its origin would start. Not activated." >&2; exit 1 ;;
+        esac
+    done < <(lvs --noheadings -a -o lv_name,lv_attr "${vg}")
+    vgchange -ay --config "activation { read_only_volume_list = [ \"${vg}\" ] }" "${vg}"
+    # What is active has to be read-only: otherwise it is put back
+    while read -r name attr; do
+        if [[ "${attr:4:1}" == a && "${attr:1:1}" != [rR] ]]; then bad+=("${name}"); fi
+    done < <(lvs --noheadings -a -o lv_name,lv_attr "${vg}")
+    if ((${#bad[@]})); then
+        vgchange -an "${vg}" >/dev/null || true
+        echo "amethystora-forensic: ${bad[*]} came up writable, so ${vg} is not left active." >&2
+        exit 1
+    fi
+    log "${vg} activated read-only"
+    echo "${vg} is active, read-only. Its volumes are in /dev/${vg}/."
+}
+
+# The top bar's words, through the live pill (no code of the shell's): a program of the account that stays while the session
+# does, whose pill is taken away when it ends. It says so when a disk is writable, and puts the pill back every five minutes
+pill() {
+    local state="" now helper=/usr/libexec/amethystora-pill
+    # Once, in words that say what this is and what it is not
+    notify-send -a "Disks read-only" -i drive-harddisk-symbolic "Disks read-only" \
+        "Every disk is set read-only by software. This is not a hardware write blocker." 2>/dev/null || true
+    while :; do
+        if verify >/dev/null; then now=ok; else now=bad; fi
+        if [[ "${now}" != "${state}" ]]; then
+            if [[ "${state}" == ok ]]; then "${helper}" end "Disks read-only" || true; fi
+            if [[ "${state}" == bad ]]; then "${helper}" end "A disk is writable" || true; fi
+            state="${now}"
+        fi
+        if [[ "${state}" == ok ]]; then
+            "${helper}" start "Disks read-only" --icon drive-harddisk-symbolic --pid "$$" || true
+        else
+            "${helper}" start "A disk is writable" --icon dialog-warning-symbolic --pid "$$" || true
+        fi
+        sleep 300 &
+        wait $! || true
+    done
+}
+
+case "${1:-}" in
+    start) start ;;
+    session) session ;;
+    guard) shift; guard "$@" ;;
+    verify) verify ;;
+    status) status ;;
+    writable) shift; writable "$@" ;;
+    pill) pill ;;
+    forget) shift; forget "$@" ;;
+    lvm-activate) shift; lvm_activate "$@" ;;
+    overrides) printf '%s
+' "${OVERRIDES[@]}" ;;
+    rules) rules ;;
+    args) printf '%s\n' "${ARGS[@]}" ;;
+    *) echo "usage: amethystora-forensic start|session|guard NODE|verify|status|writable DISK|lvm-activate VOLUMEGROUP|forget NAME|pill|rules|args|overrides" >&2; exit 64 ;;
+esac

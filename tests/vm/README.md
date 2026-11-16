@@ -172,6 +172,23 @@ reads what it says (`70-backups.sh` shows how).
 
 A new feature gets its check here with it, and a bug a run found gets the check that would have caught it.
 
+### The live ISO's forensic start
+
+The suites above run in an installed image. The live ISO's third menu entry, **Start without touching the disks** (`iso/live/forensic`,
+manual: `forensic-start.md`), is tried in the live system itself by `forensic-live.sh`, which is not part of `run.sh` and needs the live ISO
+(the `live-iso` job's, or one made the same way):
+
+```bash
+bash tests/vm/forensic-live.sh disk                     # once: a 3 GiB disk with ext4, XFS, btrfs, LVM, LUKS, swap and an MD RAID1, logs unreplayed
+bash tests/vm/forensic-live.sh amethystora.iso          # the entry's own kernel and arguments, the disk beside it, the session used, the disk's checksum before and after
+bash tests/vm/forensic-live.sh amethystora.iso --control   # the first entry instead, one partition mounted read-write: the checksum must differ
+```
+
+It reads the entry and its arguments out of the ISO's own `grub.cfg`, starts the ISO's kernel and initramfs with them under QEMU with the
+disk as a SATA disk (`forensic-live.mjs`), and exits 0 only when every line is ok and the checksum is the same. The disk is made in the lab
+container with the tools it installs when it runs (xfsprogs, btrfs-progs, lvm2, cryptsetup, mdadm): a file system the lab's kernel cannot
+make is left out and its lines say `skip`. Not run yet: written without a live ISO to try it on.
+
 ## Using it by hand
 
 1. `disk_build` installs an image onto a disk with `bootc install to-disk` (btrfs, as the installer ISO
