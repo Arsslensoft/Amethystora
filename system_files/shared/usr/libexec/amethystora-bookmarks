@@ -6,8 +6,10 @@
 #
 # Firefox keeps its bookmarks in places.sqlite, which it holds locked while it runs, beside the history. Firefox is left
 # exactly as it is: the file and its write-ahead log are copied into a folder of the account's own in memory
-# ($XDG_RUNTIME_DIR), the copy is opened, only bookmarks are read from it (moz_bookmarks of type 1, each joined to its
-# address in moz_places), and the copy is deleted before anything is printed. No visit is ever read: moz_historyvisits
+# ($XDG_RUNTIME_DIR), the copy is opened read-only with SQLite's defensive settings (no trusted schema, no extension
+# loading, a limit on the time a query may take) and read only if moz_bookmarks and moz_places are tables there, only
+# bookmarks are read from it (moz_bookmarks of type 1, each joined to its address in moz_places), and the copy is
+# deleted before anything is printed. No visit is ever read: moz_historyvisits
 # is never named, and an address with no bookmark is never selected. Addresses other than http, https and file are
 # left out, so that a click can never run a javascript: or data: address.
 
@@ -18,6 +20,8 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
+from urllib.parse import quote
 
 # Where Firefox keeps its profiles: the old folder, the XDG one of newer releases, and the Flatpak's two
 PLACES = ['.mozilla/firefox', '.config/mozilla/firefox', '.var/app/org.mozilla.firefox/.mozilla/firefox',
@@ -28,6 +32,8 @@ LONGEST = 300
 SCHEMES = ('http://', 'https://', 'file://')
 # A places.sqlite larger than this is not copied (a real one is a few tens of MB)
 MOST_BYTES = 512 * 1024 * 1024
+# A query that takes longer than this many seconds is stopped
+QUERY_SECONDS = 10
 
 
 def default_profile():
@@ -66,10 +72,26 @@ def clip(text):
     return ' '.join(str(text or '').split())[:LONGEST]
 
 
+def open_copy(copy):
+    """The copy, opened read-only (SQLite still takes in the copied log), with the database's own SQL kept from running more"""
+    connection = sqlite3.connect(f'file:{quote(copy)}?mode=ro', uri=True)
+    connection.enable_load_extension(False)
+    connection.setconfig(sqlite3.SQLITE_DBCONFIG_DEFENSIVE, True)
+    connection.setconfig(sqlite3.SQLITE_DBCONFIG_TRUSTED_SCHEMA, False)
+    connection.execute('PRAGMA cell_size_check=ON')
+    connection.execute('PRAGMA query_only=ON')
+    deadline = time.monotonic() + QUERY_SECONDS
+    connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 100000)
+    return connection
+
+
 def read(copy):
-    # The copy is ours, opened as it is: SQLite takes in the copied log, which a read-only open could not
-    connection = sqlite3.connect(copy)
+    connection = open_copy(copy)
     try:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('moz_bookmarks', 'moz_places')")}
+        if tables != {'moz_bookmarks', 'moz_places'}:
+            return []
         # A bookmark (type 1), its address, and the title of the folder it is in; nothing else of the database
         rows = connection.execute(
             'SELECT b.title, p.url, f.title FROM moz_bookmarks AS b '

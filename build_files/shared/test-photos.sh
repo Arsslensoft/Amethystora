@@ -106,6 +106,33 @@ found = sorted(os.path.relpath(path, pictures) for path, _, _ in photos.candidat
 assert found == ['Holiday/Beach2.PNG', 'Holiday/beach.jpg', 'top.webp'], found
 PY
 
+# A file is decoded only when it starts as one of the kinds in KINDS, whatever its name: an XPM called x.jpg is refused before
+# anything reads it, and each kind's signature is accepted
+python3 - "${HELPER}" "${T}" <<'PY' || fail "which files are decoded"
+import importlib.util, os, sys
+from importlib.machinery import SourceFileLoader
+helper, t = sys.argv[1:3]
+loader = SourceFileLoader('photos', helper)
+photos = importlib.util.module_from_spec(importlib.util.spec_from_loader('photos', loader))
+loader.exec_module(photos)
+def make(name, data):
+    path = os.path.join(t, name)
+    open(path, 'wb').write(data)
+    return path
+for name, data in (('x.jpg', b'/* XPM */\nstatic char *x[] = {"1 1 1 1", "a c #ff0000", "a"};\n'),
+                   ('y.png', b'<svg xmlns="http://www.w3.org/2000/svg"/>'), ('z.jpg', b''), ('w.webp', b'RIFF\0\0\0\0WAVE')):
+    try:
+        photos.picture_vector(None, make(name, data), None)
+    except ValueError:
+        continue
+    raise AssertionError(name + ' was decoded')
+for name, data in (('a.jpg', b'\xff\xd8\xff\xe0' + bytes(12)), ('b.png', b'\x89PNG\r\n\x1a\n' + bytes(8)), ('c.gif', b'GIF89a' + bytes(10)),
+                   ('d.bmp', b'BM' + bytes(14)), ('e.tif', b'II*\0' + bytes(12)), ('f.tif', b'MM\0*' + bytes(12)),
+                   ('g.webp', b'RIFF\1\0\0\0WEBPVP8 '), ('h.heic', b'\0\0\0\x18ftypheic' + bytes(4)),
+                   ('i.avif', b'\0\0\0\x18ftypavif' + bytes(4))):
+    assert photos.is_picture(make(name, data)), name
+PY
+
 # Mains power and being left alone: a battery that is not charging, or a person at the keyboard, and nothing is read
 mkdir -p "${R}/sys/class/power_supply/BAT0" "${R}/sys/class/power_supply/AC"
 echo Battery >"${R}/sys/class/power_supply/BAT0/type"
