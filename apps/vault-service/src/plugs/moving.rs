@@ -47,13 +47,20 @@ pub fn backup(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Result<Ne
 pub fn put(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Result<Next, Refusal> {
     let offset = number(body, "offset", 0..=MAX_BACKUP as u64)?.ok_or(Refusal::BadRequest)? as usize;
     let data = base64_field(body, "data", CHUNK)?;
+    let now = Instant::now();
+    service.expire_staged(now);
     if offset == 0 {
+        // A place held for its whole life is not taken straight back by the account that held it
+        if service.staging.contains_key(&peer.uid) && !service.staged.contains_key(&peer.uid) {
+            return Err(Refusal::Failed);
+        }
         service.staged.remove(&peer.uid);
         // One backup is brought in at a time, whoever asks: up to 48 MiB for each account with a session, asked of nobody, would be
         // memory any account could take from the service
         if !service.staged.is_empty() {
             return Err(Refusal::Failed);
         }
+        service.staging.entry(peer.uid).or_insert(now);
     }
     let held = service.staged.get(&peer.uid).map_or(0, |(bytes, _)| bytes.len());
     if offset != held || held + data.len() > MAX_BACKUP + 32 {
@@ -62,7 +69,7 @@ pub fn put(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Result<Next,
     }
     let (bytes, since) = service.staged.entry(peer.uid).or_insert_with(|| (Vec::new(), Instant::now()));
     bytes.extend_from_slice(&data);
-    *since = Instant::now();
+    *since = now;
     Ok(Next::Answer(json!({"ok": true, "held": bytes.len()})))
 }
 
@@ -71,6 +78,7 @@ pub fn restore(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Result<N
     let typed = base64_field(body, "recovery", 256)?;
     // The upload is used once, whatever comes of it
     let (bytes, _) = service.staged.remove(&peer.uid).ok_or(Refusal::BadRequest)?;
+    service.staging.remove(&peer.uid);
     let archive = moving::parse(&bytes).ok_or(Refusal::BadRequest)?;
     drop(bytes);
     let recovery = std::str::from_utf8(&typed).ok().and_then(RecoveryKey::parse).ok_or(Refusal::Refused)?;

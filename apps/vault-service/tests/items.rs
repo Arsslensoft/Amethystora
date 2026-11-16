@@ -434,6 +434,8 @@ fn account_json(issuer: &str, secret: &str) -> Value {
 fn a_merge_adds_what_is_new_and_says_what_was_held() {
     let running = opened("merge");
     let id = add_account(&running, "Held");
+    // Said yes to once: only such an account is compared with an import
+    ok(running.ask(json!({"op": "auth-code", "id": id})));
     let service = json!({"id": "x", "serviceName": "Mail", "codes": [{"code": "1111-1111"}]});
     let accounts = [account_json("Held", &SECRET.to_lowercase()), account_json("New", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"), account_json("New", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"), json!({"issuer": "Broken"}), json!({"issuer": "Gone", "secret": SECRET, "deletedAt": 5})];
     let before = running.outside.asked();
@@ -1475,4 +1477,65 @@ fn the_local_services_ca_is_trusted_by_browsers_only_when_asked() {
     assert!(run("off").status.success());
     assert!(!listed().contains("Local Services CA"), "{}", listed());
     assert_eq!(run("sideways").status.code(), Some(64));
+}
+
+/// J-3: an import or an add is compared with the accounts a program could read with no question and with no others, so that neither
+/// says whether the vault holds a secret that asks first, or which item holds it
+#[test]
+fn an_import_is_compared_only_with_accounts_that_can_be_read_unasked() {
+    let running = opened("merge-compare");
+    let id = add_account(&running, "Held");
+    let same = [account_json("Held", SECRET)];
+    // Not yet said yes to: not compared
+    let dry = ok(running.ask(json!({"op": "import-merge", "accounts": same, "dry": true})));
+    assert_eq!((&dry["same"], &dry["added"]), (&json!(0), &json!(1)), "{dry}");
+    // Said yes to, it is the same account
+    ok(running.ask(json!({"op": "auth-code", "id": id})));
+    let dry = ok(running.ask(json!({"op": "import-merge", "accounts": same, "dry": true})));
+    assert_eq!((&dry["same"], &dry["added"]), (&json!(1), &json!(0)), "{dry}");
+    let again = ok(running.ask(json!({"op": "auth-add", "account": {"issuer": "Held", "label": "ada", "secret": SECRET}})));
+    assert_eq!((&again["added"], &again["id"]), (&json!(false), &json!(id)));
+    // Set to ask every time, it is never compared, and an add does not say which item it is
+    ok(running.ask(json!({"op": "set-approval", "kind": "authenticator", "id": id, "approval": "ask"})));
+    let dry = ok(running.ask(json!({"op": "import-merge", "accounts": same, "dry": true})));
+    assert_eq!((&dry["same"], &dry["added"]), (&json!(0), &json!(1)), "{dry}");
+    let added = ok(running.ask(json!({"op": "auth-add", "account": {"issuer": "Held", "label": "ada", "secret": SECRET}})));
+    assert_eq!(added["added"], json!(true));
+    assert_ne!(added["id"], json!(id));
+}
+
+/// J-1: reading the codes one at a time never comes to all of them on one yes: after a code is marked used, the next asks again
+#[test]
+fn backup_codes_stepped_through_ask_again_after_each_one_used() {
+    let running = opened("codes-stepped");
+    let codes: Vec<String> = (0..4).map(|at| format!("5555-{at}000")).collect();
+    let id = ok(running.ask(json!({"op": "codes-add", "service": "Mail", "codes": codes})))["id"].as_str().unwrap().to_string();
+    let before = running.outside.asked();
+    assert_eq!(ok(running.ask(json!({"op": "codes-next", "id": id})))["code"], json!("5555-0000"));
+    assert_eq!(running.outside.asked(), before + 1);
+    // The yes holds for the code in hand, and for marking it
+    assert_eq!(ok(running.ask(json!({"op": "codes-next", "id": id})))["code"], json!("5555-0000"));
+    ok(running.ask(json!({"op": "codes-used", "id": id, "index": 0, "used": true})));
+    assert_eq!(running.outside.asked(), before + 1);
+    // The next one is a question of its own, answered once
+    assert_eq!(ok(running.ask(json!({"op": "codes-next", "id": id})))["code"], json!("5555-1000"));
+    assert_eq!(running.outside.asked(), before + 2);
+    ok(running.ask(json!({"op": "codes-next", "id": id})));
+    assert_eq!(running.outside.asked(), before + 2);
+    // A person who says no gets no code, and the next try asks again
+    ok(running.ask(json!({"op": "codes-used", "id": id, "index": 1, "used": true})));
+    refuse_prompts(&running, true);
+    assert_eq!(why(&running.ask(json!({"op": "codes-next", "id": id}))), "refused");
+    assert_eq!(why(&running.ask(json!({"op": "codes-next", "id": id}))), "refused");
+    refuse_prompts(&running, false);
+    // An item set to never ask asks for the next code all the same, once a code was marked used
+    ok(running.ask(json!({"op": "set-approval", "kind": "backup-codes", "id": id, "approval": "never"})));
+    let before = running.outside.asked();
+    ok(running.ask(json!({"op": "codes-next", "id": id})));
+    assert_eq!(running.outside.asked(), before);
+    ok(running.ask(json!({"op": "codes-used", "id": id, "index": 2, "used": true})));
+    assert_eq!(ok(running.ask(json!({"op": "codes-next", "id": id})))["code"], json!("5555-3000"));
+    assert_eq!(running.outside.asked(), before + 1);
+    ok(running.ask(json!({"op": "codes-next", "id": id})));
+    assert_eq!(running.outside.asked(), before + 1);
 }

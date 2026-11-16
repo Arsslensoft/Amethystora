@@ -861,6 +861,12 @@ fn put_in_place(service: &mut Service, applying: &mut Applying) -> bool {
     }
     if !items.is_empty() && store.commit_batch(items).is_err() {
         applying.full = true;
+        // A link says its items are here: the slice's links stay as they were, so that no cipher is taken for gone from the vault
+        // whose items did not land, and its groups are counted as skipped
+        let failed = linked.len();
+        applying.applied = applying.applied.saturating_sub(failed);
+        applying.skipped_groups += failed;
+        applying.skipped.extend(linked.drain(..).map(|(cipher, _)| cipher));
     }
     // The links that changed, written with the items they go with: sixteen items at most, whatever the number of ciphers
     let changed: BTreeSet<char> = linked.iter().map(|(cipher, _)| merge::shard_of(cipher)).collect();

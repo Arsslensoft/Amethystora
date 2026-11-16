@@ -258,9 +258,11 @@ const STEERING: &[&str] = &[
     "CC", "CXX", "CPP", "LD", "AR", "AS", "MAKEFLAGS",
     // Run through a shell, or read as code or startup files, by git, Lua, zsh, vim, PHP, npm, OpenSSL (engines and providers) and .NET
     "GIT_EDITOR", "GIT_PAGER", "GIT_SEQUENCE_EDITOR", "SYSTEMD_EDITOR", "LUA_INIT", "ZDOTDIR", "OPENSSL_CONF", "VIMINIT", "EXINIT", "PHPRC", "NPM_CONFIG_SCRIPT_SHELL", "TCLLIBPATH", "DOTNET_STARTUP_HOOKS",
+    // Settings files and folders that name a program to run: git's template hooks, aws's credential_process, kubectl's exec plugins, cargo's compiler, npm's script shell, gpg-agent's pinentry
+    "GIT_TEMPLATE_DIR", "AWS_CONFIG_FILE", "KUBECONFIG", "RUSTC", "RUSTC_WRAPPER", "NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG", "GNUPGHOME",
 ];
 const STEERING_STARTS: &[&str] = &["LD_", "DYLD_", "MALLOC_", "BASH_FUNC_", "XDG_", "PYTHON", "PERL", "RUBY", "GIT_CONFIG", "GIT_DIR", "LUA_INIT", "OPENSSL_", "DOTNET_", "CORECLR_", "COR_"];
-const STEERING_ENDS: &[&str] = &["_OPTIONS", "_OPTS", "_PATH", "_ENV", "_COMMAND", "_ASKPASS", "_EDITOR", "_PAGER", "_PROXY", "_INIT", "_HOOKS"];
+const STEERING_ENDS: &[&str] = &["_OPTIONS", "_OPTS", "_PATH", "_ENV", "_COMMAND", "_ASKPASS", "_EDITOR", "_PAGER", "_PROXY", "_INIT", "_HOOKS", "_CONFIG_FILE", "_USERCONFIG", "_GLOBALCONFIG", "_WRAPPER", "_TEMPLATE_DIR"];
 
 fn steers(name: &str) -> bool {
     STEERING.contains(&name) || STEERING_STARTS.iter().any(|start| name.starts_with(start)) || STEERING_ENDS.iter().any(|end| name.ends_with(end))
@@ -985,7 +987,7 @@ mod tests {
             "PYTHONPATH", "PYTHONSTARTUP", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB", "GIT_SSH_COMMAND", "GIT_ASKPASS", "GIT_CONFIG_GLOBAL", "SSH_ASKPASS", "PROMPT_COMMAND", "PS4", "HOME", "TMPDIR", "XDG_CONFIG_HOME", "MALLOC_CHECK_",
             "BASH_FUNC_x%%", "SHELL", "EDITOR", "CLASSPATH", "SSL_CERT_FILE", "SSH_AUTH_SOCK", "GIT_EDITOR", "GIT_PAGER", "GIT_SEQUENCE_EDITOR", "SYSTEMD_PAGER", "HTTP_PROXY",
             "HTTPS_PROXY", "ALL_PROXY", "CC", "CXX", "CPP", "LD", "MAKEFLAGS", "LUA_INIT", "LUA_INIT_5_4", "ZDOTDIR", "OPENSSL_CONF", "OPENSSL_MODULES", "DOTNET_STARTUP_HOOKS", "CORECLR_PROFILER_PATH_64", "VIMINIT", "EXINIT",
-            "PHPRC", "NPM_CONFIG_SCRIPT_SHELL", "SYSTEMD_EDITOR", "TCLLIBPATH", "SOME_STARTUP_HOOKS", "MY_INIT",
+            "PHPRC", "NPM_CONFIG_SCRIPT_SHELL", "SYSTEMD_EDITOR", "TCLLIBPATH", "SOME_STARTUP_HOOKS", "MY_INIT", "GIT_TEMPLATE_DIR", "AWS_CONFIG_FILE", "KUBECONFIG", "RUSTC", "RUSTC_WRAPPER", "NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG", "GNUPGHOME", "SOME_CONFIG_FILE", "X_USERCONFIG", "X_GLOBALCONFIG", "X_WRAPPER", "X_TEMPLATE_DIR",
         ] {
             assert!(steers(name), "{name} is not refused");
         }

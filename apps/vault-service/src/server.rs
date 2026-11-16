@@ -2,8 +2,8 @@
 //! and no polling. Only a person (polkit) or the disk's slowest write can make a client wait, and neither stalls the others:
 //! an approval is a message on the bus, and scrypt runs on a thread of its own, one at a time, since each takes 128 MiB.
 //!
-//! Every account gets its turn: lines are taken a share per account per round, and queued work round the accounts, so that one
-//! account's programs cannot hold up another's. A connection that asks nothing is let go after a few seconds, and an account
+//! Every account gets its turn: lines are taken a share per account per round (of bytes, and of the time they take on the loop), and
+//! queued work round the accounts, so that one account's programs cannot hold up another's. A connection that asks nothing is let go after a few seconds, and an account
 //! with no session at the machine (a container's own uids among them) is not taken at all.
 //!
 //! Exits when nothing is open and nothing has been asked for a while. systemd keeps the socket, and starts it again for the
@@ -47,6 +47,9 @@ const READ_AT_ONCE: usize = 64 * 1024;
 const LINES_AT_ONCE: usize = 32;
 /// What one account's lines may come to in one round, before the others have had theirs
 const BYTES_A_ROUND: usize = 256 * 1024;
+/// And what they may cost the loop: a request that reads a whole vault is a short line, so the time is counted too. The line that
+/// passes it is finished, and the account's next waits for the others' turn
+const WORK_A_ROUND: Duration = Duration::from_millis(20);
 /// A program the person said no to this often in a minute is not put in front of them again for a minute
 const REFUSALS: usize = 3;
 const REFUSAL_MEMORY: Duration = Duration::from_secs(60);
@@ -349,15 +352,21 @@ impl Server {
         }
         self.turn = self.turn.wrapping_add(1);
         let start = (self.turn as usize) % ids.len();
-        let mut spent: HashMap<u32, usize> = HashMap::new();
+        let mut spent: HashMap<u32, (usize, Duration)> = HashMap::new();
         for id in ids[start..].iter().chain(&ids[..start]) {
             let Some(uid) = self.clients.get(id).map(|client| client.peer.uid) else { continue };
             for _ in 0..LINES_AT_ONCE {
-                if spent.get(&uid).copied().unwrap_or(0) >= BYTES_A_ROUND {
+                let (bytes, time) = spent.get(&uid).copied().unwrap_or_default();
+                if bytes >= BYTES_A_ROUND || time >= WORK_A_ROUND {
                     break;
                 }
+                let began = Instant::now();
                 match self.next_line(*id) {
-                    Some(length) => *spent.entry(uid).or_default() += length.max(1),
+                    Some(length) => {
+                        let account = spent.entry(uid).or_default();
+                        account.0 += length.max(1);
+                        account.1 += began.elapsed();
+                    }
                     None => break,
                 }
             }

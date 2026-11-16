@@ -1,6 +1,7 @@
 //! Authenticator accounts. The secret stays here: one code goes out, never the key, but for the link a person asks to see.
 //! Making a code touches nothing but the item's file and the stack: no libcrypto, and well inside the 5 ms budget.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use serde_json::{json, Value};
@@ -124,10 +125,17 @@ fn keep(service: &mut Service, uid: u32, vault: &str, account: &Account, approva
     Ok(())
 }
 
+/// The accounts an import or an add is compared with: those a program could read with no question (`Service::readable_unasked`).
+/// Comparing with the others would say whether the vault holds a secret that asks first, and which item holds it.
+fn readable_ids(service: &Service, uid: u32, target: &str) -> HashSet<String> {
+    service.readable_unasked(uid, KIND_ACCOUNT).into_iter().filter(|(vault, _)| vault == target).map(|(_, id)| id).collect()
+}
+
 fn add_now(service: &mut Service, uid: u32, target: &str, account: Account, approval: Approval) -> Result<Next, Next> {
+    let readable = readable_ids(service, uid, target);
     let store = service.store_of(uid, target).map_err(Next::refuse)?;
     let (accounts, _) = held(store).map_err(Next::trouble)?;
-    if let Some(same) = accounts.iter().find(|one| one.deleted_at.is_none() && import::same_account(one, &account)) {
+    if let Some(same) = accounts.iter().find(|one| one.deleted_at.is_none() && readable.contains(&one.id) && import::same_account(one, &account)) {
         return Ok(Next::Answer(json!({"ok": true, "id": same.id, "vault": target, "added": false})));
     }
     let mut account = account;
@@ -289,8 +297,16 @@ pub fn note(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Result<Next
 }
 
 fn merge_now(service: &mut Service, uid: u32, target: &str, import: Imported, dry: bool, replace: bool) -> Result<Next, Next> {
+    let readable = readable_ids(service, uid, target);
     let store = service.store_of(uid, target).map_err(Next::refuse)?;
-    let (accounts, services) = held(store).map_err(Next::trouble)?;
+    let (mut accounts, services) = held(store).map_err(Next::trouble)?;
+    if !replace {
+        // A merge is compared only with what is readable unasked: the other accounts keep their ids taken, and count as gone for the
+        // comparison (in memory, never written)
+        for account in accounts.iter_mut().filter(|account| !readable.contains(&account.id)) {
+            account.deleted_at.get_or_insert(0);
+        }
+    }
     let skipped = import.skipped;
     let now = now_ms();
     let (add_accounts, add_services, answer, gone) = if replace {

@@ -877,6 +877,82 @@ fn a_second_account_cannot_reach_the_first_s_vault() {
     }
 }
 
+/// A secret of 32 base32 characters for each number
+fn secret_for(number: usize) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut text = vec![b'A'; 32];
+    let (mut rest, mut at) = (number, 31);
+    while rest > 0 {
+        text[at] = ALPHABET[rest % 32];
+        rest /= 32;
+        at -= 1;
+    }
+    String::from_utf8(text).unwrap()
+}
+
+/// Run by the test below, as another uid: asks the status over and over for a while and says how long the slowest answer took
+#[test]
+#[ignore = "the other account's half of one_accounts_heavy_requests_do_not_hold_the_others_up"]
+fn other_account_waits_its_turn() {
+    let socket = std::path::PathBuf::from(std::env::var("OTHER_SOCKET").unwrap());
+    let end = Instant::now() + Duration::from_secs(4);
+    let mut worst = Duration::ZERO;
+    while Instant::now() < end {
+        let began = Instant::now();
+        let answer = amethystora_vault_client::exchange(&socket, &json!({"v": 1, "op": "status"}), Duration::from_secs(20)).unwrap();
+        assert_eq!(answer["ok"], json!(true));
+        worst = worst.max(began.elapsed());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(worst < Duration::from_secs(8), "the slowest answer took {worst:?}");
+}
+
+/// J-5: lines that are short to send and long to run (a request that reads every item of a vault) are counted by the time they take,
+/// not by their number, so that the other accounts are answered between them
+#[test]
+fn one_accounts_heavy_requests_do_not_hold_the_others_up() {
+    // SAFETY: getuid cannot fail
+    if unsafe { libc::getuid() } != 0 {
+        eprintln!("skipped: needs root, to run the other half as another account");
+        return;
+    }
+    let running = start("heavy");
+    running.set_up(PASSWORD);
+    for batch in 0..3 {
+        let accounts: Vec<Value> = (0..250).map(|at| json!({"issuer": format!("Site {}", batch * 250 + at), "label": "ada", "secret": secret_for(batch * 250 + at + 1), "type": "totp", "digits": 6, "period": 30, "algorithm": "SHA1"})).collect();
+        assert_eq!(running.ask(json!({"op": "import-merge", "accounts": accounts}))["added"], json!(250));
+    }
+    // Sixteen connections, thirty-two requests each, every one reading the whole vault
+    let line = format!("{}
+", json!({"v": 1, "op": "auth-add", "account": {"issuer": "Site 1", "label": "ada", "secret": secret_for(2)}}));
+    let mut flooding = Vec::new();
+    for _ in 0..16 {
+        let mut stream = UnixStream::connect(&running.socket).unwrap();
+        let reader = stream.try_clone().unwrap();
+        stream.write_all(line.repeat(32).as_bytes()).unwrap();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(reader);
+            let mut text = String::new();
+            while reader.read_line(&mut text).unwrap_or(0) > 0 {
+                text.clear();
+            }
+        });
+        flooding.push(stream);
+    }
+    use std::os::unix::process::CommandExt;
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "other_account_waits_its_turn", "--nocapture"])
+        .env("OTHER_SOCKET", &running.socket)
+        .uid(1234)
+        .gid(1234)
+        .status()
+        .unwrap();
+    for stream in &flooding {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
+    assert!(status.success());
+}
+
 // --- On the disk -----------------------------------------------------------------------------------------------------------
 
 #[test]
