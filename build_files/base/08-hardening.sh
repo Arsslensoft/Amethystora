@@ -46,6 +46,18 @@ fi
 # /etc/udev/rules.d and loads i2c-dev, for the external screens' brightness in quick settings, and off takes it back.
 rm -f /usr/lib/udev/rules.d/60-ddcutil-i2c.rules /usr/lib/modules-load.d/ddcutil.conf
 
+# OpenRGB's rules (openrgb-udev-rules) give the user at the seat every i2c bus, which is what taking ddcutil's rule out
+# is for (the motherboard's SMBus and the RAM modules' chips are on them), and /dev/port. Their two lines go, marked as
+# changed, and the build fails when either is not there exactly once: the file changed upstream and has to be read
+# again. The lighting rules for the devices themselves stay.
+OPENRGB_RULES=/usr/lib/udev/rules.d/60-openrgb.rules
+for line in 'KERNEL=="i2c-[0-99]*", TAG+="uaccess"' 'KERNEL=="port", TAG+="uaccess"'; do
+    [[ "$(grep -cxF -- "${line}" "${OPENRGB_RULES}")" == 1 ]]
+    sed -i "$(grep -nxF -- "${line}" "${OPENRGB_RULES}" | cut -d: -f1)d" "${OPENRGB_RULES}"
+    [[ "$(grep -cxF -- "${line}" "${OPENRGB_RULES}")" == 0 ]]
+done
+sed -i '1i # Changed by Amethystora (build_files/base/08-hardening.sh): the two lines giving every i2c bus and /dev/port to\n# whoever sits at the machine are taken out. `ame desktop screen-brightness on` gives the display controllers back.' "${OPENRGB_RULES}"
+
 # Firewall: Fedora Workstation's default zone accepts incoming connections on every port from 1025 up.
 # The Amethystora zone (/usr/lib/firewalld/zones/amethystora.xml) only lets in what a desktop needs.
 # Tailscale traffic is trusted: who may reach this machine over the tailnet is set by the tailnet's ACLs,

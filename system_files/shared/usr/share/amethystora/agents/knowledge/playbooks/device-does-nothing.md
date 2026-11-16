@@ -74,7 +74,7 @@ the app again.
 
 Use the device at the machine. For another keyboard, the user gives it to the seat (root), with the vendor
 ID from `lsusb`, then plugs it in again:
-`echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="1234", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-keyboard.rules`.
+`echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="1234", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/72-zz-keyboard.rules`.
 Never `MODE="0666"`.
 
 ### 5. Blocked module
@@ -117,6 +117,6 @@ or runs `ame security lockdown off` (root) (restart), which costs protection; ne
   `ame apps gaming off` put it back unless the other still needs it; the second uninstalls Steam with its
   games: ask first.
 - A Flatpak app: `flatpak override --user --nodevice=input APP`.
-- The HID rule: `sudo rm /etc/udev/rules.d/70-keyboard.rules` (root), then plug the device in again.
+- The HID rule: `sudo rm /etc/udev/rules.d/72-zz-keyboard.rules` (root), then plug the device in again.
 - Each `ame security` switch above: the same command with `on`; key remapping with `off`.
 - The Xbox wireless adapter: `ame apps xbox-adapter off` (root) (restart).

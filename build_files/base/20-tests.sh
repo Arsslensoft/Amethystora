@@ -4057,7 +4057,7 @@ fi
 # from every interface whose report descriptor is not vendor-defined only (an app with --device=all would read
 # passwords from it), and the USB device nodes are given only to bootloaders
 rules=/usr/lib/udev/rules.d/71-amethystora-keyboard-interfaces.rules
-grep -q 'IMPORT{program}="/usr/bin/python3 /usr/libexec/amethystora-hid-vendor-only %S%p"' "${rules}"
+grep -q 'IMPORT{program}="/usr/bin/python3 -I /usr/libexec/amethystora-hid-vendor-only %S%p"' "${rules}"
 for vendor in 16c0 3297 03eb 31e3; do
     grep -q "idVendor}==\"[0-9a-f|]*${vendor}[0-9a-f|]*\", ENV{AMETHYSTORA_HID_VENDOR_ONLY}!=\"1\", TAG-=\"uaccess\"" "${rules}"
 done
@@ -4082,6 +4082,30 @@ assert module.pages(raw) == [0xFF60], module.pages(raw)
 assert module.pages(kbd) == [1, 7] and module.pages(cons) == [0xC], (module.pages(kbd), module.pages(cons))
 assert module.pages(raw + kbd) == [0xFF60, 1, 7] and module.pages(b"\x06") is None
 EOF
+# ...and for every other maker's keyboards: the files that come with the base image (Solaar's, OpenRGB's, the game
+# controllers') tag all of a device's nodes, so 72-amethystora-keyboards-not-shared.rules, which sorts after them and before
+# 73-seat-late.rules, takes the grant back from a hidraw node whose descriptor declares a keyboard or keypad, from keyboards'
+# input nodes and from the USB device node of a boot keyboard among HID interfaces only (security keys excepted), and
+# test-hid-keyboards.sh runs the helper's answers for a set of descriptors and checks the order of the files
+rules=/usr/lib/udev/rules.d/72-amethystora-keyboards-not-shared.rules
+grep -q 'SUBSYSTEM=="hidraw".*ENV{AMETHYSTORA_HID_KEYBOARD}=="1".*TAG-="uaccess", MODE="0600"' "${rules}"
+grep -qxF 'SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="?*", TAG-="uaccess"' "${rules}"
+grep -qxF 'SUBSYSTEM=="input", ENV{ID_INPUT_KEY}=="?*", ENV{ID_INPUT_JOYSTICK}!="?*", ENV{ID_REMOTE_CONTROL}!="1", TAG-="uaccess"' "${rules}"
+grep -q 'SUBSYSTEM=="usb".*AMETHYSTORA_USB_KEYBOARD}=="1", TAG-="uaccess"' "${rules}"
+udevadm verify "${rules}" 2>/dev/null ||
+    ! udevadm verify --help >/dev/null 2>&1
+bash /ctx/build_files/shared/test-hid-keyboards.sh
+# OpenRGB's two lines that gave every i2c bus and /dev/port to the seat (08-hardening.sh takes them out) are gone, and no
+# rule of the image tags an i2c node but the display brightness switch's own file, which the switch copies into /etc
+for rules in /usr/lib/udev/rules.d/*.rules /etc/udev/rules.d/*.rules; do
+    [[ -e "${rules}" ]] || continue
+    if grep -nE '^[^#]*(i2c|KERNEL=="port").*TAG\+="uaccess"' "${rules}"; then
+        echo "${rules} gives the i2c buses or /dev/port to the user at the seat"
+        false
+    fi
+done
+grep -q '^# Changed by Amethystora.*i2c' /usr/lib/udev/rules.d/60-openrgb.rules
+grep -qF 'ATTRS{class}=="0x03*", TAG+="uaccess"' /usr/share/amethystora/ddc/60-amethystora-ddc.rules
 # A keyboard's hidraw device carries every key typed on it, and the devices under a vendor ID include the
 # keyboards built on its chips: no rule the image adds gives either to every account, as 92-viia.rules,
 # 60-arduino-mbed.rules and 50-zsa.rules did before they gave them to the user at the seat (uaccess)

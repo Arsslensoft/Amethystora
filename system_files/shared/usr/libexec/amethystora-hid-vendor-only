@@ -1,50 +1,135 @@
 #!/usr/bin/python3 -I
-# Says, for udev, whether a hidraw node belongs to a HID interface that is the maker's own channel and not a
-# keyboard: its report descriptor uses vendor-defined usage pages (0xFF00 to 0xFFFF) only. Run by
-# 71-amethystora-keyboard-interfaces.rules as `IMPORT{program}` with the node's sysfs path, it prints
-# AMETHYSTORA_HID_VENDOR_ONLY=1 for such an interface and nothing for any other, or for one it cannot read.
-# An interface that also uses the generic desktop, keyboard or consumer pages (the keys typed on it, whether in the
-# boot protocol or NKRO) is never "vendor only", whatever else it carries.
+# Says, for udev, what a HID interface is, from its report descriptor, so that the rules in
+# 71-amethystora-keyboard-interfaces.rules and 72-amethystora-keyboards-not-shared.rules can leave a keyboard's keys to
+# root and the maker's own channel to the person at the machine. Run as `IMPORT{program}` with the hidraw node's sysfs
+# path, it always prints two lines:
+#   AMETHYSTORA_HID_VENDOR_ONLY=1  the descriptor uses vendor-defined usage pages (0xFF00 to 0xFFFF) only
+#   AMETHYSTORA_HID_KEYBOARD=1     it declares a keyboard or keypad (an application collection of the generic desktop
+#                                  page's Keyboard or Keypad usage, or any use of the keyboard/keypad page 0x07)
+# An interface that also uses the generic desktop, keyboard or consumer pages is never "vendor only", whatever else
+# it carries. A descriptor that cannot be read or parsed (missing, empty, longer than the 4 KiB sysfs gives, cut inside
+# an item) answers the safe way: a keyboard, not vendor only. Given `usb STRING` it answers for a USB device node
+# instead: STRING is the device's ID_USB_INTERFACES, and AMETHYSTORA_USB_KEYBOARD=1 means that it holds a boot
+# keyboard and nothing but HID interfaces (anything it cannot read counts as that too).
 
 import os
+import re
 import sys
 
+LIMIT = 4096
+SIZES = (0, 1, 2, 4)
+APPLICATION = 1
+KEYBOARD_PAGE = 0x07
+DESKTOP_PAGE = 0x01
+KEYBOARD_USAGES = (0x06, 0x07)
 
-def pages(data):
-    """Every Usage Page the descriptor's items set (a global item, prefix 0x04, one to four bytes)."""
-    found = []
+
+def walk(data):
+    """The Usage Pages a descriptor sets or reaches through a 4-byte usage, and whether it declares a keyboard.
+    None when it is empty or ends inside an item."""
+    if not data:
+        return None
+    pages = []
+    keyboard = False
+    page = 0
+    stack = []
+    usages = []
     i = 0
     while i < len(data):
         prefix = data[i]
         if prefix == 0xFE:  # a long item: its size is the next byte
-            if i + 1 >= len(data):
+            if i + 1 >= len(data) or i + 3 + data[i + 1] > len(data):
                 return None
             i += 3 + data[i + 1]
             continue
-        size = (0, 1, 2, 4)[prefix & 3]
-        if i + 1 + size > len(data):
+        end = i + 1 + SIZES[prefix & 3]
+        if end > len(data):
             return None
-        if prefix & 0xFC == 0x04:
-            found.append(int.from_bytes(data[i + 1:i + 1 + size], "little"))
-        i += 1 + size
-    return found
+        value = int.from_bytes(data[i + 1:end], "little")
+        kind = (prefix >> 2) & 3
+        tag = prefix >> 4
+        if kind == 1:  # global
+            if tag == 0:
+                page = value
+                pages.append(value)
+            elif tag == 0xA and len(stack) < 64:
+                stack.append(page)
+            elif tag == 0xB and stack:
+                page = stack.pop()
+        elif kind == 2 and tag in (0, 1, 2):  # usage, usage minimum, usage maximum
+            if end - i - 1 == 4:  # a 4-byte usage carries its own page in its upper 16 bits
+                pages.append(value >> 16)
+                usages.append((value >> 16, value & 0xFFFF))
+            else:
+                usages.append((page, value))
+        elif kind == 0:  # main
+            if tag == 0xA and value == APPLICATION:
+                keyboard = keyboard or any(p == DESKTOP_PAGE and u in KEYBOARD_USAGES for p, u in usages)
+            if tag in (0x8, 0x9, 0xA, 0xB, 0xC):
+                usages = []
+        i = end
+    return pages, keyboard or KEYBOARD_PAGE in pages
 
 
-def main():
-    if len(sys.argv) != 2:
-        return
-    path = os.path.realpath(os.path.join(sys.argv[1], "device", "report_descriptor"))
-    if not path.startswith("/sys/devices/") or not path.endswith("/report_descriptor"):
-        return
-    try:
-        with open(path, "rb") as handle:
-            data = handle.read(4096)
-    except OSError:
-        return
+def pages(data):
+    """Every Usage Page the descriptor uses, or None."""
+    found = walk(data)
+    return None if found is None else found[0]
+
+
+def keyboard(data):
+    """True when the descriptor declares a keyboard, or cannot be told from one."""
+    found = walk(data)
+    return True if found is None else found[1]
+
+
+def vendor_only(data):
     found = pages(data)
-    if found and all(0xFF00 <= page <= 0xFFFF for page in found):
-        print("AMETHYSTORA_HID_VENDOR_ONLY=1")
+    return bool(found) and all(0xFF00 <= page <= 0xFFFF for page in found) and not keyboard(data)
+
+
+def read_limited(path):
+    """The file, or None when it is longer than sysfs ever gives (4 KiB)."""
+    with open(path, "rb") as handle:
+        data = handle.read(LIMIT + 1)
+    return data if len(data) <= LIMIT else None
+
+
+def descriptor(sysfs):
+    path = os.path.realpath(os.path.join(sysfs, "device", "report_descriptor"))
+    if not path.startswith("/sys/devices/") or not path.endswith("/report_descriptor"):
+        return None
+    return read_limited(path)
+
+
+def usb_keyboard(interfaces):
+    """A boot keyboard among HID interfaces only (the string is ':' and each interface's class, subclass and protocol)."""
+    entries = interfaces.strip(":").split(":")
+    if not interfaces.startswith(":") or not interfaces.endswith(":") or not all(
+        re.fullmatch("[0-9a-f]{6}", entry) for entry in entries
+    ):
+        return True
+    return "030101" in entries and all(entry.startswith("03") for entry in entries)
+
+
+def main(argv):
+    if len(argv) == 3 and argv[1] == "usb":
+        try:
+            answer = usb_keyboard(argv[2])
+        except Exception:
+            answer = True
+        print("AMETHYSTORA_USB_KEYBOARD=%d" % answer)
+        return
+    only, typing = False, True
+    try:
+        data = descriptor(argv[1]) if len(argv) == 2 else None
+        if data is not None:
+            only, typing = vendor_only(data), keyboard(data)
+    except Exception:
+        only, typing = False, True
+    print("AMETHYSTORA_HID_VENDOR_ONLY=%d" % only)
+    print("AMETHYSTORA_HID_KEYBOARD=%d" % typing)
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv)

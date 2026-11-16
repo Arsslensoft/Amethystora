@@ -18,14 +18,14 @@ older laser printers are included for the rest. Add a printer in **Settings → 
 
 ### Keyboard configurators
 
-VIA, Vial, Keychron Launcher, ZSA's Oryx and Keymapp, and Wootility reach Keychron, Lemokey, ZSA, Vial and Wooting
-keyboards for whoever is at the machine, through the keyboard's configuration channel, never the one its keys are typed
-on. Other keyboards are kept from them and from every other program, because what a
-configurator reads is every key typed. To configure another one, give it to whoever is at the machine with its vendor ID
-from `lsusb`, then plug it in again:
+VIA, Vial, Keychron Launcher, ZSA's Oryx and Keymapp, Wootility, Solaar and lighting apps such as OpenRGB reach a
+keyboard for whoever is at the machine through its configuration channel, never the one its keys are typed on, whoever
+made it: what a configurator reads is every key typed. A keyboard that offers configuration only on the interface it
+types on (some Bluetooth ones) is no longer reachable by those apps without root. To configure one anyway, give it to
+whoever is at the machine with its vendor ID from `lsusb`, then plug it in again:
 
 ```bash
-echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="1234", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-keyboard.rules
+echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="1234", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/72-zz-keyboard.rules
 ```
 
 ## Game controllers

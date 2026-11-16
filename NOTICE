@@ -50,6 +50,12 @@ solaar-udev package, are changed when an image is built: the line that gives
 /dev/uinput to whoever sits at the machine is taken out, and the file says so
 (build_files/base/08-hardening.sh). Its source is Fedora's package.
 
+OpenRGB's udev rules (GPL-2.0-only AND GPL-3.0-or-later, https://openrgb.org),
+/usr/lib/udev/rules.d/60-openrgb.rules from Fedora's openrgb-udev-rules package,
+are changed when an image is built: the two lines that give every i2c bus and
+/dev/port to whoever sits at the machine are taken out, and the file says so
+(build_files/base/08-hardening.sh). Its source is Fedora's package.
+
 The desktop theme switcher takes its design and its colour palettes from Omakub
 and its fork Omabuntu. Each says in its README that it is released under the
 MIT License; neither carries a licence file or a copyright line of its own, so
