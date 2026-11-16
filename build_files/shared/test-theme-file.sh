@@ -202,6 +202,13 @@ for bad in "https://example.org/theme.conf" "/proc/self/status" "${T}/in" "${T}/
     : >"${T}/in/empty"
     if run read "${bad}" >/dev/null 2>&1; then fail "${bad} was read"; fi
 done
+# ...and so is a link to a file whose own name holds a control character, which the name given does not show
+ESC_NAME="x$(printf '\033')[31my.conf"
+mkdir "${T}/esc"
+cp "${T}/in/kanagawa.conf" "${T}/esc/${ESC_NAME}"
+ln -s "${T}/esc/${ESC_NAME}" "${T}/in/plain.conf"
+chmod -R a+rX "${T}/esc" "${T}/in"
+if run read "${T}/in/plain.conf" >/dev/null 2>&1; then fail "a link to a file named with an escape was read"; fi
 
 # A picture beside the file comes along, written again as PNG
 python3 -I -c 'import sys, gi
@@ -219,6 +226,13 @@ grep -q '^color12 = "#7fb4ca"$' "${THEMES}/kanagawa/colors.toml" || fail "the im
 [[ "$(grep -c ' = "#' "${THEMES}/kanagawa/colors.toml")" == 22 ]] || fail "the imported theme has not every key"
 run import "${T}/in/bright.yaml" "Bright Day" >/dev/null
 [[ -e "${THEMES}/bright-day/light.mode" ]] || fail "a light ground makes no light theme"
+# A picture of more than 64 million pixels is refused from its header, before anything decodes it (only its header is here)
+cp "${T}/in/kanagawa.conf" "${T}/in/huge.conf"
+python3 -I -c 'import struct, sys
+sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">IIBBBBB", 9000, 9000, 8, 2, 0, 0, 0) + b"\0\0\0\0")' >"${T}/in/huge.png"
+chmod a+r "${T}/in/huge.conf" "${T}/in/huge.png"
+if run import "${T}/in/huge.conf" Huge >"${T}/huge.out" 2>&1; then fail "a picture of 81 million pixels was taken"; fi
+grep -qF "64 million pixels" "${T}/huge.out" || fail "the picture's size was not what was refused: $(cat "${T}/huge.out")"
 
 # A palette from the maker: whole, and only a palette
 palette="$(grep ' = "#' "${THEMES}/kanagawa/colors.toml")"

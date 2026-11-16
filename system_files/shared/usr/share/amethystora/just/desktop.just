@@ -97,7 +97,7 @@ theme *ARGS:
             [[ $# == 2 || $# == 3 ]] || { echo "usage: ame desktop theme import FILE [NAME]"; exit 64; }
             info="$("${helper}" read "$2")" || exit 3
             name="$(own_name "${3:-$(jq -r .name <<<"${info}")}")"
-            file="${2##*/}"
+            file="$(/usr/libexec/amethystora-security-text "${2##*/}")"
             kind="$(jq -r .format <<<"${info}")"
             read_lines="$(jq -r .read <<<"${info}")"
             left_lines="$(jq -r .left_out <<<"${info}")"
@@ -106,7 +106,7 @@ theme *ARGS:
             echo "$(eval_gettext "Colour lines read: \${read_lines}. Other lines left out: \${left_lines}.")"
             picture="$(jq -r '.picture // empty' <<<"${info}")"
             if [[ -n "${picture}" ]]; then
-                picture="${picture##*/}"
+                picture="$(/usr/libexec/amethystora-security-text "${picture##*/}")"
                 echo "$(eval_gettext "The picture beside it becomes its wallpaper: \${picture}")"
             fi
             checks "${info}"

@@ -877,8 +877,10 @@ fill_templates() {
 # {{ key_rgb }} (decimal r,g,b) from colors.toml. A file the theme ships itself is left alone, so a
 # theme can hand-write any config a template would otherwise generate. Any further key=value pairs
 # given as arguments are substituted too, for things a palette cannot hold, such as the theme name.
-# A theme is shared as dotfiles and looks like data, so nothing in it is ever read as a program: each
-# colour has to be a colour, and is put into the templates as text. (It used to become a sed command, and a
+# Nothing in colors.toml is ever read as a program: each colour has to be a colour, and is put into the templates
+# as text. The files a theme folder ships itself are used as written (a starship.toml, a kitty-theme.conf, a
+# stylesheet), so a theme folder is as trusted as the person who copied it into ~/.config/amethystora/themes:
+# the importers (amethystora-theme-file) write only colours and a picture. (It used to become a sed command, and a
 # value holding | could end it and run anything, at every login.) A value that is not #rrggbb refuses the
 # whole theme, with its name, rather than render half of it.
 render_templates() {

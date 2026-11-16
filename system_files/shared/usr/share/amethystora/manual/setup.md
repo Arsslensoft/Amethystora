@@ -67,7 +67,8 @@ A template of your own goes to the other machine as a file of its own, with `ame
 - `-` what this machine has and the file does not name,
 - `!` what the file names that this machine cannot have, and why: an app from a remote it does not have, a
   container from a template that is not here or from the AUR while [the AUR](containers.md#the-aur) is off,
-  an extension or a theme that is not installed.
+  an extension or a theme that is not installed, a Homebrew tap (a file never adds one: `brew tap` is yours to run), and
+  a Homebrew name that is not a plain formula or cask of Homebrew's own taps, such as one from a tap or a path.
 
 `ame setup diff ~/setup.json` compares another file, and `--json` prints the same for scripts.
 
@@ -80,6 +81,8 @@ it twice and the second run finds nothing to do.
 - **It takes nothing away**, unless you add `--remove`: then it also lists what this machine has and the
   file does not name, and asks again before it uninstalls, turns off, or puts a setting back as the image
   has it. Apps keep their data, and a container's home folder stays.
+- **Homebrew** installs only plain names from its own taps. A tap, a formula or cask named with its tap (`user/tap/name`)
+  or a file (`name.rb`) is listed as one this machine cannot have and left out, with `--yes` as without it.
 - **The system** is switched through `ame system rebase`, which takes signed images only and asks its own
   questions. The new system takes over at the next restart.
 - **`--yes`** skips the first question, for a script. It skips neither `--remove`'s question nor the system
