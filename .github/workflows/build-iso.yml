@@ -331,7 +331,7 @@ jobs:
       ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
       (needs.build-iso.result == 'success' || needs.live-iso.result == 'success') }}
     runs-on: ubuntu-latest
-    # The signing key and the bucket's token are the release environment's, which admits main alone
+    # The signing key and the bucket's token are the release environment's, which admits main, beta and the merge queue's branches
     environment: release
     permissions: {}
     strategy:

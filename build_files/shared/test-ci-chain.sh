@@ -28,6 +28,10 @@ grep -q 'COPY --from=kernel .*/evdi.ko.xz ' "${kernel}" || fail "the one thing t
 ! grep -nE 'AKMODS_PRIVKEY|private_key|/run/secrets' build_files/base/03-install-kernel-akmods.sh ||
     fail "03-install-kernel-akmods.sh runs third-party code with the network on and must not see the key"
 grep -q '03-sign-evdi.sh' "${kernel}" || fail "${kernel} does not copy 03-sign-evdi.sh"
+# What the key signs is evdi's module for the image's kernel, which the unpack step (no key) checks before the signing step
+unpack="$(awk '/^unpack\)/{u=1; next} /^sign\)/{u=0} u' build_files/base/03-sign-evdi.sh)"
+grep -qF 'modinfo -F name' <<<"${unpack}" || fail "the unpack step of 03-sign-evdi.sh must check the module's name"
+grep -qF 'modinfo -F vermagic' <<<"${unpack}" || fail "the unpack step of 03-sign-evdi.sh must check the module's version magic"
 
 # A layer's signature carries its name and tag, and is verified with them
 grep -q 'sign .*-a "org.amethystora.layer=\${name}:\${tag}"' .github/actions/push-layers/action.yml ||
