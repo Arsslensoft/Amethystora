@@ -1,27 +1,29 @@
 # The image's own entries for the programs that accept connections (LISTENERS in /etc/amethystora/security.conf):
 # what the image's own services listen on, which starts when the watcher may already have looked, recorded and
 # not said. The machine's own are in /etc/amethystora/allow.d/listeners (ame security allow listeners "PROGRAM
-# PORT"). A glob each.
+# PORT"). A glob each. The program is the file the listening process runs, in the system's own mount namespace:
+# the image's entries name that file, which a process cannot take as it can the name ss shows. An entry of the
+# machine's with a name instead of a file still matches that name.
 #
 # fwupd's passim, which offers the firmware metadata fwupd downloaded to the machines nearby; it starts when
 # firmware is looked for, from Updates or GNOME Firmware (P2pPolicy in /etc/fwupd/fwupd.conf)
-passimd 27500
-# The phone link (amethystora-connect, whose name the kernel cuts to fifteen characters), for phones, from the first
-# login, which may come after the watcher's first run: the protocol's port 1716, and one port of 1739 to 1764 for a file
-# in transit. The firewall opens them at home only (ame security home-networks)
-amethystora-con 1716
-amethystora-con 173[9]
-amethystora-con 174[0-9]
-amethystora-con 175[0-9]
-amethystora-con 176[0-4]
-# Move to this computer (amethystora-move, cut to fifteen characters): the new computer's port while `ame system move receive`
-# waits, for ten minutes at most. The firewall opens it at home only
-amethystora-mov 4793
-# The remote desktop (gnome-remote-desktop-daemon, whose name the kernel cuts to fifteen characters), only while ame desktop help-me or
-# second-screen runs it, on the one port the remote-screen switch opens in the home zone (ame security remote-screen)
-gnome-remote-de 3389
+/usr/libexec/passimd 27500
+# The phone link (amethystora-connect), for phones, from the first login, which may come after the watcher's first
+# run: the protocol's port 1716, and one port of 1739 to 1764 for a file in transit. The firewall opens them at home
+# only (ame security home-networks)
+/usr/libexec/amethystora-connect 1716
+/usr/libexec/amethystora-connect 173[9]
+/usr/libexec/amethystora-connect 174[0-9]
+/usr/libexec/amethystora-connect 175[0-9]
+/usr/libexec/amethystora-connect 176[0-4]
+# Move to this computer (amethystora-move): the new computer's port while `ame system move receive` waits, for ten
+# minutes at most. The firewall opens it at home only
+/usr/libexec/amethystora-move 4793
+# The remote desktop (gnome-remote-desktop-daemon), only while ame desktop help-me or second-screen runs it, on the
+# one port the remote-screen switch opens in the home zone (ame security remote-screen)
+/usr/libexec/gnome-remote-desktop-daemon 3389
 
 # The store for another computer's backup (R7-35, ame backup store, only while it is on): rclone serving restic, one port of 8767 to 8799 for each computer paired,
 # and python3 on 8766 for the three minutes a pairing waits. The firewall opens them at home only (ame security backup-store)
-rclone 87[6-9][0-9]
-python3 8766
+/usr/bin/rclone 87[6-9][0-9]
+/usr/bin/python3* 8766

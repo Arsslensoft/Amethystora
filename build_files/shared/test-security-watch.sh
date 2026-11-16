@@ -338,6 +338,44 @@ jq -se 'length == 6
     and any(.[]; .key == "decoy" and .level == "quiet" and (.text | startswith("/usr/bin/restic")))
     and all(.[]; (.text | test("/usr/bin/ssh ")) | not)' <<<"${FOUND}" >/dev/null || fail "secrets read: ${FOUND}"
 
+# An allowlist entry is a program and a file, each matched on its own: a program whose path holds a space and
+# ends in a file the entry allows, and a name that climbs out of the folder an entry allows, are not allowed;
+# the agent reading its own token is
+STEP=135
+SPACED="$(printf '%s' "/var/home/alice/.local/share/claude/versions/a /var/home/alice/.claude/b" | od -An -tx1 | tr -d ' \n' | tr a-f A-F)"
+{
+    opened 1601 91 "${SPACED}" /var/home/alice/.ssh/id_ed25519 credentials | sed 's/exe="\([0-9A-F]*\)"/exe=\1/'
+    opened 1602 92 /var/home/alice/.local/bin/agy-x /var/home/alice/.gemini/antigravity-cli/../../.ssh/id_ed25519 credentials
+    opened 1603 93 /var/home/alice/.local/share/claude/versions/2.1.0 /var/home/alice/.claude/.credentials.json credentials
+    close 1699
+} >>"${AMETHYSTORA_WATCH_AUDIT}"
+before="$(wc -l <"${HISTORY}")"
+timeout 120 "${WATCH}" >/dev/null || fail "the run with allowlist entries and names that mimic them failed"
+FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "credentials")')"
+jq -se 'length == 2 and all(.[]; .level == "normal")
+    and any(.[]; .text == "/var/home/alice/.local/share/claude/versions/a /var/home/alice/.claude/b read /var/home/alice/.ssh/id_ed25519 (SSH keys), as 4500")
+    and any(.[]; .text == "/var/home/alice/.local/bin/agy-x read /var/home/alice/.ssh/id_ed25519 (SSH keys), as 4500")' \
+    <<<"${FOUND}" >/dev/null || fail "an allowlist entry's two halves: ${FOUND}"
+
+# A program path from another mount namespace is the namespace's own to make up: what the sensor records of it
+# (hostmnt=0) is never allowed by the program's name. Without the field (auditd's records) nothing changes.
+STEP=138
+hostmnt() { sed '/^type=SYSCALL/ s/$/ hostmnt='"$1"'/'; }
+{
+    opened 1611 95 /usr/bin/ssh /var/home/alice/.ssh/id_ed25519 credentials | hostmnt 0
+    opened 1612 96 /usr/bin/ssh /var/home/alice/.ssh/id_rsa credentials | hostmnt 1
+    opened 1613 97 /usr/bin/ssh /var/home/alice/.ssh/id_ecdsa credentials
+    opened 1614 98 /usr/bin/restic /var/home/alice/.ssh/id_backup decoy | hostmnt 0
+    close 1619
+} >>"${AMETHYSTORA_WATCH_AUDIT}"
+before="$(wc -l <"${HISTORY}")"
+timeout 120 "${WATCH}" >/dev/null || fail "the run with records from another mount namespace failed"
+FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "credentials" or .key == "decoy")')"
+jq -se 'length == 2
+    and any(.[]; .key == "credentials" and .level == "normal" and (.text | startswith("/usr/bin/ssh read /var/home/alice/.ssh/id_ed25519 ")))
+    and any(.[]; .key == "decoy" and .level == "critical" and (.text | startswith("/usr/bin/restic read the decoy key")))' \
+    <<<"${FOUND}" >/dev/null || fail "programs of another mount namespace: ${FOUND}"
+
 # Steps of one attack: a program run from the downloads and a secret read, for one account, are a chain,
 # said once; what the owner allowed builds none
 echo "CHAINS=on" >>"${AMETHYSTORA_SECURITY_CONF}"
@@ -402,7 +440,7 @@ jq -se 'length == 5
     and any(.[]; .level == "quiet" and (.text | test("unsuccessfully deleted /var/home/alice/.local/share/dbus-1/services/")))
     and any(.[]; .level == "quiet" and .allowed == "yes" and (.text | test("/var/home/alice/.ssh/known_hosts using /usr/bin/ssh")))
     and any(.[]; .level == "quiet" and (.text | test("symlinked to /var/home/alice/.config/systemd/user/graphical-session.target.wants/ using /usr/lib/systemd/systemd")))
-    and any(.[]; .level == "normal" and (.text | test("autostart/watch-start.desktop")))' <<<"${FOUND}" >/dev/null ||
+    and any(.[]; .level == "normal" and .account == "4500" and (.text | test("autostart/watch-start.desktop")))' <<<"${FOUND}" >/dev/null ||
     fail "a boot's and a login's writes: ${FOUND}"
 
 # Just after a switch's note, what root did is that switch's change and recorded; an autostart entry an account's
@@ -491,25 +529,93 @@ jq -se 'length == 1 and .[0].level == "normal" and (.[0] | has("allow") | not)' 
     fail "a program whose path spells systemd's was taken for it: ${FOUND}"
 echo "PERSISTENCE=off" >>"${AMETHYSTORA_SECURITY_CONF}"
 
-# Programs that accept connections, from a stand-in ss: the image's own passim is recorded, and one nobody
-# knows is said, with what allows it
+# A run that is cut short, after it read the audit log and before it wrote what it found: the next run says it. Its
+# listeners are asked of an ss that never answers
+echo "PERSISTENCE=on" >>"${AMETHYSTORA_SECURITY_CONF}"
+mkdir -p "${T}/ss-hang"
+printf '#!/usr/bin/bash\nexec sleep 30\n' >"${T}/ss-hang/ss"
+chmod 0755 "${T}/ss-hang/ss"
+STEP=360
+{
+    opened 1401 94 /usr/bin/cp /var/home/alice/.config/autostart/watch-cut.desktop persistence
+    close 1499
+} >>"${AMETHYSTORA_WATCH_AUDIT}"
+echo "LISTENERS=on" >>"${AMETHYSTORA_SECURITY_CONF}"
+before="$(wc -l <"${HISTORY}")"
+PATH="${T}/ss-hang:${PATH}" timeout 10 "${WATCH}" >/dev/null && fail "a run that cannot end ended"
+tail -n +"$((before + 1))" "${HISTORY}" | grep -q "watch-cut" && fail "a run that was cut short wrote what it found"
+timeout 120 "${WATCH}" >/dev/null || fail "the run after one that was cut short failed"
+tail -n +"$((before + 1))" "${HISTORY}" | grep -q "watch-cut" || fail "what a run that was cut short had read was lost"
+echo "LISTENERS=off" >>"${AMETHYSTORA_SECURITY_CONF}"
+echo "PERSISTENCE=off" >>"${AMETHYSTORA_SECURITY_CONF}"
+
+# Programs that accept connections, from a stand-in ss and a stand-in /proc: the image's own passim is recorded, and one
+# nobody knows is said, with what allows it. The image's entries name a program's file, so a process that only has the
+# name of an allowed program (another file, or the file in a mount namespace of its own) is said, and is said
+# although the real one was recorded before it
 mkdir -p "${T}/ss-bin"
 cat >"${T}/ss-bin/ss" <<'EOF'
 #!/usr/bin/bash
-echo 'LISTEN 0 4096 0.0.0.0:27500 0.0.0.0:* users:(("passimd",pid=900,fd=8))'
-echo 'LISTEN 0 4096 0.0.0.0:4444 0.0.0.0:* users:(("watch-nc",pid=901,fd=3))'
-echo 'LISTEN 0 4096 0.0.0.0:4445 0.0.0.0:* users:(("wa*tch",pid=902,fd=3))'
+cat "$(dirname "$0")/rows"
 EOF
 chmod 0755 "${T}/ss-bin/ss"
+listening() { printf 'LISTEN 0 4096 0.0.0.0:%s 0.0.0.0:* users:(("%s",pid=%s,fd=8))\n' "$1" "$2" "$3"; }
+{
+    listening 27500 passimd 900
+    listening 4444 watch-nc 901
+    listening 4445 'wa*tch' 902
+    listening 1716 amethystora-con 903
+    listening 1739 amethystora-con 904
+    listening 1740 amethystora-con 905
+} >"${T}/ss-bin/rows"
+HOSTMNT='mnt:[4026531841]'
+proc() { mkdir -p "${T}/proc/$1/ns"; ln -sfn "$2" "${T}/proc/$1/exe"; ln -sfn "${3:-${HOSTMNT}}" "${T}/proc/$1/ns/mnt"; }
+proc 1 /usr/lib/systemd/systemd
+proc 900 /usr/libexec/passimd
+proc 901 /var/tmp/watch-nc
+proc 902 /var/tmp/watch-glob
+proc 903 /tmp/x
+proc 904 /usr/libexec/amethystora-connect 'mnt:[4026539999]'
+proc 905 '/usr/libexec/amethystora-connect (deleted)'
+export AMETHYSTORA_WATCH_PROC="${T}/proc"
 echo "LISTENERS=on" >>"${AMETHYSTORA_SECURITY_CONF}"
 before="$(wc -l <"${HISTORY}")"
 PATH="${T}/ss-bin:${PATH}" timeout 120 "${WATCH}" >/dev/null || fail "the run with listeners failed"
 FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "listeners")')"
-jq -se 'length == 3
+jq -se 'length == 6
     and any(.[]; .allow == "wa\\*tch 4445")
+    and any(.[]; .level == "quiet" and .allow == "amethystora-con 1740" and .allowed == "yes")
+    and any(.[]; .level == "normal" and .allow == "amethystora-con 1716")
+    and any(.[]; .level == "normal" and .allow == "amethystora-con 1739")
     and any(.[]; .level == "quiet" and .allow == "passimd 27500" and .allowed == "yes")
     and any(.[]; .level == "normal" and .allow == "watch-nc 4444" and (.text | startswith("watch-nc accepts connections on port 4444")))' \
     <<<"${FOUND}" >/dev/null || fail "programs that accept connections: ${FOUND}"
+# The real program is on a port first, then a process with its name: the one that was recorded is not the other
+proc 906 /var/tmp/imposter
+listening 1750 amethystora-con 905 >>"${T}/ss-bin/rows"
+before="$(wc -l <"${HISTORY}")"
+PATH="${T}/ss-bin:${PATH}" timeout 120 "${WATCH}" >/dev/null || fail "the second run with listeners failed"
+sed -i '/:1750 /d' "${T}/ss-bin/rows"
+listening 1750 amethystora-con 906 >>"${T}/ss-bin/rows"
+PATH="${T}/ss-bin:${PATH}" timeout 120 "${WATCH}" >/dev/null || fail "the third run with listeners failed"
+FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "listeners")')"
+jq -se 'length == 2 and any(.[]; .level == "quiet" and .allowed == "yes") and any(.[]; .level == "normal" and .allow == "amethystora-con 1750")' \
+    <<<"${FOUND}" >/dev/null || fail "a program with the name of the one recorded: ${FOUND}"
+# A service of ame dev service is a rootless container whose port is published on the loopback address (pasta holds the
+# port): the watcher looks only beyond the loopback address, so that is no finding, in either family; the same container
+# published on every address is said as any program is
+proc 910 /usr/bin/pasta
+{
+    printf 'LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:* users:(("pasta",pid=910,fd=8))\n'
+    printf 'LISTEN 0 4096 [::1]:8025 [::]:* users:(("pasta",pid=910,fd=9))\n'
+    printf 'LISTEN 0 4096 0.0.0.0:5433 0.0.0.0:* users:(("pasta",pid=910,fd=10))\n'
+} >>"${T}/ss-bin/rows"
+before="$(wc -l <"${HISTORY}")"
+PATH="${T}/ss-bin:${PATH}" timeout 120 "${WATCH}" >/dev/null || fail "the run with a container's ports failed"
+FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "listeners")')"
+jq -se 'length == 1 and .[0].level == "normal" and .[0].allow == "pasta 5433"' <<<"${FOUND}" >/dev/null ||
+    fail "a container's port on the loopback address, and on every address: ${FOUND}"
+unset AMETHYSTORA_WATCH_PROC
 echo "LISTENERS=off" >>"${AMETHYSTORA_SECURITY_CONF}"
 
 # --- The behaviour sensor, from a stand-in of Falco's file ------------------------------------------------
@@ -666,6 +772,27 @@ timeout 120 "${WATCH}" >/dev/null || fail "the second run with a full folder tab
 tail -n +"$((before + 1))" "${HISTORY}" | grep -qE 'so many (folders|files)|table of folders' && fail "a full table was said twice"
 rm -f "${AMETHYSTORA_SENSOR_RUN}/full" "${AMETHYSTORA_SENSOR_RUN}/skipped"
 
+# The sensor's other two causes, and a heartbeat that stopped while the unit is active: each said once, and the status says it
+printf 'queue\nstalled\n' >"${AMETHYSTORA_SENSOR_RUN}/full"
+printf '1000\n' >"${AMETHYSTORA_SENSOR_RUN}/heartbeat"
+printf '1100.55 4000.00\n' >"${T}/uptime"
+export AMETHYSTORA_WATCH_UPTIME="${T}/uptime"
+before="$(wc -l <"${HISTORY}")"
+timeout 120 "${WATCH}" >/dev/null || fail "the run with a sensor that fell silent failed"
+FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "hardening")')"
+jq -se 'length == 3
+    and any(.[]; .level == "normal" and (.text | test("could not queue a folder")))
+    and any(.[]; .level == "normal" and (.text | test("taken the file-watch sensor a minute")))
+    and any(.[]; .level == "critical" and (.text | test("has not reported for more than 30 seconds")))' <<<"${FOUND}" >/dev/null || fail "the sensor's queue, stall and heartbeat: ${FOUND}"
+jq -e '.sensor.stale == true' "${R}/var/lib/amethystora/security/status.json" >/dev/null || fail "the status does not say the heartbeat is old"
+before="$(wc -l <"${HISTORY}")"
+printf '1090\n' >"${AMETHYSTORA_SENSOR_RUN}/heartbeat"
+timeout 120 "${WATCH}" >/dev/null || fail "the run with a sensor beating again failed"
+tail -n +"$((before + 1))" "${HISTORY}" | grep -q 'file-watch sensor' && fail "the sensor's silence was said twice"
+jq -e '.sensor.stale == false' "${R}/var/lib/amethystora/security/status.json" >/dev/null || fail "the status says an old heartbeat that is not"
+unset AMETHYSTORA_WATCH_UPTIME
+rm -f "${AMETHYSTORA_SENSOR_RUN}/full" "${AMETHYSTORA_SENSOR_RUN}/heartbeat"
+
 # Reaching into another program's memory, as the sensor records it, with the program reached and both mount
 # namespaces: a write into another program, a read of its memory, an open of /proc/PID/mem to read, and a try
 # the kernel refused are said; a program's own business (a neighbour in its own folder, two programs in one
@@ -753,6 +880,10 @@ LD_PRELOAD='libgamemodeauto.so.0 /usr/$LIB/libMangoHud_shim.so' /usr/bin/sleep 3
 PIDS+=($!)
 LD_AUDIT="/usr/lib64/../..${P}/audit.so" /usr/bin/sleep 308 2>/dev/null &
 PIDS+=($!)
+# A program that runs from memory under the name runc gives its copies is said, since nothing of a container
+# runtime's started it
+python3 -I -c 'import os; fd = os.memfd_create("runc_cloned:/proc/self/exe", 0); os.write(fd, open("/usr/bin/sleep", "rb").read()); os.execv("/proc/self/fd/%d" % fd, ["sleep", "309"])' &
+PIDS+=($!)
 # ...and a session whose own environment has every program it starts load code: a library from a home, a
 # Java agent, and one the owner allowed; GStreamer's own plugins, under /usr, are not said
 printf '%s\n' "HOME=/var/home/alice" "LD_PRELOAD=/var/home/alice/.cache/x.so" "GST_PLUGIN_SYSTEM_PATH=/usr/lib64/gstreamer-1.0" \
@@ -772,13 +903,15 @@ for want in "runs from a folder where downloads and temporary files land: ${P}/d
     "A library from outside the system is loaded into /usr/bin/sleep: ${P}/lib/libfake.so" \
     "A library from outside the system is loaded into /usr/bin/sleep: /usr/lib64/../..${P}/audit.so" \
     "Every program started in alice's session now loads /var/home/alice/.cache/x.so (LD_PRELOAD)" \
-    "Every program started in alice's session now loads /var/home/alice/agent.jar (JAVA_TOOL_OPTIONS)"; do
+    "Every program started in alice's session now loads /var/home/alice/agent.jar (JAVA_TOOL_OPTIONS)" \
+    "A program runs from memory alone, with no file: /memfd:runc_cloned"; do
     grep -qF -- "${want}" <<<"${FOUND}" || fail "what runs: \"${want}\" was not found in ${FOUND}"
 done
 grep -qE 'gamemode|MangoHud|gstreamer' <<<"${FOUND}" && fail "a library under /usr was said: ${FOUND}"
 jq -se 'any(.[]; (.text | test("kernel thread")) and .level == "critical" and .tactic == "Defense Evasion")
     and any(.[]; (.text | test("/allowed/sleep")) and .level == "quiet")
     and any(.[]; (.text | test("AI agent")) and .allow == "/var/tmp/claude")
+    and any(.[]; (.text | test("memory alone")) and .level == "normal")
     and any(.[]; (.text | test("inject.so")) and .level == "normal" and .tactic == "Defense Evasion" and .allow == "'"${P}"'/inject.so")
     and any(.[]; (.text | test("x.so .LD_PRELOAD.")) and .level == "normal" and .tactic == "Persistence" and .account == "alice"
         and .allow == "LD_PRELOAD /var/home/alice/.cache/x.so")
@@ -900,5 +1033,21 @@ FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "journa
 jq -se 'length == 1 and .[0].account == "alice" and .[0].level == "normal" and (.[0].text | startswith("3 Amethystora Vault question"))' \
     <<<"${FOUND}" >/dev/null || fail "the Vault's questions given up after a wrong password: ${FOUND}"
 [[ -e "${T}/ran" ]] && fail "a name read from the journal ran a command"
+
+# --- The real-time scan's list of folders it leaves out ----------------------------------------------------------
+
+# A folder of a home is listed only where its name says it is: one that is a link to another folder is not
+ONACCESS="${WATCH%/*}/amethystora-clamav-onaccess"
+OX="${T}/onaccess"
+mkdir -p "${OX}/var/home/alice/.cache" "${OX}/var/home/alice/.local/share/containers" "${OX}/var/home/alice/Documents" \
+    "${OX}/var/home/bob/.local/share" "${OX}/var/home/bob/.var/app/org.a.App"
+ln -s "${OX}/var/home/alice/Documents" "${OX}/var/home/bob/.cache"
+ln -s "${OX}/var/home/alice/Documents" "${OX}/var/home/bob/.var/app/org.a.App/cache"
+n1="$(grep -n '^{$' "${ONACCESS}" | head -n1 | cut -d: -f1)"
+n2="$(grep -nF '} >"${EXCLUDES}"' "${ONACCESS}" | head -n1 | cut -d: -f1)"
+[[ -n "${n1}" && -n "${n2}" ]] || fail "the list of folders the real-time scan leaves out was not found"
+sed -n "${n1},${n2}p" "${ONACCESS}" | sed "s#/var/home#${OX}/var/home#g" | EXCLUDES="${OX}/excludes" bash || true
+[[ "$(cat "${OX}/excludes")" == "${OX}/var/home/alice/.cache
+${OX}/var/home/alice/.local/share/containers" ]] || fail "the folders the real-time scan leaves out: $(cat "${OX}/excludes")"
 
 echo "test-security-watch: what an account plants is only ever read"

@@ -79,7 +79,7 @@ take two parts, in quotes:
 | `dns-names` | A name: `'*.example.net'` |
 | `bpf-programs` | A BPF program's name and what loaded it, or `unknown` |
 | `app-permissions` | An app's id and a way out of its sandbox: `'com.valvesoftware.Steam x11'` |
-| `listeners` | A program and its port, or `ephemeral`: `'syncthing *'` |
+| `listeners` | A program, by its name or the file it runs, and its port, or `ephemeral`: `'syncthing *'`, `'/usr/bin/syncthing 22000'` (the file is what a program cannot choose) |
 
 ### What the image enforces
 

@@ -20,7 +20,8 @@ FINDINGS=/var/log/amethystora-clamav-findings.log
 {
     for home in /var/home/*/; do
         for dir in "${home}.cache" "${home}.local/share/containers" "${home}".var/app/*/cache; do
-            [[ -d "${dir}" ]] && echo "${dir}"
+            # Only a folder that is where its name says: a link there would leave out a folder it points to
+            [[ -d "${dir}" && "$(realpath -e -- "${dir}" 2>/dev/null)" == "${dir}" ]] && echo "${dir}"
         done
     done
     # Ransomware protection's snapshots: read-only, and a copy of every home folder each
@@ -36,10 +37,16 @@ N_() { printf '%s' "$1"; }
 found() {
     local file="$1" signature="$2" mode outcome summary body shown credit name
     mode="$(/usr/libexec/amethystora-security-config ON_DETECTION)"
-    outcome=reported
-    [[ "${mode}" == report ]] || outcome="$(/usr/libexec/amethystora-quarantine act "${file}" | cut -f1)"
+    # Whatever the mode, the file is scanned again first, so that a line in the log is only ever said of a file
+    # ClamAV itself calls malware (a file name can hold a line of its own)
+    outcome="$(/usr/libexec/amethystora-quarantine act "${file}" | cut -f1)"
     # The file changed before it could be scanned again, and is clean now
     [[ "${outcome}" == clean ]] && return
+    # Reporting only, and the file cannot be scanned again: nothing confirms the line, which is said where the journal is
+    if [[ "${mode}" == report && "${outcome}" == failed ]]; then
+        echo "A line of the real-time scan's log could not be confirmed, as the file could not be scanned again" >&2
+        return
+    fi
 
     # A file name is whatever somebody called a file: what the journal and the findings log keep, which a
     # terminal shows, is made safe to show; the file acted on is the real one

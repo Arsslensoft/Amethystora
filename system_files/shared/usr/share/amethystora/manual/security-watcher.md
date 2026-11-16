@@ -38,7 +38,7 @@ a network interface reading every packet.
 ## What accepts connections
 
 Each program that listens on the network, which every device on your tailnet can reach. A new one is
-said once.
+said once. The image's own services are known by the file they run, in the system's own folders, never by the name a program gives itself.
 
 ## What your session finds first
 
