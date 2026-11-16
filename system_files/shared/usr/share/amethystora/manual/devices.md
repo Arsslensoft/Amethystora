@@ -11,7 +11,7 @@ older laser printers are included for the rest. Add a printer in **Settings → 
 ## Keyboards, mice and security keys
 
 - **Gaming mice:** the service that configures them is included; install **Piper** from Bazaar to change buttons,
-  lighting and resolution.
+  lighting and resolution. Piper works from an administrator's account.
 - **Remapping keys:** `ame security input-remapper` turns on Input Remapper
   ([Security](devices-security.md#key-remapping) explains why it starts off).
 - **FIDO2 security keys** can replace your password: [Security](logins.md#security-keys).

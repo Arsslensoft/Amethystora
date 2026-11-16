@@ -429,17 +429,21 @@ if command -v pamtester >/dev/null; then
         fi
     done
     if pamtester gdm-password amethystora-guest authenticate </dev/null >/dev/null 2>&1; then ok "G25 the login screen lets the guest in"; else not_ok "G25 the login screen refused the guest"; fi
+    # ...and in the account stage, for a service that starts a process with no auth step
+    if pamtester sshd amethystora-guest acct_mgmt </dev/null >/dev/null 2>&1; then not_ok "G25 sshd's account stage let the guest in"; else ok "G25 sshd's account stage refuses the guest"; fi
 else
     for service in login sshd sudo; do
         if [[ "$(grep -c 'user != amethystora-guest' /etc/authselect/system-auth /etc/authselect/password-auth | paste -sd ' ')" == \
-            "/etc/authselect/system-auth:1 /etc/authselect/password-auth:1" ]]; then ok "G25 ${service}: the guest's refusal is in its PAM stack"; else not_ok "G25 ${service}: no refusal in PAM"; fi
+            "/etc/authselect/system-auth:2 /etc/authselect/password-auth:2" ]]; then ok "G25 ${service}: the guest's refusal is in its PAM stack"; else not_ok "G25 ${service}: no refusal in PAM"; fi
     done
 fi
 grep -qx "DenyUsers amethystora-guest" /etc/ssh/sshd_config.d/60-amethystora-guest.conf && ok "G25 sshd denies the guest by name" || not_ok "G25 sshd does not deny the guest"
 # A session of the guest's own (systemd's user manager, as a login starts it): the home is a tmpfs, and a file written
 # there is gone after
 mkdir -p /var/lib/systemd/linger && : >/var/lib/systemd/linger/amethystora-guest
+: >/var/tmp/vmlab69-guest-before && chown "${GUEST_UID}" /var/tmp/vmlab69-guest-before
 systemctl start "user@${GUEST_UID}.service"
+same "G26 what an earlier session left is gone as the next one starts" "$(test -e /var/tmp/vmlab69-guest-before && echo left || echo gone)" gone
 same "G26 a linger the guest had is taken away as its manager starts" \
     "$(test -e /var/lib/systemd/linger/amethystora-guest && echo lingers || echo no)" no
 same "G26 the guest's home is a tmpfs while its user manager runs" "$(findmnt -n -o FSTYPE /var/home/amethystora-guest)" tmpfs

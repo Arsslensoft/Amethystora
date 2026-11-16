@@ -51,6 +51,11 @@ if [[ -d "${XDG_STATE_HOME:-${HOME:-/nonexistent}/.local/state}/amethystora/pkg/
     timeout 60 amethystora-pkg containers list --json >"${EARLY}/containers" 2>/dev/null &
     EARLY_CONTAINERS=$!
 fi
+# ...and the firewall's saved and running settings, which each start a Python program
+timeout 30 firewall-cmd --permanent --list-all-zones >"${EARLY}/firewall-saved" 2>/dev/null &
+EARLY_FIREWALL_SAVED=$!
+timeout 30 firewall-cmd --list-all-zones >"${EARLY}/firewall-running" 2>/dev/null &
+EARLY_FIREWALL_RUNNING=$!
 
 declare -A HEADINGS=(
     [updates]="$(gettext "Updates and boot")"
@@ -680,11 +685,38 @@ if hardening_off bluetooth-privacy; then
     turned_off watching bluetooth-privacy "$(gettext "Bluetooth privacy")" "$(gettext "Bluetooth privacy is turned off")" \
         "$(gettext "Bluetooth uses this machine's fixed address, and stays visible and pairable for as long as it is asked to.")"
 fi
+# What the running firewall lets in beyond what its saved settings do: a service, port, protocol or rule added with
+# `firewall-cmd` without --permanent, which neither the zone files nor the drift check of /etc would show. Read from the
+# two listings started at the top; at most five found, none when firewalld is not answering.
+wait "${EARLY_FIREWALL_SAVED}" "${EARLY_FIREWALL_RUNNING}" 2>/dev/null
+FIREWALL_EXTRA="$(awk '
+    FNR == 1 { file++ }
+    /^[^ \t]/ { zone = $1; key = ""; next }
+    /^  [^ \t]/ {
+        key = $0; sub(/^  /, "", key); sub(/:.*$/, "", key)
+        rest = $0; sub(/^[^:]*:[ ]*/, "", rest)
+        n = split(rest, item, " ")
+        for (i = 1; i <= n; i++) note(item[i])
+        next
+    }
+    /^[ \t]+[^ \t]/ { line = $0; sub(/^[ \t]+/, "", line); note(line) }
+    function note(text) {
+        if (key !~ /^(services|ports|protocols|source-ports|forward-ports|rich rules)$/) return
+        if (file == 1) saved[zone SUBSEP key SUBSEP text] = 1
+        else if (!((zone SUBSEP key SUBSEP text) in saved) && ++found <= 5) extra[found] = zone ": " key " " text
+    }
+    END { if (file == 2) for (i = 1; i <= found && i <= 5; i++) print extra[i] }
+' "${EARLY}/firewall-saved" "${EARLY}/firewall-running")"
 ZONE="$(firewall-cmd --get-default-zone 2>/dev/null || echo unknown)"
 if hardening_off firewall; then
     COMMAND="ame security firewall on"
     turned_off watching firewall "$(gettext "Firewall")" "$(eval_gettext "The Amethystora zone is turned off: the firewall's default zone is \${ZONE}")" \
         "$(gettext "Fedora Workstation's zone lets in every port from 1025 up, from every network.")"
+elif [[ "${ZONE}" == amethystora* && -n "${FIREWALL_EXTRA}" ]]; then
+    COMMAND="sudo firewall-cmd --reload"
+    EXTRA_LIST="${FIREWALL_EXTRA//$'\n'/; }"
+    report watching firewall check "$(gettext "Firewall")" "$(eval_gettext "The running firewall lets in more than its saved settings do: \${EXTRA_LIST}")" \
+        "$(gettext "Put it back to its saved settings with:")"
 elif [[ "${ZONE}" == "amethystora" ]]; then
     report watching firewall ok "$(gettext "Firewall")" \
         "$(gettext "Firewall is on the amethystora zone: nothing incoming that a desktop does not need")"
@@ -709,6 +741,15 @@ if ! hardening_off firewall; then
             "$(gettext "No network is named home, so phone pairing is closed on every one")" \
             "$(gettext "Name yours with:")"
     fi
+fi
+# systemd 262 has a polkit rule that says yes to every action for the group `empower`, empty as the image ships:
+# whoever is in it has root's rights without a password
+IFS=: read -r _ _ _ EMPOWER < <(getent group empower)
+if [[ -n "${EMPOWER}" ]]; then
+    COMMAND="sudo gpasswd -d ${EMPOWER%%,*} empower"
+    report watching empower check "$(gettext "Full rights without a password")" \
+        "$(eval_gettext "These accounts are in the empower group, which polkit lets do anything without asking: \${EMPOWER}")" \
+        "$(gettext "Take an account out of it with:")"
 fi
 
 # Network protection is a setting, so when it is on, Suricata is expected to be running, to have the

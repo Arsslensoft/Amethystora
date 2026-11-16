@@ -57,7 +57,8 @@ user's), as for the rest.
 
 ### Some programs lost their setuid bit
 
-Symptom: `chfn`, `chage`, `gpasswd`, `newgrp`, `ksu` or `mount.davfs` fail for a normal account. Confirm: `ls -l
+Symptom: `chfn`, `chage`, `gpasswd`, `newgrp`, `ksu`, `mount.davfs`, `pam_timestamp_check` or (on a
+machine without the `lxc` package) `lxc-user-nic` fail for a normal account. Confirm: `ls -l
 /usr/bin/chfn`. Change: run them with `sudo`; this is by design.
 
 ### The clipboard history is sealed under the login keyring
