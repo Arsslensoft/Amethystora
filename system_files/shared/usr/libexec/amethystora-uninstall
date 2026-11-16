@@ -196,14 +196,19 @@ def undo(app_id, option):
         print(DATA_STAYS)
         return 0
     # Only a folder of the account's own that the uninstall can have trashed, never a link or a file put there
+    gone = False
     for entry in entries:
         try:
             made = os.lstat(entry[3])
         except OSError:
+            gone = True
             continue
         if stat.S_ISDIR(made.st_mode) and made.st_uid == os.getuid():
             break
     else:
+        # An entry whose file has gone is a failure, as it always was; one that is no folder of the account's stays
+        if gone:
+            return 1
         print(DATA_STAYS)
         return 0
     _app, _when, info, held = entry
