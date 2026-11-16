@@ -113,10 +113,29 @@ changed='Changed by Amethystora when its live ISO is built (iso/live/build.sh)'
 { grep -rlI --null 'Fedora' /usr/share/anaconda/gnome /usr/share/applications/liveinst.desktop 2>/dev/null || true; } |
     while IFS= read -r -d '' file; do
         sed -i 's/\bFedora\b/Amethystora/g' "${file}"
-        if [[ ${file} == *.desktop || "$(head -c2 "${file}")" == '#!' ]]; then
+        # The welcome window is a GJS script since Fedora 45, where a line that starts with # is a syntax error:
+        # it never opened, and the live session started without the installer's offer
+        if [[ "$(head -n1 "${file}")" == '#!'*gjs* ]]; then
+            echo "// ${changed}" >>"${file}"
+        elif [[ ${file} == *.desktop || "$(head -c2 "${file}")" == '#!' ]]; then
             echo "# ${changed}" >>"${file}"
         fi
     done
+# ...which the session opens at its start (livesys copies it into the live account's autostart), and which still reads
+# as the language it is written in
+welcome=/usr/share/anaconda/gnome/fedora-welcome
+[[ -x ${welcome} && -e /usr/share/anaconda/gnome/org.fedoraproject.welcome-screen.desktop ]] ||
+    { echo "the live session has no welcome window that offers the installer" >&2; exit 1; }
+if [[ "$(head -n1 "${welcome}")" == '#!'*gjs* ]] && tail -n +2 "${welcome}" | grep -nE '^#'; then
+    echo "${welcome}: a # comment in a GJS script, which would keep it from opening" >&2
+    exit 1
+fi
+# The installer's offer is what a live session opens on: not the Manual's welcome page, Pick a look or the greeting
+# of a new account, which would open over it and are for the installed system's first login (the live account's
+# home is made from /etc/skel at every start)
+rm -f /usr/share/amethystora/user-setup.hooks.d/17-welcome.sh /usr/share/amethystora/user-setup.hooks.d/25-first-look.sh
+install -d /etc/skel/.local/state/amethystora
+echo '{}' >/etc/skel/.local/state/amethystora/first-look.json
 
 # liveinst takes a release package whose release starts with 0. for a pre-release, and Fedora's
 # generic-release is one (44-0.2): the web installer would show a "Pre-release" badge on a stable image
