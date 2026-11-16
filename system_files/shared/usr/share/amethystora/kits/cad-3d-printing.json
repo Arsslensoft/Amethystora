@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "flatpaks": {
+    "system": [
+      {
+        "app": "com.orcaslicer.OrcaSlicer",
+        "origin": "flathub"
+      },
+      {
+        "app": "com.prusa3d.PrusaSlicer",
+        "origin": "flathub"
+      },
+      {
+        "app": "com.ultimaker.cura",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.blender.Blender",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.freecad.FreeCAD",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.librecad.librecad",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.openscad.OpenSCAD",
+        "origin": "flathub"
+      }
+    ]
+  }
+}

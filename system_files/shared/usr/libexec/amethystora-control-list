@@ -2955,6 +2955,41 @@ USAGE="ame apps webapps install"
 item apps webapps webapps "${ gettext "Web apps"; }" \
     "${ gettext "Sites in a window of their own, with a launcher in the app grid."; }" "" web-apps
 
+# Kits: the apps for a line of work, a row each. Add is `ame apps kit add` in a terminal, which shows what it installs and asks
+# first; Show says why each app is in it. The kits' words are theirs (amethystora-kit lists them in English), translated here from
+# the same catalogs (check-translations.js reads them from the kits' about files).
+if [[ "${ ended kits; }" == 0 ]] && jq -e 'type == "array" and length > 0' <<<"${ said kits; }" >/dev/null 2>&1; then
+    declare -A KIT_WORDS=()
+    while IFS= read -r word; do
+        KIT_WORDS["${word}"]="${ gettext "${word}"; }"
+    done < <(jq -r '.[] | .name, .description' <<<"${ said kits; }")
+    kit_pairs=""
+    for word in "${!KIT_WORDS[@]}"; do
+        json "${word}"
+        kit_key="${REPLY}"
+        json "${KIT_WORDS["${word}"]}"
+        kit_pairs+="${kit_pairs:+, }${kit_key}: ${REPLY}"
+    done
+    EXTRA="$(jq -c --argjson t "{${kit_pairs}}" --arg inside "${ gettext "In it:"; }" --arg here "${ gettext "Installed here:"; }" \
+        --arg add "${ gettext "Add…"; }" --arg show "${ gettext "Show…"; }" '
+        {rows: [.[] | {
+            id: .id,
+            title: ($t[.name] // .name),
+            text: (($t[.description] // .description) + " " + $inside + " " + ([.apps[].name] | join(", ")) + "."
+                + (if any(.apps[]; .installed) then " " + $here + " " + ([.apps[] | select(.installed) | .name] | join(", ")) + "." else "" end)),
+            state: "plain",
+            actions: [{id: "show", title: $show, terminal: true, command: ["ame", "apps", "kit", "show", .id]},
+                      {id: "add", title: $add, terminal: true, command: ["ame", "apps", "kit", "add", .id]}]}]}' <<<"${ said kits; }" 2>/dev/null)" || EXTRA=""
+fi
+if [[ -n "${EXTRA}" ]]; then
+    GROUP="${ gettext "Kits"; }"
+    USAGE="ame apps kit list|show KIT|add KIT|remove KIT"
+    item apps kits rows "${ gettext "Apps for a line of work"; }" \
+        "${ gettext "Each kit is the apps people in one line of work use, from Flathub. Adding one shows the apps first, asks, and changes nothing else."; }" \
+        "" kits
+    GROUP=""
+fi
+
 # The apps hidden, renamed or given another icon in the app grid (its menu, or `ame desktop app`), each with the way
 # back; shown only when there is one. Nothing but the app grid's own settings: no launcher of the account's own.
 if [[ "${ ended app-looks; }" == 0 ]] && EXTRA="$(jq -ec --arg hidden "${ gettext "Hidden from the app grid and the search."; }" \

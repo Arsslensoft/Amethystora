@@ -2164,6 +2164,19 @@ is an address. The script refuses a file with a key or a name it does not know, 
 `--remove`, which always asks in a terminal. `build_files/shared/test-setup.sh`, run by `20-tests.sh`
 against stand-ins for flatpak, brew and GNOME, checks all of this. The manual page is `setup.md`.
 
+### Kits
+
+`ame apps kit list|show KIT|add KIT|remove KIT` (`/usr/libexec/amethystora-kit`, `apps.just`; Control's Apps page, group Kits; the manual's `kits.md`) is the apps for a line of work, picked once and installed in one
+go: electronics, CAD and 3D printing, music production, streaming, game development, data science, a security lab. A kit is two files in `/usr/share/amethystora/kits`: `KIT.json`, a setup file of `version` and
+`flatpaks.system` (Flathub apps) and nothing else, which `amethystora-setup`'s own check reads as it is, and `about/KIT.json`, its name, description and a name and a reason for each app, which `check-translations.js` puts in
+the `.pot` (not in `DATA`: Control's list translates in its script). The helper drops a kit whose setup file holds more (Homebrew, a setting, a container), because the setup check would let it through. `add` shows the kit's
+apps with their reasons, then is `amethystora-setup apply` on the file (the same list and question, no `--yes`, never `--remove`; `AMETHYSTORA_SETUP_KIT` only silences its line about the rest of the machine);
+`remove` is not `apply --remove`, which would take away everything the kit does not name: it asks about each of the kit's installed apps, default no, and uninstalls through `amethystora-uninstall` (data to the trash).
+Which apps each kit names is the maintainer's, 5 to 10 each, free software, every ID on Flathub and not end of life: `check-windows-programs.yml`'s `kits` job asks Flathub weekly and on a change to a kit, and
+`test-kits.sh` (from `20-tests.sh`) holds the shape, the two files to the same apps, the words free of characters gettext's fast path cannot take, and a bad kit refused before anything runs. The agent may `list` and `show`;
+`add` and `remove` ask, so the user runs them, as `ame setup apply`. Nothing is installed into the image, no package layered, no container template named (the setup file cannot name a built-in one), no Homebrew formula.
+Suite 40-kits.sh. Not done: Control's Remove, kits naming a container template for tools only a distribution packages (the security lab's), a local remote in the suite.
+
 ### An image of your own
 
 `arsslensoft/amethystora-image-template`, a repository of its own, builds an image `FROM` the stable image,

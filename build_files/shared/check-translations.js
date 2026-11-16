@@ -438,6 +438,18 @@ function shellMessages() {
             }
         });
     }
+    // The kits' words (ame apps kit, Control's Kits) are data, read from the files beside each kit: its name, what it is for and
+    // why each app is in it. amethystora-kit and Control's list look them up as they are, so the English is the message
+    const about = path.join(root, 'usr/share/amethystora/kits/about');
+    for (const file of fs.existsSync(about) ? fs.readdirSync(about).filter((name) => name.endsWith('.json')).sort() : []) {
+        const script = `usr/share/amethystora/kits/about/${file}`;
+        const kit = JSON.parse(fs.readFileSync(path.join(about, file), 'utf8'));
+        for (const id of [kit.name, kit.description, ...(kit.apps || []).map((app) => app.why)].filter((word) => word)) {
+            const entry = found.get(`${id}\u0000`) || { id, plural: null, files: new Set(), comment: '' };
+            entry.files.add(script);
+            found.set(`${id}\u0000`, entry);
+        }
+    }
     // The phone link's program (apps/connect) and Move to this computer (apps/move) are not shell programs but speak through the
     // same catalogs: tr("...") and trf("...", &[("name", value)]) of src/text.rs, whose {name} placeholders msgfmt checks as
     // python-brace-format

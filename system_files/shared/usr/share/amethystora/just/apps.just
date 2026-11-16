@@ -562,3 +562,9 @@ aur ACTION="":
     mkdir -p "$(dirname "${FLAG}")"
     touch "${FLAG}"
     echo "$(gettext "On. Make a container for it with: amepkg containers new --template arch-aur")"
+
+# The apps for a line of work in one go, from Flathub: list the kits, show one, add one (what is missing, shown and asked first) or remove one (app by app)
+[no-exit-message]
+[positional-arguments]
+kit *ARGS:
+    @/usr/libexec/amethystora-kit "$@"

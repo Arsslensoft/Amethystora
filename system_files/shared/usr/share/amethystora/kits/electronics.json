@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "flatpaks": {
+    "system": [
+      {
+        "app": "cc.arduino.IDE2",
+        "origin": "flathub"
+      },
+      {
+        "app": "io.github.gtkwave.GTKWave",
+        "origin": "flathub"
+      },
+      {
+        "app": "io.github.ra3xdh.qucs_s",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.kicad.KiCad",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.librepcb.LibrePCB",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.openscad.OpenSCAD",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.qelectrotech.QElectroTech",
+        "origin": "flathub"
+      }
+    ]
+  }
+}

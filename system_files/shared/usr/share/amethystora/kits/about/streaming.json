@@ -1,0 +1,41 @@
+{
+  "name": "Streaming",
+  "description": "Stream or record video, edit it and make the pictures around it.",
+  "apps": [
+    {
+      "app": "com.obsproject.Studio",
+      "name": "OBS Studio",
+      "why": "Mixes cameras, screens and sound, and streams or records them."
+    },
+    {
+      "app": "org.kde.kdenlive",
+      "name": "Kdenlive",
+      "why": "Edits a recording into a video."
+    },
+    {
+      "app": "com.github.wwmm.easyeffects",
+      "name": "Easy Effects",
+      "why": "Cleans up a microphone with noise reduction and compression."
+    },
+    {
+      "app": "org.audacityteam.Audacity",
+      "name": "Audacity",
+      "why": "Edits the sound of a recording."
+    },
+    {
+      "app": "org.inkscape.Inkscape",
+      "name": "Inkscape",
+      "why": "Draws overlays, logos and thumbnails that scale."
+    },
+    {
+      "app": "org.kde.krita",
+      "name": "Krita",
+      "why": "Paints artwork and thumbnails."
+    },
+    {
+      "app": "org.videolan.VLC",
+      "name": "VLC",
+      "why": "Plays any file or stream, to check what viewers get."
+    }
+  ]
+}

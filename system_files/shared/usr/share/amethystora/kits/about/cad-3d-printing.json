@@ -1,0 +1,41 @@
+{
+  "name": "CAD and 3D printing",
+  "description": "Design a part, slice it and print it.",
+  "apps": [
+    {
+      "app": "org.freecad.FreeCAD",
+      "name": "FreeCAD",
+      "why": "Parametric 3D design, for parts that have to fit."
+    },
+    {
+      "app": "org.openscad.OpenSCAD",
+      "name": "OpenSCAD",
+      "why": "Designs a part from code, so a change is one number."
+    },
+    {
+      "app": "org.librecad.librecad",
+      "name": "LibreCAD",
+      "why": "Flat 2D drawings and plans."
+    },
+    {
+      "app": "org.blender.Blender",
+      "name": "Blender",
+      "why": "Models and repairs meshes, and renders them."
+    },
+    {
+      "app": "com.prusa3d.PrusaSlicer",
+      "name": "PrusaSlicer",
+      "why": "Turns a model into instructions for the printer."
+    },
+    {
+      "app": "com.orcaslicer.OrcaSlicer",
+      "name": "OrcaSlicer",
+      "why": "A slicer with calibration tools for many printers."
+    },
+    {
+      "app": "com.ultimaker.cura",
+      "name": "UltiMaker Cura",
+      "why": "Another slicer, with settings for many printers."
+    }
+  ]
+}

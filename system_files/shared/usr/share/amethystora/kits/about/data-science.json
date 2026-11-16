@@ -1,0 +1,41 @@
+{
+  "name": "Data science",
+  "description": "Look at data, test an idea and draw the result.",
+  "apps": [
+    {
+      "app": "org.jaspstats.JASP",
+      "name": "JASP",
+      "why": "Statistics, with the results as tables and plots."
+    },
+    {
+      "app": "org.octave.Octave",
+      "name": "GNU Octave",
+      "why": "Numerical computing in a language made for matrices."
+    },
+    {
+      "app": "org.kde.labplot",
+      "name": "LabPlot",
+      "why": "Plots and analyses data as you change it."
+    },
+    {
+      "app": "org.kde.cantor",
+      "name": "Cantor",
+      "why": "A notebook for Python, R, Julia and other languages."
+    },
+    {
+      "app": "org.sqlitebrowser.sqlitebrowser",
+      "name": "DB Browser for SQLite",
+      "why": "Opens and edits SQLite databases."
+    },
+    {
+      "app": "io.dbeaver.DBeaverCommunity",
+      "name": "DBeaver Community",
+      "why": "Queries databases of most kinds."
+    },
+    {
+      "app": "org.qgis.qgis",
+      "name": "QGIS",
+      "why": "Maps and analyses geographic data."
+    }
+  ]
+}

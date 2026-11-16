@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "flatpaks": {
+    "system": [
+      {
+        "app": "com.github.libresprite.LibreSprite",
+        "origin": "flathub"
+      },
+      {
+        "app": "com.orama_interactive.Pixelorama",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.audacityteam.Audacity",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.blender.Blender",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.godotengine.Godot",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.inkscape.Inkscape",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.kde.krita",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.mapeditor.Tiled",
+        "origin": "flathub"
+      }
+    ]
+  }
+}

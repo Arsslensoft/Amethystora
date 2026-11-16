@@ -6,12 +6,17 @@ on:
   pull_request:
     paths:
       - system_files/shared/usr/share/amethystora/windows-programs.json
+      - system_files/shared/usr/share/amethystora/kits/*.json
       - .github/workflows/check-windows-programs.yml
 
 # What opening a Windows program offers instead (amethystora-windows-program) names apps on Flathub by their IDs, in
 # system_files/shared/usr/share/amethystora/windows-programs.json. An app can leave Flathub or change its ID, and the
 # offer would then fail as it installed: this asks Flathub's API for each ID, weekly and whenever the map changes, and
 # fails on one Flathub no longer has. The image build only checks the map's shape (20-tests.sh).
+#
+# The kits (ame apps kit, system_files/shared/usr/share/amethystora/kits) name Flathub apps the same way, and the second
+# job asks Flathub for each, weekly and whenever a kit changes: an ID Flathub does not have, or an app it has marked end of
+# life, fails it, so that a kit never offers what `ame apps kit add` cannot install.
 
 permissions: {}
 

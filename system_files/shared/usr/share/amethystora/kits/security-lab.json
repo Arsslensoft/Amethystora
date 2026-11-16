@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "flatpaks": {
+    "system": [
+      {
+        "app": "net.werwolv.ImHex",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.ghidra_sre.Ghidra",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.gnome.Boxes",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.wireshark.Wireshark",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.zaproxy.ZAP",
+        "origin": "flathub"
+      },
+      {
+        "app": "re.rizin.cutter",
+        "origin": "flathub"
+      }
+    ]
+  }
+}

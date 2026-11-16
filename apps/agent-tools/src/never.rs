@@ -718,6 +718,11 @@ mod tests {
             "ame desktop greeting on",
             "ame update",
             "ame update boot-guard",
+            // Kits install apps from Flathub: the agent reads them, and adding or removing one is a hand-off, as `ame setup apply` is
+            "ame apps kit list",
+            "ame apps kit show electronics",
+            "ame apps kit add electronics",
+            "ame apps kit remove electronics",
             "ame",
             "just build amethystora latest main",
             "just --list",

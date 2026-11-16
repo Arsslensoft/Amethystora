@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "flatpaks": {
+    "system": [
+      {
+        "app": "io.lmms.LMMS",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.ardour.Ardour",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.audacityteam.Audacity",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.hydrogenmusic.Hydrogen",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.musescore.MuseScore",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.rncbc.qpwgraph",
+        "origin": "flathub"
+      },
+      {
+        "app": "studio.kx.carla",
+        "origin": "flathub"
+      }
+    ]
+  }
+}

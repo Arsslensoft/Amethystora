@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "flatpaks": {
+    "system": [
+      {
+        "app": "io.dbeaver.DBeaverCommunity",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.jaspstats.JASP",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.kde.cantor",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.kde.labplot",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.octave.Octave",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.qgis.qgis",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.sqlitebrowser.sqlitebrowser",
+        "origin": "flathub"
+      }
+    ]
+  }
+}

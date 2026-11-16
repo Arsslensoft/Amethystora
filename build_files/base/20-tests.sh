@@ -2047,6 +2047,16 @@ grep -vE "^[[:space:]]*#" /usr/libexec/amethystora-restore-setup | grep -qE "res
 test -x /usr/libexec/amethystora-setup
 ame --show setup::apply >/dev/null
 bash /ctx/build_files/shared/test-setup.sh
+# Kits, the apps for a line of work (ame apps kit): each a setup file with its apps part only, from Flathub, that
+# amethystora-setup's own check reads, with a name and a reason for every app, added by `ame setup apply` and never
+# with --remove (a kit's own remove asks about each app and goes through the uninstall helper, whose data goes to the trash)
+test -x /usr/libexec/amethystora-kit
+ame --show apps::kit >/dev/null
+bash /ctx/build_files/shared/test-kits.sh
+[[ -z "$(grep -vE '^[[:space:]]*#' /usr/libexec/amethystora-kit | grep -E -- '--remove|flatpak (install|uninstall)|rpm-ostree|brew ')" ]]
+for kit in /usr/share/amethystora/kits/about/*.json; do
+    grep -qF "| $(jq -r .name "${kit}") |" /usr/share/amethystora/manual/kits.md
+done
 # The image switch it makes goes through the rebase helper, which takes signed images only and offers the
 # image without NVIDIA's driver too
 grep -q "^rebase IMAGE=\"\" STREAM=\"\":" /usr/share/amethystora/just/system.just
@@ -2492,6 +2502,11 @@ jq -e '.items[] | select(.id == "text-shortcut-list") | .kind == "shortcuts" and
 jq -e 'any(.items[]; .id == "raid-create")' <<<"${CONTROL_LIST}" >/dev/null
 [[ -z "$(jq -c '.items[] | select(.id | startswith("raid-")) | ., (.choices // [])[] | select(.command != null)
     | select(.command[0:3] != ["ame", "system", "raid"] or .terminal != true)' <<<"${CONTROL_LIST}")" ]]
+# The Kits group of the Apps page: a row for each kit, whose Show and Add are `ame apps kit` in a terminal and nothing else
+jq -e '[.items[] | select(.id == "kits" and .kind == "rows" and .page == "apps")] | length == 1' <<<"${CONTROL_LIST}" >/dev/null
+[[ "$(jq -r '.items[] | select(.id == "kits") | .rows | map(.id) | join(" ")' <<<"${CONTROL_LIST}")" == "$(/usr/libexec/amethystora-kit list --json | jq -r 'map(.id) | join(" ")')" ]]
+[[ -z "$(jq -c '.items[] | select(.id == "kits") | .rows[].actions[]
+    | select(.terminal != true or (.command[0:3] != ["ame", "apps", "kit"]) or (.id | IN("show", "add") | not))' <<<"${CONTROL_LIST}")" ]]
 mapfile -t CONTROL_MANUAL < <(jq -r '.items[].manual // empty' <<<"${CONTROL_LIST}" | sort -u)
 "${NODE[@]}" /ctx/build_files/shared/check-manual.js /usr/share/amethystora/manual --links "${CONTROL_MANUAL[@]}"
 # The window runs nothing of its own: no shell, no password prompt, nothing of Security's (the commands it
