@@ -47,6 +47,13 @@ installing these by hand, and leave them to the user to run: each asks questions
   the same app from Flathub, its web version or an alternative (the map is
   `/usr/share/amethystora/windows-programs.json`) before running it with Bottles, which it grants X11 to for
   the account. It asks, so the user runs it; suggest the Flathub app first.
+- The apps for a line of work (electronics, CAD and 3D printing, music, streaming, game development, data science, a
+  security lab): kits, `ame apps kit list` and `ame apps kit show KIT` (read-only, no password; run them) say what each holds and
+  why. `ame apps kit add KIT` installs the missing ones from Flathub and `remove KIT` asks about each; both ask, so the user runs
+  them, as `ame setup apply`. Suggest a kit before listing apps one by one.
+- Whether a game will run: `ame apps will-it-run NAME` (read-only, no network, no password) says what a community list of
+  games and their anti-cheat says of it on Linux, with the day its entry changed. Run it before suggesting a download, and
+  say it is the list's word: it never says a game will run, and a name that only resembles an entry is not an answer.
 - Only containers it made are listed (labels `amethystora.pkg.*`, real names `pkg-<name>`); leave the
   user's other distrobox containers alone. `containers rm` and `reset` delete what is installed:
   ask first.

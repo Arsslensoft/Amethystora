@@ -1,0 +1,183 @@
+#!/usr/bin/bash
+# What a community list says of a game's anti-cheat on Linux, before a long download or before a Windows game is opened.
+# `ame apps will-it-run`, the search's `game:` and the Windows programs handler (amethystora-windows-program, a map entry
+# with a `game`) answer from here.
+#
+#   amethystora-will-it-run [--json] NAME...   by the list's id or the game's name, exactly
+#   amethystora-will-it-run [--json] --stdin   the name from standard input (the search: what is typed never goes on a command line)
+#   amethystora-will-it-run [--json] --id ID   by the list's id alone, silent and failing when the list has none (the handler)
+#
+# The list is /usr/share/amethystora/anticheat-list.json, a trimmed copy of a community list at one commit (the licence and
+# the commit are in /usr/share/licenses/areweanticheatyet). It knows each game's anti-cheat and the state it was last checked
+# in, never the game: so the answer says what the list says, with the day its entry changed, and is never "it will work".
+# An exact match answers. A name that only resembles an entry is shown as the list's closest entry and is never an answer.
+# Nothing here reads the network. The list is somebody else's text: every string of it goes through
+# amethystora-security-text before it is shown.
+#
+# Exit status: 0 for every answer (the list not saying is one), 1 when the list or a game for --id is missing, 64 for a bad call.
+
+set -uo pipefail
+
+export TEXTDOMAIN=amethystora
+# shellcheck source=/dev/null
+source gettext.sh
+
+# These stand in for the list and the cleaner when testing
+LIST="${AMETHYSTORA_ANTICHEAT_LIST:-/usr/share/amethystora/anticheat-list.json}"
+SECURITY_TEXT="${AMETHYSTORA_SECURITY_TEXT:-/usr/libexec/amethystora-security-text}"
+MAX_QUERY=100
+
+json=false mode=name from_stdin=false words=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json) json=true ;;
+        --stdin) from_stdin=true ;;
+        --id)
+            mode=id
+            [[ $# -ge 2 ]] || exit 64
+            words=("$2")
+            shift
+            ;;
+        --) shift; words+=("$@"); break ;;
+        -*) echo "usage: amethystora-will-it-run [--json] NAME... | --stdin | --id ID" >&2; exit 64 ;;
+        *) words+=("$1") ;;
+    esac
+    shift
+done
+if [[ "${from_stdin}" == true ]]; then
+    # A name is a line; a longer input is cut where it is read
+    IFS= read -r -n $((MAX_QUERY + 1)) -d '' query || true
+else
+    query="${words[*]}"
+fi
+# Control characters in what was asked are no part of any name
+query="${query//[[:cntrl:]]/ }"
+query="${query#"${query%%[![:space:]]*}"}"
+query="${query%"${query##*[![:space:]]}"}"
+if [[ -z "${query}" || ${#query} -gt ${MAX_QUERY} ]]; then
+    echo "usage: amethystora-will-it-run [--json] NAME... | --stdin | --id ID" >&2
+    exit 64
+fi
+if ! jq -e '(.entries | type == "array") and (.updated | type == "string")' "${LIST}" >/dev/null 2>&1; then
+    gettext "The list of games is not here, or cannot be read." >&2
+    echo >&2
+    exit 1
+fi
+
+# The match: by id, then by name exactly (case and punctuation set aside); failing both, the list's closest name, which
+# never answers. A name is "close" when it holds what was asked or is held by it, at three characters or more.
+result="$(printf '%s' "${query}" | jq -c --slurpfile list "${LIST}" --rawfile q /dev/stdin --arg mode "${mode}" -n '
+    def norm: ascii_downcase | gsub("[^a-z0-9]"; "");
+    def trim: sub("^\\s+"; "") | sub("\\s+$"; "");
+    ($q | trim) as $raw
+    | ($raw | ascii_downcase) as $low
+    | ($raw | norm) as $n
+    | $list[0].entries as $e
+    | (if $mode == "id" then [$e[] | select(.[0] == $raw)] | first
+       else
+           ([$e[] | select(.[0] == $raw or .[0] == $low)] | first) //
+           ([$e[] | select((.[1] | ascii_downcase) == $low or ($n != "" and (.[1] | norm) == $n))] | first)
+       end) as $hit
+    | if $hit != null then
+        {match: "exact", id: $hit[0], name: $hit[1], state: $hit[2], anticheats: $hit[3], date: $hit[4]}
+      else
+        (if $mode == "id" or ($n | length) < 3 then null
+         else
+             [$e[] | (.[1] | norm) as $m
+              | select(($m | length) >= 3 and (($m | contains($n)) or (($m | length) >= 4 and ($n | contains($m)))))
+              | {id: .[0], name: .[1], gap: (((.[1] | norm | length) - ($n | length)) | fabs)}]
+             | sort_by(.gap) | first | if . == null then null else del(.gap) end
+         end) as $close
+        | {match: (if $close == null then "none" else "closest" end), closest: $close}
+      end
+    + {updated: $list[0].updated}' 2>/dev/null)" || result=""
+if [[ -z "${result}" ]]; then
+    gettext "The list of games could not be read." >&2
+    echo >&2
+    exit 1
+fi
+match="$(jq -r .match <<<"${result}")"
+[[ "${mode}" == id && "${match}" != exact ]] && exit 1
+
+# The list's own words, cleaned, and in one line each
+clean() { "${SECURITY_TEXT}" --max "$2" -- "$1"; }
+# A day, as the list writes it, or nothing
+day() { [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && printf '%s' "$1"; }
+updated="$(day "$(jq -r .updated <<<"${result}")")"
+
+if [[ "${match}" == exact ]]; then
+    id="$(clean "$(jq -r .id <<<"${result}")" 100)"
+    name="$(clean "$(jq -r .name <<<"${result}")" 120)"
+    state="$(jq -r .state <<<"${result}")"
+    changed="$(day "$(jq -r .date <<<"${result}")")"
+    anticheats=()
+    while IFS= read -r line; do
+        [[ -n "${line}" ]] && anticheats+=("$(clean "${line}" 60)")
+    done < <(jq -r '.anticheats[]? | gsub("[\\p{Cc}\\p{Zl}\\p{Zp}]"; " ")' <<<"${result}")
+    case "${state}" in
+        supported | running) answer=runs ;;
+        planned | broken | denied) answer=blocked ;;
+        *) answer=unknown state=unknown ;;
+    esac
+    if [[ "${json}" == true ]]; then
+        printf '%s\n' "$(jq -cn --arg match exact --arg id "${id}" --arg name "${name}" --arg state "${state}" --arg answer "${answer}" \
+            --arg date "${changed}" --arg updated "${updated}" --args '
+            {match: $match, answer: $answer, id: $id, name: $name, state: $state, anticheats: $ARGS.positional,
+             date: (if $date == "" then null else $date end), list_updated: (if $updated == "" then null else $updated end)}' \
+            "${anticheats[@]}")"
+        exit 0
+    fi
+    printf '%s\n' "${name}"
+    case "${state}" in
+        supported) gettext "The list says it runs on Linux: its maker turned the anti-cheat on there, or the anti-cheat works under Wine and Proton as it is." ;;
+        running) gettext "The list says it runs on Linux without harm to online play, but may need some tinkering first." ;;
+        planned) gettext "The list says its maker plans to support Linux, and has not yet." ;;
+        broken) gettext "The list says it does not run online on Linux, because of its anti-cheat." ;;
+        denied) gettext "The list says its maker has said it will not turn its anti-cheat on for Linux." ;;
+        *) gettext "The list does not say." ;;
+    esac
+    echo
+    if [[ ${#anticheats[@]} -gt 0 ]]; then
+        list="$(printf '%s, ' "${anticheats[@]}")"
+        list="${list%, }"
+        eval_gettext 'Anti-cheat: ${list}'
+        echo
+    else
+        gettext "The list names no anti-cheat for it."
+        echo
+    fi
+    if [[ -n "${changed}" ]]; then
+        eval_gettext 'The list changed this entry on ${changed}.'
+    else
+        gettext "The list gives no date for this entry."
+    fi
+    echo
+    [[ -n "${updated}" ]] && {
+        eval_gettext 'This copy of the list is from ${updated}. It knows the anti-cheat, not how the game runs on this computer.'
+        echo
+    }
+    exit 0
+fi
+
+# No entry of that name: the list does not say
+shown="$(clean "${query}" 100)"
+cid="" cname=""
+if [[ "${match}" == closest ]]; then
+    cid="$(clean "$(jq -r .closest.id <<<"${result}")" 100)"
+    cname="$(clean "$(jq -r .closest.name <<<"${result}")" 120)"
+fi
+if [[ "${json}" == true ]]; then
+    printf '%s\n' "$(jq -cn --arg match "${match}" --arg query "${shown}" --arg id "${cid}" --arg name "${cname}" --arg updated "${updated}" '
+        {match: $match, answer: "unknown", query: $query, closest: (if $id == "" then null else {id: $id, name: $name} end),
+         list_updated: (if $updated == "" then null else $updated end)}')"
+    exit 0
+fi
+gettext "The list does not say."
+echo
+eval_gettext 'It has no entry named ${shown}.'
+echo
+if [[ -n "${cid}" ]]; then
+    eval_gettext 'The closest entry in the list is ${cname} (id ${cid}), which is not an answer for ${shown}. Ask for it by its name to see its entry.'
+    echo
+fi
+exit 0

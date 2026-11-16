@@ -1,0 +1,15 @@
+Are We Anti-Cheat Yet?'s list of games and the state of their anti-cheat on Linux, which `amethystora-will-it-run` answers from,
+and which `windows-programs.json`'s `game` ids are checked against. The copy is /usr/share/amethystora/anticheat-list.json.
+
+  Data:         https://github.com/AreWeAntiCheatYet/AreWeAntiCheatYet, games.json, commit 6c26305efc3dccdbf84ebf55a2d6118c2778848f
+                (2026-10-24, branch master)
+  Tarball:      https://codeload.github.com/AreWeAntiCheatYet/AreWeAntiCheatYet/tar.gz/6c26305efc3dccdbf84ebf55a2d6118c2778848f
+                SHA-256 3e82c0595532f9b89687961fdbc82901e602f7e69ef6ed714c5e1262d3ec95d3
+  Made with:    node build_files/shared/trim-anticheat-list.mjs games.json anticheat-list.json 6c26305efc3dccdbf84ebf55a2d6118c2778848f 2026-10-24 LICENSE
+                (1167 rows; the file is SHA-256 6e1053bdefda9d6ea57f9bd83bb878c716023fc314e16038a90d5414e70cb6fe, and holds this licence)
+  Licence:      MIT, Copyright 2021 Starz0r, Curve, LICENSE here (the repository's LICENSE, with a final newline added). It is the
+                repository's licence: it names no other for games.json, whose entries are the community's.
+
+Only the id, the name, the state, the anti-cheats and the day of the last change of each game are kept (not the notes, links, store
+numbers, pictures or timeline). The states are the list's own: supported, running, planned, broken and denied. Move to a newer commit
+by hand, with the tarball's sum and the file's again; check-anticheat-list.yml says when the pinned commit has fallen behind.

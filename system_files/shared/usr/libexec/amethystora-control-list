@@ -1720,6 +1720,8 @@ search_item remembered "${ gettext "Files by what you remember"; }" \
     "${ gettext "“pdf from last week” or “big videos” finds files by their kind, date and size, from GNOME's own file index."; }"
 search_item plugins "${ gettext "Plugins"; }" \
     "${ gettext "What each plugin that asks for search last printed, when you type its prefix. What you type never goes to a plugin."; }"
+search_item game "${ gettext "Will it run?"; }" \
+    "${ gettext "Type game: and a game's name to see what a community list says of its anti-cheat on Linux, from a copy in this system."; }"
 # Offered and off (plans/ui-ideas/spec-later.md): bookmarks, Notes while unlocked, and files by meaning
 search_item bookmarks "${ gettext "Bookmarks"; }" \
     "${ gettext "Firefox's bookmarks, never its history, read from a copy of its bookmarks file. Firefox is left as it is."; }"

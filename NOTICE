@@ -408,6 +408,13 @@ License, which the file holds and which ships in usr/share/licenses/2fa-director
 
   - 2fa.directory  https://github.com/2factorauth/twofactorauth
 
+The answer to "will it run?" (usr/libexec/amethystora-will-it-run) comes from a trimmed copy of the community list of games and
+the state of their anti-cheat on Linux, Are We Anti-Cheat Yet? (usr/share/amethystora/anticheat-list.json), made from its
+repository's games.json at one commit and under the MIT License of that repository, which the file holds and which ships in
+usr/share/licenses/areweanticheatyet with the commit and the checksums.
+
+  - Are We Anti-Cheat Yet?  https://github.com/AreWeAntiCheatYet/AreWeAntiCheatYet
+
 Written offer: for at least three years after an Amethystora image or
 installer ISO was last published, Arsslen Idadi will give anyone who asks the
 complete corresponding source code of any software in it whose licence

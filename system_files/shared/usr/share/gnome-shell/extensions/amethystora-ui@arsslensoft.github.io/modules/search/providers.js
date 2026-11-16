@@ -34,6 +34,7 @@ import {BookmarksProvider} from './bookmarks.js';
 import {NotesProvider} from './notes.js';
 import {MeaningProvider} from './meaning.js';
 import {PhotosProvider} from './photos.js';
+import {GamesProvider} from './games.js';
 import {WordsProvider} from './wordsProvider.js';
 import {RememberedProvider} from './rememberProvider.js';
 import {PluginsProvider} from './plugins.js';
@@ -61,6 +62,8 @@ const PROVIDERS = [
     // What plugins that contribute `search` last printed (modules/plugins.js)
     {key: 'plugins', rank: 5, max: 4},
     {key: 'photos', rank: 5, max: 6},
+    // Read-only and local: what a community list says of a game's anti-cheat, after game:
+    {key: 'game', rank: 5, max: 1},
     {key: 'agent', rank: 7, max: 1},
 ];
 const GNOME_RANK = 4;
@@ -136,6 +139,7 @@ export class Providers {
         case 'notes': return new NotesProvider();
         case 'meaning': return new MeaningProvider();
         case 'photos': return new PhotosProvider();
+        case 'game': return new GamesProvider();
         case 'old-words': return new WordsProvider();
         case 'remembered': return new RememberedProvider();
         case 'plugins': return new PluginsProvider(this._ext);
@@ -164,6 +168,7 @@ export class Providers {
             meaning: {title: _('Files by meaning'), tag: _('On this computer')},
             plugins: {title: _('Plugins'), tag: _('What each last printed')},
             photos: {title: _('Photos'), tag: _('While the vault is open')},
+            game: {title: _('Will it run?'), tag: _('What a community list says')},
             agent: {title: _('The agent'), tag: _('Only while it is on')},
         }[key];
     }

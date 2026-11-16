@@ -4098,6 +4098,7 @@ search WHAT="" STATE="":
         notes) title="$(gettext "Notes")" ;;
         meaning) title="$(gettext "Files by meaning")" ;;
         photos) title="$(gettext "Your photos, by what is in them")" ;;
+        game) title="$(gettext "Will it run?")" ;;
         *) usage ;;
     esac
     # Photos need a model that is downloaded once, and a vault to keep what is worked out in (R7-63)

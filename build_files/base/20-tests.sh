@@ -1988,7 +1988,7 @@ done
 # Its map: known fields only, every pattern compiles, every Flatpak ID has an ID's shape, and no entry names one twice
 WIN_MAP=/usr/share/amethystora/windows-programs.json
 jq -e 'length >= 30 and all(.[]; .match as $m |
-    (.name | type == "string") and (keys - ["name", "match", "flatpak", "web", "launcher", "ame", "alternatives", "wine", "driver"] == [])
+    (.name | type == "string") and (keys - ["name", "match", "flatpak", "web", "launcher", "ame", "alternatives", "wine", "driver", "game"] == [])
     and ("x" | test($m; "i") | type == "boolean")
     and ([.flatpak // empty, .alternatives[]?.flatpak] | all(test("^[A-Za-z][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+$")) and length == (unique | length))
     and ((.web // "https://") | startswith("https://")))' "${WIN_MAP}" >/dev/null
@@ -2001,6 +2001,14 @@ done
 [[ "$(/usr/libexec/amethystora-windows-program --match 'SpotifySetup (1).exe' | jq -r .flatpak)" == com.spotify.Client ]]
 [[ "$(/usr/libexec/amethystora-windows-program --match 'Firefox Installer.exe' | jq -r .launcher)" == org.mozilla.firefox.desktop ]]
 [[ -z "$(/usr/libexec/amethystora-windows-program --match 'something-else.exe')" ]]
+# The `game` of an entry is an id of the community list of games and their anti-cheat that amethystora-will-it-run answers from:
+# the test holds each to the shipped copy, and the copy to its SOURCE and the list's licence (MIT, which ships beside it and is named in
+# NOTICE). The helper says what the list says and never that a game will run; what the handler says is checked in suite 63
+[[ "$(/usr/libexec/amethystora-windows-program --match 'Install VALORANT.exe' | jq -r .game)" == valorant ]]
+test -x /usr/libexec/amethystora-will-it-run
+grep -q '^Copyright' /usr/share/licenses/areweanticheatyet/LICENSE
+grep -q 'Are We Anti-Cheat Yet' /usr/share/licenses/amethystora/NOTICE
+bash /ctx/build_files/shared/test-will-it-run.sh
 # DistroShelf, the window onto the containers, comes with every machine, as Bazaar and Flatseal do
 for preinstall in bazaar flatseal distroshelf; do
     test -f "/usr/share/flatpak/preinstall.d/${preinstall}.preinstall"
@@ -2286,6 +2294,8 @@ bash /ctx/build_files/shared/test-sensor-records.sh
 # The checks written in JavaScript run on the apps stage's Node, mounted at /apps-stage with its libraries,
 # so that the image carries no Node of its own
 NODE=(env LD_LIBRARY_PATH=/apps-stage/usr/lib64 NODE_ICU_DATA="$(echo /apps-stage/usr/share/node-*/icudata)" /apps-stage/usr/bin/node)
+# The script that trims the list of games and their anti-cheat (will it run?), on a made-up list
+"${NODE[@]}" /ctx/build_files/shared/test-trim-anticheat-list.mjs
 
 # The manual: every page in pages.json exists and every link between pages lands on a page and a heading
 # that exist, as the pages are in the image and as they were written, before 07-debrand.sh renamed

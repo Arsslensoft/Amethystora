@@ -7,7 +7,7 @@
 #      Windows, known malware, and the image's own app opened in place of one
 #   2. an unknown program run with Bottles: X11 granted to Bottles alone, a first bottle made, and the file reaching
 #      Bottles through the document portal
-# vmlab-paths: @sf/usr/libexec/amethystora-windows-program @sf/usr/share/amethystora/windows-programs.json @sf/usr/share/applications/zz-amethystora-open-anything.desktop build_files/shared/open-anything-types.py @ui/modules/tools/opener.js
+# vmlab-paths: @sf/usr/libexec/amethystora-windows-program @sf/usr/share/amethystora/windows-programs.json @sf/usr/libexec/amethystora-will-it-run @sf/usr/share/amethystora/anticheat-list.json @sf/usr/share/amethystora/just/apps.just @sf/usr/share/applications/zz-amethystora-open-anything.desktop build_files/shared/open-anything-types.py @ui/modules/tools/opener.js
 source "$(dirname "$0")/lib.sh"
 
 HOME_DIR="/var/home/${TEST_USER}"
@@ -142,6 +142,37 @@ if [[ "${SUITE_PHASE}" == 1 ]]; then
         ok "a .sys file is said to be no program"
     else
         not_ok "the .sys file" "$(tail -n 8 <<<"${out}")"
+    fi
+
+    # A game the community list of anti-cheats knows: it says what the list says, with the day, before it offers anything
+    # (here nothing, since Valorant is known not to run with Wine). It never says the game will run
+    put 'Install VALORANT.exe' <"${HOME_DIR}/${FOLDER}/vmlab-tool.exe"
+    out="$(opened 'Install VALORANT.exe')"
+    known="$(line_of "${out}" 'known not to run with Wine')"
+    listed="$(line_of "${out}" 'The list says')"
+    if [[ -n "${known}" && -n "${listed}" ]] && ((known < listed)) && grep -qF 'Anti-cheat:' <<<"${out}" &&
+        grep -qF 'The list changed this entry on' <<<"${out}" && ! grep -qiF 'it will run' <<<"${out}" &&
+        ! grep -qF 'What would you like to do' <<<"${out}"; then
+        ok "a game of the list gets the list's answer with its day, then nothing is offered: $(sed -n "${listed}p" <<<"${out}")"
+    else
+        not_ok "the game entry for Valorant" "$(tail -n 12 <<<"${out}")"
+    fi
+    # The same answer from the command, by name, by id, and for a game the list lacks (no network is needed or used)
+    out="$("${AS_TESTER[@]}" "ame apps will-it-run Elden Ring" 2>&1)"
+    if grep -qF 'Elden Ring' <<<"${out}" && grep -qF 'The list says' <<<"${out}" && ! grep -qiF 'will run' <<<"${out}"; then
+        ok "ame apps will-it-run answers from the list by name"
+    else
+        not_ok "ame apps will-it-run Elden Ring" "${out}"
+    fi
+    out="$("${AS_TESTER[@]}" "ame apps will-it-run valorant" 2>&1)"
+    check "ame apps will-it-run answers by the list's id" grep -qF 'Valorant' <<<"${out}"
+    out="$("${AS_TESTER[@]}" "ame apps will-it-run no-such-game-zzqx" 2>&1)"
+    check "a game the list lacks is said not to be said" grep -qF 'The list does not say.' <<<"${out}"
+    out="$("${AS_TESTER[@]}" "ame apps will-it-run Elden" 2>&1)"
+    if grep -qF 'The list does not say.' <<<"${out}" && grep -qF 'The closest entry in the list is Elden Ring' <<<"${out}"; then
+        ok "a name that only resembles an entry is shown as the closest entry, not as the answer"
+    else
+        not_ok "the closest entry" "${out}"
     fi
 
     # Known malware stops it before anything is read from the file

@@ -132,6 +132,14 @@ gaming ACTION="":
         *) exit 0 ;;
     esac
 
+# What a community list says of a game's anti-cheat on Linux, from a copy in the image: a game's name, or the list's own id. It says what
+# the list says, with the day its entry changed, and never that a game will run; nothing is looked up on the network
+[no-cd]
+[no-exit-message]
+[positional-arguments]
+will-it-run *NAME:
+    @/usr/libexec/amethystora-will-it-run "$@"
+
 # Android apps, in Waydroid: set it up, start it, stop it, or take it all away again
 [positional-arguments]
 android ACTION="":
