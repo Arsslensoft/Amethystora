@@ -57,6 +57,35 @@ card, or, on an NVIDIA image with no card NVIDIA's driver drives, the image with
 takes signed images only and asks before it switches. Nothing switches by itself, it is said once per machine, and
 **Don't ask again** stops it for good.
 
+### A graphics card in a container
+
+`ame dev gpu` answers whether CUDA, ROCm or the render node work in a container here, which usually takes an afternoon to
+find out. It goes from the machine to the container and stops at the first step that fails, with the sentence that says
+what is wrong and the command that fixes it. It changes nothing and runs as you, never as root.
+
+```bash
+ame dev gpu               # the cards, their drivers, the host, and the container if its image is here
+ame dev gpu --pull        # also fetch the small image the container step runs, by its digest
+ame dev gpu --deep        # also a short computation on an NVIDIA card (fetches the image too)
+ame dev gpu --json        # the same, for a program
+```
+
+1. **The cards** and who made them. A virtual display has nothing to compute on.
+2. **The driver.** It reads what the driver check and the wrong-image notice above already know: NVIDIA's driver not
+   loaded (Secure Boot's key not enrolled, or the wrong image) is said with their commands.
+3. **The host.** NVIDIA: `nvidia-smi`, and the CDI description the toolkit writes for podman at every start
+   (`nvidia-cdi-refresh.service`). AMD: `/dev/kfd` and the render node. Intel: the render node. Fedora gives every
+   account the render nodes and `/dev/kfd` (group `render`, mode 0666), so no group is needed.
+4. **A container**, rootless podman with the devices passed through, running the maker's own information tool: `nvidia-smi
+   -L` on NVIDIA (through `--device nvidia.com/gpu=all`), `rocminfo` on AMD, and opening the render node on Intel.
+5. **`--deep`**, NVIDIA only: two lists of numbers added on the card through the driver's own library. AMD and Intel have
+   no such test, and say so.
+
+The images are pinned by digest, and their size is said before anything is fetched: the NVIDIA and Intel steps use a
+44 MB Python image, the AMD step ROCm's, about 1.2 GB. Nothing is fetched unless you pass `--pull` or `--deep`; in a
+terminal it asks first. A fix that belongs to the image, such as a missing CDI description after a restart, is a fault of
+the image: `ame report` says it.
+
 ## Memory
 
 When RAM runs short, what programs are not using moves into compressed memory (zram) rather than to the disk, and comes

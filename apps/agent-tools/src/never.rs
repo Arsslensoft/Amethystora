@@ -124,6 +124,14 @@ pub fn refusal(argv: &[String]) -> Option<String> {
     if program == "amethystora-share-screen" && argv.get(1).map(String::as_str) != Some("status") {
         return Some("sharing the screen is the user's: it lets another computer see it".into());
     }
+    // `ame dev`'s helpers by their own names, for what its words are refused for: a service pulls an image, runs a container and may
+    // delete its data; the graphics card check fetches an image only with --pull or --deep. Listing and the ports only read
+    if program == "amethystora-dev-services" && !matches!(argv.get(1).map(String::as_str), None | Some("list" | "ports")) {
+        return Some("a development service pulls an image, runs a container and may delete its data: the user adds, starts, stops and removes it".into());
+    }
+    if program == "amethystora-gpu-compute" && argv.iter().skip(1).any(|arg| matches!(arg.as_str(), "--pull" | "--deep")) {
+        return Some("fetching the image the graphics card check runs is the user's: the agent may run it without --pull or --deep".into());
+    }
     if program == "grdctl" && !(argv.len() == 2 && argv[1] == "status") {
         return Some("GNOME's remote desktop is the user's: it lets another computer see the screen, and `status` is the only part that does not".into());
     }
@@ -671,6 +679,16 @@ mod tests {
             "ame security kernel-args init_on_free=1 on",
             "ame security dns quad9",
             "ame system raid status",
+            "ame dev service list --json",
+            "/usr/libexec/amethystora-dev-services list --json",
+            "amethystora-dev-services ports",
+            "amethystora-dev-services",
+            "/usr/libexec/amethystora-gpu-compute --json",
+            "amethystora-gpu-compute",
+            "ame dev service",
+            "ame dev ports --json",
+            "ame dev gpu",
+            "ame dev gpu --json",
             "amethystora-if-found status",
             "ame desktop text-shortcuts off",
             "ame desktop phone codes off",

@@ -2131,6 +2131,56 @@ and the like share the PE type and are said not to be programs.
 - Not taken: WinApps (AGPL, and files with no licence at all), WinBoat (the manual names it as something to
   install) and Wine in the image (Bottles brings its own runners).
 
+### Moving in from Windows
+
+`ame system move-in` (`/usr/libexec/amethystora-move-in`, Python, run as the user; `plans/everybody/PLAN-move-in.md`, manual page `move-in.md`) copies a Windows account's
+Documents, Pictures, Music, Videos and Desktop into the same folders here, from the Windows partition of this computer (dual boot) or a disk plugged in. `find [--offer]`, `look PART`
+and `copy PART ACCOUNT [--folders ID,ID] [--yes]` are its steps, each with `--json`; with no argument it walks a person through in a terminal. `amethystora-bring-over` is its sibling for another computer's plugged-in disk (any OS, files without the `(from Windows)` beside rule). **The disk is only read**: `candidates()` (lsblk) is the only list of what may be
+opened (NTFS or BitLocker, not this system's own mount, not a pool, not a recovery or System Reserved partition), the one mount is `udisksctl mount -o ro,noexec,nosuid,nodev` (whichever
+driver udisks picks, ntfs3 or ntfs-3g, none is named), a disk the desktop mounted read-write under `/run/media` is never touched by `find` and `look` (listed with the reason) and only `copy` and the
+walk, after saying so and a yes (`--yes`), unmount it, mount it read-only and mount it again as it was at the end (busy: left as it is, nothing copied); any other
+read-write mount is refused; a BitLocker volume the desktop unlocked already is used only if read-only and is not locked by us. With `--json` only JSON reaches stdout. A BitLocker volume is unlocked through udisks's `Encrypted.Unlock` with its `read-only` option (the flag of `cryptsetup open --type bitlk --readonly`: a pkexec helper would be a
+new root surface for the same thing), refused unless `lsblk -o RO` says the unlocked device is read-only, and locked again at the end; the 48-digit recovery key is typed with no echo in
+the terminal, is the argument of that one D-Bus call and is kept nowhere, so no option, file or variable takes it (the build test greps the code). `find --offer` reads the partition
+table alone (nothing mounted, no password) and is what Control's list runs in the background: its `move-in` entry is available only then, and the first look (`welcome.rs`
+`move_card`, built on the same `offer_card` as Have a backup?) offers it once per account (`~/.local/state/amethystora/move-in-offered`). Accounts are listed to an administrator
+(`wheel`) only; anyone else sees the one named like their login or full name (a courtesy, not protection: GECOS can be changed by the account), and copying another account is said first and asked (`--yes` for scripts). **It adds and never replaces**:
+a file is written as `.<16 random hex>.amethystora-partial` (O_EXCL|O_NOFOLLOW, never a name taken by someone else, swept as links), fsynced and `os.link`ed (which refuses an existing name; a destination folder that is a link out of the home, or a file where a folder is needed, is counted once as `outside` or `clash`, with its own sentence), a name already there keeps its file and the copy lands as `NAME (from
+Windows).EXT` (`(from Windows 2)`...), unless it is that file (size and time); a ledger in `~/.local/state/amethystora/move-in/*.jsonl` (source, size, time) lets a stopped run carry on
+and keeps an edited copy from being made again. Downloads, `AppData`, the registry, password stores and e-mail are never read; links, junctions and reparse points are never followed;
+OneDrive's files that were never downloaded (the file's own attributes through `system.ntfs_attrib_be`, else in a `OneDrive*` folder a size with no blocks) are skipped and counted.
+The pill shows progress through `ame pill` (`/usr/libexec/amethystora-pill`, the helper's own pid as owner, no file name). The agent may not run any of it (`never.rs`). A gigabyte is kept
+free. `build_files/shared/test-move-in.sh` (stand-in disks, the unlock and the pill swapped in by loading the helper as a module) and `tests/vm/suites/79-move-in.sh` (an NTFS disk on SPARE-1,
+the disk's SHA-256 unchanged) hold it. By hand: a BitLocker disk, a really hibernated disk, real OneDrive placeholders, polkit's password for an internal disk.
+
+### For developers: services and the graphics card (ame dev)
+
+`ame dev` (`dev.just`; a group of its own, like `pill`) is for developers and is on every image. **`ame dev service add NAME [AS] [--port N] [--at-login]`, `start|stop|remove AS`, `list [--json]`** make a
+database or a mail catcher for a project in one line (`/usr/libexec/amethystora-dev-services`, Python, as the account, never root; the recipes are thin). The templates are
+`/usr/share/amethystora/dev-services/<name>.json` (postgres, mariadb, valkey which answers to `redis`, mailpit): each image pinned by digest (the digest alone, the tag a field of its own; Renovate's `dev-image` manager moves
+the digest only; a new major version is by hand), the port, the volume, the variables; no image whose licence limits offering it as a service is offered by name, and none is carried:
+`start` pulls it on the person's machine, said first with its size. The service is a quadlet of the account's own in `~/.config/containers/systemd/amethystora-dev-AS.container`
+(user unit, label `amethystora.dev.service=AS`), `PublishPort=127.0.0.1:...` only (a test holds every template to it), a named volume `amethystora-dev-AS`, and not started at login
+unless `--at-login`. A password is made at `add` into `~/.config/amethystora/dev-services/AS.env` (0600, in a 0700 folder; `DEV_PASSWORD` is its record, the maintainer's choice of
+2026-11-16 over the Vault) and never printed or put on a command line (Valkey's is in a configuration file of its own, mounted read-only). `remove` asks in a terminal before the
+data volume goes (type `DELETE`); with no terminal, or any other answer, the volume and the env file stay and a service made again takes the password back. **`ame dev ports [--json]`**
+lists the account's TCP listeners with the program, its project folder (inside the home) and, for a container, its name, labels and service, matched by the published port from
+`podman ps`; another account's port shows as "another account, or the system". The watcher needs nothing for it: it does not look at loopback listeners at all (`listeners()` skips
+127.*, ::1), so a service is never a finding, and the same container on every address is one as any program is (`test-security-watch.sh`). The agent may list and read the ports;
+`never.rs` refuses `add|start|stop|remove`. `test-dev-services.sh` (stand-in podman, systemctl, ss), VM suite 77, the manual's `dev-services.md`, knowledge `dev.md`.
+
+**`ame dev gpu [--pull] [--deep] [--json]`** (`/usr/libexec/amethystora-gpu-compute`, Python, as the account, read-only) answers whether CUDA, ROCm or the render node work in a container. It
+goes from the machine to the container and stops, per maker (NVIDIA, AMD, Intel), at the first step that fails, with one sentence and the command that fixes it: the cards (PCI class 0x03 and
+0x12); the driver, which asks what is already decided (`amethystora-gpu-check offer` for the wrong image, the driver check's saved findings for Secure Boot's key and lockdown) and never decides
+again; the host (NVIDIA: `nvidia-smi` and the CDI description, `nvidia-ctk cdi list` or `/run/cdi`/`/etc/cdi`; AMD: `/dev/kfd` and the render node; Intel: the render node); a rootless podman
+container with the devices passed (`--device nvidia.com/gpu=all --security-opt=label=disable`; `/dev/kfd` and `/dev/dri`) running the maker's information tool; and `--deep`, NVIDIA only, a PTX
+kernel run through `libcuda` in the same small image (AMD and Intel say it is not built). The NVIDIA images write the CDI description at every start (Universal Blue's `nvidia-install.sh` enables
+`nvidia-cdi-refresh.service` and its path; the image skips both while the driver is not loaded; `20-tests.sh` holds both enabled): a description missing with the driver loaded is a fault of the
+image, which the sentence says. Fedora's own udev rule gives every account `/dev/kfd` and the render nodes (group `render`, mode 0666), so no group is ever offered. The images are pinned by digest (the digest alone, the tag a field of its own) in
+`/usr/share/amethystora/gpu-compute/images.json` (Python 3.14 slim, 44 MB; ROCm's `dev-ubuntu-24.04`, 1.2 GB; Renovate's `dev-image` manager moves the digest only) and **nothing is fetched
+without `--pull` or `--deep`**, which say the size first and ask in a terminal; the agent may run the plain command and `--json`, `never.rs` refuses the two flags. It changes nothing and installs
+no driver. `test-gpu-compute.sh` (stand-ins for the card, `/dev`, the helpers, nvidia-smi, nvidia-ctk and podman), VM suite 78, the manual's Hardware page, playbook `gpu-compute`.
+
 ### New machines
 
 - **How long it takes to start** (`/usr/libexec/amethystora-start-times`, `ame system start-times`, Control's System page; R7-51). `amethystora-start-times.service`

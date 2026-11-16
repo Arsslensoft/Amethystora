@@ -5426,6 +5426,13 @@ case "${IMAGE_NAME}" in
     *-nvidia-lts) [[ "$(modinfo -F license "${NVIDIA_KO}")" == "NVIDIA" ]] ;;
     *) [[ -z "${NVIDIA_KO}" ]] ;;
 esac
+# ...which write podman's CDI description of the card at every start (ame dev gpu asks for it): the toolkit's refresh service and the path
+# unit that starts it again after a driver change are both enabled
+if [[ "${IMAGE_NAME}" =~ nvidia ]]; then
+    for unit in nvidia-cdi-refresh.service nvidia-cdi-refresh.path; do
+        systemctl is-enabled -q "${unit}"
+    done
+fi
 # ...whose services are skipped where the driver is not loaded, rather than restarted until the machine is degraded
 if [[ "${IMAGE_NAME}" =~ nvidia ]]; then
     for unit in nvidia-persistenced.service nvidia-cdi-refresh.service; do
@@ -5485,6 +5492,21 @@ mapfile -t DRIVERS_MANUAL < <(jq -r '.findings[].manual' <<<"${DRIVERS_FOUND}" |
 "${NODE[@]}" /ctx/build_files/shared/check-manual.js /usr/share/amethystora/manual --links "${DRIVERS_MANUAL[@]}"
 rm -rf "${DRIVERS_TEST}"
 bash /ctx/build_files/shared/test-driver-status.sh
+# For developers (ame dev): a database or a mail catcher in one line, the port that is taken, and whether a container can use the graphics
+# card. Each is a program of the account's own against stand-ins for podman, systemctl, ss, the card and its devices; the images they
+# name are pinned by digest (a pull of one happens only on a person's machine), and nothing listens beyond the loopback address
+test -x /usr/libexec/amethystora-dev-services
+test -x /usr/libexec/amethystora-gpu-compute
+ame --show dev::service >/dev/null
+ame --show dev::ports >/dev/null
+ame --show dev::gpu >/dev/null
+(($(ls /usr/share/amethystora/dev-services/*.json | wc -l) >= 4))
+grep -hoE '"image": "[^"]+"' /usr/share/amethystora/dev-services/*.json /usr/share/amethystora/gpu-compute/images.json |
+    while read -r _ image; do
+        [[ "${image}" =~ ^\"[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}\"$ ]] || { echo "an image of ame dev is not pinned by digest: ${image}"; exit 1; }
+    done
+bash /ctx/build_files/shared/test-dev-services.sh
+bash /ctx/build_files/shared/test-gpu-compute.sh
 # Looking for updates without installing them (amethystora-update-check): what it finds against stand-ins, an update
 # that waits for the look rather than failing beside it, and a look the person at the machine starts without a password
 bash /ctx/build_files/shared/test-update-check.sh

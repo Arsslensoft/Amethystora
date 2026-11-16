@@ -1,0 +1,506 @@
+#!/usr/bin/python3 -I
+"""amethystora-gpu-compute: can a container use this machine's graphics card (CUDA, ROCm, the render node)? It goes from the machine to the
+container one step at a time and says, at the first step that fails, what is wrong in a sentence and the command that fixes it. It runs as the
+account and changes nothing: no driver is installed, no setting changed; a fix it names is for the person to run. The only thing it fetches is
+the small image its container step runs, by digest, after saying its size, and only when asked (--pull, or --deep).
+
+    amethystora-gpu-compute [--pull] [--deep] [--json]
+
+  1. the cards (PCI class 0x03 and 0x12) and their makers
+  2. the driver each is bound to (what amethystora-driver-status and amethystora-gpu-check already know, not decided again here)
+  3. the host: NVIDIA's nvidia-smi and the CDI description the toolkit writes (nvidia-cdi-refresh.service), AMD's /dev/kfd and render node,
+     Intel's render node, and the account's access to them
+  4. a container (podman, rootless) with the devices passed, running the vendor's own information tool
+  5. --deep, NVIDIA only: a short computation through the driver's own library, in the same small image
+
+Every step of a vendor's chain is held to the one before: after a failed step the rest of that vendor's chain is not tried. The answer is 0
+when no step failed. AMETHYSTORA_GPU_ROOT (a stand-in /sys, /dev, /etc and /run), AMETHYSTORA_GPU_LIBEXEC (the helpers it asks) and
+AMETHYSTORA_GPU_IMAGES (the pinned images) are for build_files/shared/test-gpu-compute.sh."""
+
+import gettext
+import json
+import os
+import re
+import subprocess
+import sys
+
+_translation = gettext.translation("amethystora", fallback=True)
+_ = _translation.gettext
+ngettext = _translation.ngettext
+
+ROOT = os.environ.get("AMETHYSTORA_GPU_ROOT", "")
+LIBEXEC = os.environ.get("AMETHYSTORA_GPU_LIBEXEC", "/usr/libexec")
+IMAGES = os.environ.get("AMETHYSTORA_GPU_IMAGES", "/usr/share/amethystora/gpu-compute/images.json")
+SECONDS = 20
+CONTAINER_SECONDS = 180
+VENDORS = {"0x10de": "nvidia", "0x1002": "amd", "0x8086": "intel"}
+ORDER = ("nvidia", "amd", "intel")
+UNSAFE = re.compile(r"[^\x20-\x7e -\U0010ffff]")
+# An image is its repository and its digest alone (podman takes a tag beside a digest only in some of its commands); the tag it follows, for
+# Renovate and for the words, is a field of its own
+IMAGE = re.compile(r"^[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$")
+TAG = re.compile(r"^[A-Za-z0-9._-]+$")
+# --json is for a program: nothing is asked of a person then, and the flag that fetches is the consent
+ASK = True
+
+# The deep check: add two lists of numbers on the card through the driver's own library (libcuda), with a kernel written in PTX, which
+# the driver compiles for whichever card it finds, so that the image needs no CUDA toolkit. The pass is "OK" and the exit status 0.
+CUDA_ADD = r'''
+import ctypes, struct, sys
+ptx = b"""
+.version 7.0
+.target sm_50
+.address_size 64
+.visible .entry add(.param .u64 pa, .param .u64 pb, .param .u64 pc, .param .u32 pn)
+{
+  .reg .pred %p<2>;
+  .reg .b32 %r<6>;
+  .reg .f32 %f<4>;
+  .reg .b64 %rd<11>;
+  ld.param.u64 %rd1, [pa];
+  ld.param.u64 %rd2, [pb];
+  ld.param.u64 %rd3, [pc];
+  ld.param.u32 %r1, [pn];
+  mov.u32 %r2, %ctaid.x;
+  mov.u32 %r3, %ntid.x;
+  mov.u32 %r4, %tid.x;
+  mad.lo.s32 %r5, %r2, %r3, %r4;
+  setp.ge.s32 %p1, %r5, %r1;
+  @%p1 bra DONE;
+  cvta.to.global.u64 %rd4, %rd1;
+  cvta.to.global.u64 %rd5, %rd2;
+  cvta.to.global.u64 %rd6, %rd3;
+  mul.wide.s32 %rd7, %r5, 4;
+  add.s64 %rd8, %rd4, %rd7;
+  add.s64 %rd9, %rd5, %rd7;
+  add.s64 %rd10, %rd6, %rd7;
+  ld.global.f32 %f1, [%rd8];
+  ld.global.f32 %f2, [%rd9];
+  add.f32 %f3, %f1, %f2;
+  st.global.f32 [%rd10], %f3;
+DONE:
+  ret;
+}
+\0"""
+cuda = ctypes.CDLL("libcuda.so.1")
+def check(result, what):
+    if result != 0:
+        print("%s failed (%d)" % (what, result))
+        sys.exit(1)
+check(cuda.cuInit(0), "cuInit")
+device = ctypes.c_int()
+check(cuda.cuDeviceGet(ctypes.byref(device), 0), "cuDeviceGet")
+context = ctypes.c_void_p()
+check(cuda.cuDevicePrimaryCtxRetain(ctypes.byref(context), device), "cuDevicePrimaryCtxRetain")
+check(cuda.cuCtxSetCurrent(context), "cuCtxSetCurrent")
+module = ctypes.c_void_p()
+check(cuda.cuModuleLoadData(ctypes.byref(module), ptx), "cuModuleLoadData")
+function = ctypes.c_void_p()
+check(cuda.cuModuleGetFunction(ctypes.byref(function), module, b"add"), "cuModuleGetFunction")
+n = 1024
+size = 4 * n
+a = struct.pack("%df" % n, *[float(i) for i in range(n)])
+b = struct.pack("%df" % n, *[2.0 * i for i in range(n)])
+memory = [ctypes.c_uint64() for _ in range(3)]
+for pointer in memory:
+    check(cuda.cuMemAlloc_v2(ctypes.byref(pointer), ctypes.c_size_t(size)), "cuMemAlloc")
+check(cuda.cuMemcpyHtoD_v2(memory[0], a, ctypes.c_size_t(size)), "cuMemcpyHtoD")
+check(cuda.cuMemcpyHtoD_v2(memory[1], b, ctypes.c_size_t(size)), "cuMemcpyHtoD")
+count = ctypes.c_int(n)
+arguments = (ctypes.c_void_p * 4)(ctypes.addressof(memory[0]), ctypes.addressof(memory[1]), ctypes.addressof(memory[2]), ctypes.addressof(count))
+check(cuda.cuLaunchKernel(function, 4, 1, 1, 256, 1, 1, 0, None, arguments, None), "cuLaunchKernel")
+check(cuda.cuCtxSynchronize(), "cuCtxSynchronize")
+out = ctypes.create_string_buffer(size)
+check(cuda.cuMemcpyDtoH_v2(out, memory[2], ctypes.c_size_t(size)), "cuMemcpyDtoH")
+values = struct.unpack("%df" % n, out.raw)
+if all(abs(values[i] - 3.0 * i) < 1e-3 for i in range(n)):
+    print("OK")
+else:
+    print("the sums came back wrong")
+    sys.exit(1)
+'''
+
+# Intel's container step: the render nodes the container was given can be opened for reading and writing
+RENDER_NODES = r'''
+import glob, os, sys
+nodes = sorted(glob.glob("/dev/dri/renderD*"))
+good = [n for n in nodes if os.access(n, os.R_OK | os.W_OK)]
+print(" ".join(good) if good else "none")
+sys.exit(0 if good else 1)
+'''
+
+
+def clean(text):
+    return UNSAFE.sub("?", str(text))[:300]
+
+
+def run(*argv, seconds=SECONDS):
+    """(status, what it printed, its error) of a program, or (None, "", "") when it could not run at all"""
+    try:
+        done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=seconds, text=True, errors="replace",
+                              env={**os.environ, "LC_ALL": "C.UTF-8", "LANGUAGE": ""}, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None, "", ""
+    return done.returncode, done.stdout, done.stderr
+
+
+def read(path):
+    try:
+        with open(ROOT + path, encoding="utf-8", errors="replace") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def terminal():
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+class Chain:
+    """One maker's steps: each is {id, state, text, fix}; state ok, fail, skipped (not tried, and why) or not-built"""
+
+    def __init__(self, vendor, cards):
+        self.vendor = vendor
+        self.cards = cards
+        self.steps = []
+        self.failed = False
+
+    def step(self, ident, state, text, fix=None):
+        self.steps.append({"id": ident, "state": state, "text": text, "fix": fix})
+        if state == "fail":
+            self.failed = True
+        return state == "ok"
+
+    def answer(self):
+        return {"vendor": self.vendor, "cards": self.cards, "ok": not self.failed and bool(self.steps) and self.steps[-1]["state"] != "skipped",
+                "failed": self.failed, "steps": self.steps}
+
+
+# --- 1. The cards ---------------------------------------------------------------------------------------------------
+
+def card_name(address, vendor, device):
+    if not ROOT:
+        code, out, _error = run("lspci", "-s", address)
+        if code == 0 and out.strip():
+            return clean(re.sub(r"^\S+\s+", "", out.strip().splitlines()[0]))
+    return clean(f"{vendor}:{device} at {address}")
+
+
+def cards():
+    found = []
+    base = ROOT + "/sys/bus/pci/devices"
+    try:
+        entries = sorted(os.listdir(base))
+    except OSError:
+        entries = []
+    for address in entries:
+        path = f"{base}/{address}"
+        kind = read(f"/sys/bus/pci/devices/{address}/class")
+        if not (kind.startswith("0x03") or kind.startswith("0x12")):
+            continue
+        vendor = read(f"/sys/bus/pci/devices/{address}/vendor").lower()
+        device = read(f"/sys/bus/pci/devices/{address}/device").lower()
+        try:
+            driver = os.path.basename(os.readlink(f"{path}/driver"))
+        except OSError:
+            driver = None
+        try:
+            nodes = sorted(n for n in os.listdir(f"{path}/drm") if n.startswith("renderD"))
+        except OSError:
+            nodes = []
+        found.append({"address": address, "vendor": VENDORS.get(vendor, "other"), "vendor_id": vendor, "device_id": device,
+                      "driver": driver, "render_nodes": nodes, "name": card_name(address, vendor, device)})
+    return found
+
+
+# --- 2. The driver --------------------------------------------------------------------------------------------------
+
+def status_findings():
+    """What the driver check saved: [{id, kind, device, text, fix}], from the helper that already decides it"""
+    code, out, _error = run(f"{LIBEXEC}/amethystora-driver-status", "--json")
+    try:
+        data = json.loads(out) if code == 0 else {}
+    except ValueError:
+        data = {}
+    found = data.get("findings") if isinstance(data, dict) else []
+    return [f for f in found if isinstance(f, dict)] if isinstance(found, list) else []
+
+
+def gpu_check_offer():
+    """(kind, image) the image whose driver drives an NVIDIA card here, if this is not that image, else None"""
+    env = {**os.environ}
+    if ROOT:
+        env["AMETHYSTORA_PCI_DEVICES"] = ROOT + "/sys/bus/pci/devices"
+    try:
+        done = subprocess.run([f"{LIBEXEC}/amethystora-gpu-check", "offer"], stdin=subprocess.DEVNULL, capture_output=True, timeout=SECONDS,
+                              text=True, errors="replace", env=env, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    parts = done.stdout.split()
+    return (parts[0], parts[1]) if done.returncode == 0 and len(parts) == 2 else None
+
+
+def stream():
+    try:
+        with open(ROOT + "/usr/share/amethystora/image-info.json", encoding="utf-8") as handle:
+            return str(json.load(handle).get("image-tag") or "stable")
+    except (OSError, ValueError, AttributeError):
+        return "stable"
+
+
+WANT = {"nvidia": ("nvidia",), "amd": ("amdgpu",), "intel": ("i915", "xe")}
+MAKER = {"nvidia": "NVIDIA", "amd": "AMD", "intel": "Intel"}
+
+
+# The modules of each maker's driver, by name: a refused module is the card's only when it is one of these
+MODULES = {"nvidia": ("nvidia",), "amd": ("amdgpu",), "intel": ("i915", "xe")}
+
+
+def refused_for(ident, vendor):
+    """A "refused:MODULE MODULE" finding that names this maker's driver: a Wi-Fi or webcam module the kernel refused is not the card's"""
+    if not ident.startswith("refused:"):
+        return False
+    return any(module == prefix or module.startswith(prefix + "_") for module in ident[len("refused:"):].split() for prefix in MODULES[vendor])
+
+
+def driver_step(chain, card, findings):
+    vendor = chain.vendor
+    if card["driver"] in WANT[vendor]:
+        return chain.step("driver", "ok", _("The driver {driver} drives the card.").format(driver=clean(card["driver"])))
+    if vendor == "nvidia":
+        offer = gpu_check_offer()
+        if offer:
+            return chain.step("driver", "fail", _("This image has no NVIDIA driver for this card: {image} does.").format(image=clean(offer[1])),
+                              f"ame system rebase {offer[1]} {stream()}")
+    for finding in findings:
+        ident = str(finding.get("id", ""))
+        if ident.startswith(f"{vendor}:{card['address']}") or ident.startswith(f"no-driver:{card['address']}:") or refused_for(ident, vendor):
+            return chain.step("driver", "fail", clean(finding.get("text") or _("The driver did not load.")), finding.get("fix") or "ame system drivers")
+    if card["driver"]:
+        return chain.step("driver", "fail", _("The card is driven by {driver}, which cannot compute here.").format(driver=clean(card["driver"])), "ame system drivers")
+    return chain.step("driver", "fail", _("No driver took the card."), "ame system drivers")
+
+
+# --- 3. The host ----------------------------------------------------------------------------------------------------
+
+def access(path):
+    return os.access(ROOT + path, os.R_OK | os.W_OK)
+
+
+def nodes_of(card):
+    return [f"/dev/dri/{name}" for name in card["render_nodes"]]
+
+
+def host_nvidia(chain):
+    code, out, _error = run("nvidia-smi", "-L")
+    listed = [line for line in out.splitlines() if line.startswith("GPU ")] if code == 0 else []
+    if not listed:
+        chain.step("host", "fail", _("nvidia-smi does not see the card, though the driver is loaded."), "ame system drivers")
+        return None
+    chain.step("host", "ok", ngettext("nvidia-smi sees {count} card.", "nvidia-smi sees {count} cards.", len(listed)).format(count=len(listed)))
+    # The description the toolkit writes for podman, at every start (nvidia-cdi-refresh.service, which the image enables): /run/cdi (the
+    # same as /var/run/cdi) or /etc/cdi
+    code, out, _error = run("nvidia-ctk", "cdi", "list")
+    names = out.split() if code == 0 else []
+    present = "nvidia.com/gpu=all" in names
+    if code is None:
+        present = any(os.path.exists(f"{ROOT}{folder}/nvidia.{kind}") and os.path.getsize(f"{ROOT}{folder}/nvidia.{kind}") > 0
+                      for folder in ("/run/cdi", "/etc/cdi") for kind in ("yaml", "json"))
+    if present:
+        chain.step("cdi", "ok", _("The CDI description for podman is there: nvidia.com/gpu=all."))
+        return len(listed)
+    chain.step("cdi", "fail", _("The CDI description podman needs for the card is missing. The image writes it at every start (nvidia-cdi-refresh.service): if this stays after the command below, that is a fault of the image, and ame report says it."),
+               "sudo systemctl start nvidia-cdi-refresh.service")
+    return None
+
+
+def host_render(chain, cards_of_vendor):
+    nodes = [node for card in cards_of_vendor for node in nodes_of(card)]
+    if not nodes:
+        return chain.step("host", "fail", _("The kernel made no render node for the card."), "ame system drivers")
+    if not any(access(node) for node in nodes):
+        return chain.step("host", "fail", _("Your account cannot open {node}. Fedora's rule gives every account the render nodes, so a rule of your own changed it.").format(node=clean(nodes[0])),
+                          "ls -l /dev/dri")
+    return chain.step("host", "ok", _("The render node {node} opens for your account.").format(node=clean(nodes[0])))
+
+
+def host_amd(chain, cards_of_vendor):
+    if not os.path.exists(f"{ROOT}/dev/kfd"):
+        return chain.step("host", "fail", _("There is no /dev/kfd, the device ROCm computes through: the card is one ROCm does not drive, or the amdgpu driver has no compute for it."),
+                          "ame system drivers")
+    if not access("/dev/kfd"):
+        return chain.step("host", "fail", _("Your account cannot open /dev/kfd. Fedora's rule gives every account it (group render, mode 0666), so a rule of your own changed it."),
+                          "ls -l /dev/kfd")
+    return host_render(chain, cards_of_vendor)
+
+
+# --- 4 and 5. A container -------------------------------------------------------------------------------------------
+
+def images():
+    try:
+        with open(IMAGES, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, dict) and IMAGE.match(str(v.get("image", ""))) and TAG.match(str(v.get("tag", ""))) and isinstance(v.get("size_mb"), int)} \
+        if isinstance(data, dict) else {}
+
+
+def ensure_image(chain, picked, pull):
+    """True when the image is here, fetching it first when it was asked for and, in a terminal, said yes to"""
+    image = picked["image"]
+    code, _out, _error = run("podman", "image", "exists", image)
+    if code == 0:
+        return True
+    name = image.split("@")[0] + ":" + picked["tag"]
+    if not pull:
+        chain.step("container", "skipped", _("A container is not tried yet: it runs {image}, which is not here, and is about {size} MB to fetch.").format(image=clean(name), size=picked["size_mb"]),
+                   "ame dev gpu --pull")
+        return False
+    if ASK and terminal():
+        print(_("Fetch {image}, about {size} MB, by its digest? [y/N]").format(image=clean(name), size=picked["size_mb"]), end=" ", flush=True)
+        if input().strip().lower() not in ("y", "yes"):
+            chain.step("container", "skipped", _("Nothing was fetched, so a container was not tried."), "ame dev gpu --pull")
+            return False
+    code, _out, error = run("podman", "pull", "--quiet", image, seconds=1800)
+    if code != 0:
+        chain.step("container", "fail", _("The image could not be fetched: {why}").format(why=clean(error.strip().splitlines()[-1] if error.strip() else "?")),
+                   "podman pull " + name)
+        return False
+    return True
+
+
+def container_nvidia(chain, picked, deep, pull, count):
+    if not ensure_image(chain, picked, pull):
+        return
+    code, out, error = run("podman", "run", "--rm", "--device", "nvidia.com/gpu=all", "--security-opt=label=disable", picked["image"], "nvidia-smi", "-L", seconds=CONTAINER_SECONDS)
+    listed = [line for line in out.splitlines() if line.startswith("GPU ")] if code == 0 else []
+    if len(listed) != count:
+        why = clean(error.strip().splitlines()[-1]) if error.strip() else ""
+        chain.step("container", "fail", _("A container does not see the card the way the host does{why}.").format(why=f": {why}" if why else ""),
+                   "nvidia-ctk cdi list")
+        return
+    chain.step("container", "ok", ngettext("A container sees the same {count} card as the host, through nvidia.com/gpu=all.", "A container sees the same {count} cards as the host, through nvidia.com/gpu=all.", count).format(count=count))
+    if not deep:
+        return
+    code, out, error = run("podman", "run", "--rm", "--device", "nvidia.com/gpu=all", "--security-opt=label=disable", picked["image"], "python3", "-c", CUDA_ADD,
+                           seconds=CONTAINER_SECONDS)
+    if code == 0 and out.strip().endswith("OK"):
+        chain.step("deep", "ok", _("A computation ran on the card, in a container, and came back right."))
+    else:
+        chain.step("deep", "fail", _("A computation in a container failed: {why}").format(why=clean((out.strip() or error.strip() or "?").splitlines()[-1])), "nvidia-smi")
+
+
+def container_amd(chain, picked, deep, pull):
+    if not ensure_image(chain, picked, pull):
+        return
+    code, out, error = run("podman", "run", "--rm", "--device", "/dev/kfd", "--device", "/dev/dri", "--security-opt=label=disable", picked["image"],
+                           "/opt/rocm/bin/rocminfo", seconds=CONTAINER_SECONDS)
+    agents = sorted(set(re.findall(r"^\s*Name:\s+(gfx[0-9a-z]+)\s*$", out, re.M))) if code == 0 else []
+    if not agents:
+        why = clean(error.strip().splitlines()[-1]) if error.strip() else ""
+        chain.step("container", "fail", _("ROCm in a container finds no GPU{why}.").format(why=f": {why}" if why else ""), "ls -l /dev/kfd /dev/dri")
+    else:
+        chain.step("container", "ok", _("ROCm in a container lists the GPU: {agents}.").format(agents=", ".join(agents)))
+    if deep:
+        chain.step("deep", "not-built", _("A computation test is not built for AMD: the listing above is as far as this goes."))
+
+
+def container_intel(chain, picked, deep, pull):
+    if not ensure_image(chain, picked, pull):
+        return
+    code, out, error = run("podman", "run", "--rm", "--device", "/dev/dri", "--security-opt=label=disable", picked["image"], "python3", "-c", RENDER_NODES, seconds=CONTAINER_SECONDS)
+    if code == 0 and out.strip() and out.strip() != "none":
+        chain.step("container", "ok", _("A container opens the render node: {nodes}.").format(nodes=clean(out.strip())))
+    else:
+        why = clean(error.strip().splitlines()[-1]) if error.strip() else ""
+        chain.step("container", "fail", _("A container cannot open the render node{why}.").format(why=f": {why}" if why else ""), "ls -l /dev/dri")
+    if deep:
+        chain.step("deep", "not-built", _("A computation test is not built for Intel: the render node opening is as far as this goes."))
+
+
+def chain_of(vendor, vendor_cards, findings, deep, pull, pinned):
+    chain = Chain(vendor, [{k: c[k] for k in ("address", "name", "driver")} for c in vendor_cards])
+    chain.step("cards", "ok", ", ".join(c["name"] for c in vendor_cards))
+    # A card of this maker that is driven is enough to go on; when none is, the first one's step says why
+    driven = [c for c in vendor_cards if c["driver"] in WANT[vendor]]
+    if not driver_step(chain, (driven or vendor_cards)[0], findings):
+        return chain
+    count = None
+    if vendor == "nvidia":
+        count = host_nvidia(chain)
+        if count is None:
+            return chain
+    elif vendor == "amd":
+        if not host_amd(chain, vendor_cards):
+            return chain
+    elif not host_render(chain, vendor_cards):
+        return chain
+    # The container step needs the image of the vendor: AMD's own tool, otherwise the small neutral one
+    key = "amd" if vendor == "amd" else "neutral"
+    picked = pinned.get(key)
+    if picked is None:
+        chain.step("container", "fail", _("The image the container step runs is not listed in this install."), "ame system drivers")
+        return chain
+    if vendor == "nvidia":
+        container_nvidia(chain, picked, deep, pull, count)
+    elif vendor == "amd":
+        container_amd(chain, picked, deep, pull)
+    else:
+        container_intel(chain, picked, deep, pull)
+    return chain
+
+
+# --- The answer -----------------------------------------------------------------------------------------------------
+
+def main(argv):
+    pull = "--pull" in argv or "--deep" in argv
+    deep = "--deep" in argv
+    as_json = "--json" in argv
+    global ASK
+    ASK = not as_json
+    if any(arg not in ("--pull", "--deep", "--json") for arg in argv):
+        print(_("usage: ame dev gpu [--pull] [--deep] [--json]"), file=sys.stderr)
+        return 64
+    if os.geteuid() == 0 and not ROOT:
+        print(_("This is for your own account: containers run as you, so it never runs as root."), file=sys.stderr)
+        return 77
+    everything = cards()
+    findings = status_findings()
+    chains = []
+    pinned = images()
+    for vendor in ORDER:
+        mine = [c for c in everything if c["vendor"] == vendor]
+        if mine:
+            chains.append(chain_of(vendor, mine, findings, deep, pull, pinned))
+    others = [c for c in everything if c["vendor"] == "other"]
+    ok = bool(chains) and any(chain.answer()["ok"] for chain in chains)
+    failed = (not chains) or any(chain.failed for chain in chains)
+    if as_json:
+        print(json.dumps({"ok": ok, "failed": failed, "cards": everything, "vendors": [c.answer() for c in chains]}))
+        return 1 if failed else 0
+    if not chains:
+        if others:
+            print(_("The only graphics device here is {name}, a display with nothing to compute on.").format(name=others[0]["name"]))
+        else:
+            print(_("No graphics card was found on this machine."))
+        return 1
+    for chain in chains:
+        print(_("{maker}: {names}").format(maker=MAKER[chain.vendor], names=", ".join(c["name"] for c in chain.cards)))
+        for step in chain.steps[1:]:
+            mark = {"ok": _("ok"), "fail": _("FAILED"), "skipped": _("not tried"), "not-built": _("not built")}[step["state"]]
+            print(f"  {mark:<10} {step['text']}")
+            if step["fix"]:
+                print(_("             Fix: {command}").format(command=step["fix"]))
+    if ok and not failed:
+        print(_("A container can use the card."))
+    elif not failed:
+        print(_("Nothing failed, but the container step has not run: ame dev gpu --pull runs it."))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)

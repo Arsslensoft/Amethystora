@@ -138,6 +138,22 @@
       datasourceTemplate: 'docker',
       depTypeTemplate: 'pkg-template',
     },
+    // The images `ame dev service` starts (dev-services/*.json) and the ones `ame dev gpu`
+    // runs (gpu-compute/images.json), each pinned by digest like the templates
+    // above, and pulled by digest on the person's machine. The image is the
+    // repository and its digest alone, since podman takes a tag with a digest
+    // only in some commands; the tag it follows is the next field.
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^system_files/shared/usr/share/amethystora/(dev-services/[^/]+|gpu-compute/images)\\.json$/',
+      ],
+      matchStrings: [
+        '"image": "(?<depName>[^":@]+)@(?<currentDigest>sha256:[a-f0-9]{64})",\\s*"tag":"(?<currentValue>[^"]+)"',
+      ],
+      datasourceTemplate: 'docker',
+      depTypeTemplate: 'dev-image',
+    },
     // The Starship release 05-override-install.sh installs the shell prompt
     // from, with the SHA-256 of its tarball pinned beside it, which this
     // datasource works out for the new tag, as for OpenTabletDriver below.

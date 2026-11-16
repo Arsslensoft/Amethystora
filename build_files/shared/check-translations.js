@@ -326,7 +326,9 @@ const PYTHON = ['usr/libexec/amethystora-text-shortcuts',
     // The Help window's helpers (plans/ui-ideas/r7/spec-help.md), and how it finds what Show me points at
     'usr/libexec/amethystora-wrong', 'usr/libexec/amethystora-changes',
     // Bring everything from your old computer (R7-48)
-    'usr/libexec/amethystora-bring-over'];
+    'usr/libexec/amethystora-bring-over', 'usr/libexec/amethystora-move-in',
+    // For developers: a service in one line and which port holds what (ame dev service, ports), and the graphics card in a container (ame dev gpu)
+    'usr/libexec/amethystora-dev-services', 'usr/libexec/amethystora-gpu-compute'];
 const SHELL = ['usr/libexec/amethystora-security-status', 'usr/libexec/amethystora-app-permissions', 'usr/libexec/amethystora-layout-offer',
     'usr/libexec/amethystora-control-list', 'usr/libexec/amethystora-security-config', 'usr/libexec/amethystora-hardening',
     'usr/libexec/amethystora-phone-link-notice', 'usr/libexec/amethystora-deja-dup-notice', 'usr/libexec/amethystora-widgets-moved-notice',
