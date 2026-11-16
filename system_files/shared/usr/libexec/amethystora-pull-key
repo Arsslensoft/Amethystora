@@ -1,0 +1,344 @@
+#!/usr/bin/python3 -I
+"""amethystora-pull-key: lock the screen, or power the computer off, when the USB device the owner chose is pulled out
+(PULL_KEY in /etc/amethystora/security.conf, `ame security pull-key`). It stands alone: no other feature starts it or is started by it.
+
+    amethystora-pull-key list              the USB devices plugged in that it can watch, one a line: ID, a tab and the name
+    amethystora-pull-key status            what is chosen and whether it is plugged in, as JSON
+    amethystora-pull-key choose ID         as root: watch this device (ID is what `list` prints); writes the rule when PULL_KEY is on
+    amethystora-pull-key forget            as root: watch none; takes the rule away
+    amethystora-pull-key apply             as root: write the rule when PULL_KEY is lock or poweroff and a device is chosen, else take it away
+    amethystora-pull-key act               as root, by amethystora-pull-key.service: the removal, if it was one
+
+The device is named by its vendor, product and serial number (ID, VVVV:PPPP:SERIAL). The serial is somebody else's text, so
+it is held to the characters udev itself leaves in ID_SERIAL_SHORT, and it never reaches a rule: the rule only names the
+vendor and the product, in hexadecimal, as the kernel writes them in PRODUCT on a removal. udev keeps no sysfs attribute of a
+device that is gone, and the properties of its database (ID_VENDOR_ID, ID_SERIAL_SHORT) are not there in every udev, so the
+service looks for the one device itself, by its serial, a second after the rule started it.
+
+The rule is one line in /etc/udev/rules.d/90-amethystora-pull-key.rules, whose exact shape the security watcher accepts.
+The device is kept in /var/lib/amethystora/pull-key/device."""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = os.environ.get("AMETHYSTORA_PULLKEY_ROOT", "")
+RULES = f"{ROOT}/etc/udev/rules.d/90-amethystora-pull-key.rules"
+STATE = f"{ROOT}/var/lib/amethystora/pull-key"
+DEVICE = f"{STATE}/device"
+USB = f"{ROOT}/sys/bus/usb/devices"
+# Only the tests, which run against stand-ins, may point these elsewhere
+CONFIG = os.environ.get("AMETHYSTORA_PULLKEY_CONFIG", "/usr/libexec/amethystora-security-config") if ROOT else "/usr/libexec/amethystora-security-config"
+BIN = f"{ROOT}/bin" if ROOT else "/usr/bin"
+# The record systemd writes each time the system leaves a sleep state
+LEFT_SLEEP = "8811e6df2a8e40f58a94cea26f8ebf14"
+# A device that goes and comes back: a loose plug, a hub that resets (seconds)
+WAIT = float(os.environ.get("AMETHYSTORA_PULLKEY_WAIT", "1")) if ROOT else 1.0
+# After the computer wakes, its USB devices are found again one by one, and a removal then is that (seconds)
+AFTER_WAKE = 10.0
+# What udev leaves in ID_SERIAL_SHORT, and how long it may be here
+SERIAL = re.compile(r"^[A-Za-z0-9#+.:=@_-]{1,64}$")
+HEX4 = re.compile(r"^[0-9a-f]{4}$")
+ID = re.compile(r"^([0-9a-f]{4}):([0-9a-f]{4}):(.+)$")
+# Linux Foundation's vendor ID: the root hubs of every USB bus
+ROOT_HUBS = "1d6b"
+LONGEST_NAME = 48
+COMMENT = "# Pulling the chosen USB device out locks or powers off the computer: ame security pull-key"
+# The rule's second line says which device it is for, so that the rule alone is the record the service acts on and the
+# security watcher's exact-shape check covers it: its vendor and product must be the rule's own
+DEVICE_COMMENT = "# device: "
+UNIT_START = "/usr/bin/systemctl --no-block start amethystora-pull-key.service"
+
+
+def usage():
+    print("usage: amethystora-pull-key list | status | choose ID | forget | apply | act", file=sys.stderr)
+    sys.exit(64)
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read(256).strip()
+    except OSError:
+        return ""
+
+
+def clean(text):
+    """A name a device gives itself, as a line of text that cannot read as a link or a command"""
+    line = "".join(c if c.isprintable() else " " for c in text)
+    line = re.sub(r"[/\\]", " ", line)
+    line = re.sub(r"(?i)\bwww\d{0,3}\.", "www ", line)
+    return " ".join(line.split())[:LONGEST_NAME]
+
+
+def sanitize(serial):
+    """What udev's usb_id leaves of a serial number: whitespace runs as one underscore, anything else outside its set too"""
+    return re.sub(r"[^A-Za-z0-9#+.:=@_-]", "_", re.sub(r"\s+", "_", serial.strip()))
+
+
+def serial_of(folder):
+    """The serial as udev's database has it (ID_SERIAL_SHORT), else as usb_id would write it from the device's own"""
+    shown = ""
+    try:
+        done = subprocess.run([f"{BIN}/udevadm", "info", "--query=property", "--property=ID_SERIAL_SHORT", "--value",
+                               os.path.realpath(folder)], capture_output=True, text=True, timeout=5, check=False)
+        shown = done.stdout.strip() if done.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return shown or sanitize(read(f"{folder}/serial"))
+
+
+def devices():
+    """Every USB device plugged in, as (vendor, product, serial, name, is_hub)"""
+    found = []
+    try:
+        entries = sorted(os.listdir(USB))
+    except OSError:
+        return found
+    for entry in entries:
+        folder = os.path.join(USB, entry)
+        vendor, product = read(f"{folder}/idVendor"), read(f"{folder}/idProduct")
+        if not (HEX4.match(vendor) and HEX4.match(product)):
+            continue
+        hub = read(f"{folder}/bDeviceClass") == "09" or vendor == ROOT_HUBS
+        found.append((vendor, product, serial_of(folder), clean(read(f"{folder}/product")) or f"{vendor}:{product}", hub))
+    return found
+
+
+def parse(device_id):
+    match = ID.match(device_id or "")
+    if not match or not SERIAL.match(match.group(3)):
+        return None
+    return match.groups()
+
+
+def chosen():
+    return parse(read(DEVICE))
+
+
+def watchable():
+    """What can be chosen: a device with a serial number of its own, which is what tells it from another of its make. Hubs
+    and root hubs stand for everything behind them and are left out"""
+    out = []
+    for vendor, product, serial, name, hub in devices():
+        if hub or not SERIAL.match(serial or ""):
+            continue
+        out.append((f"{vendor}:{product}:{serial}", name))
+    return out
+
+
+def config(key):
+    try:
+        done = subprocess.run([CONFIG, key], capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return "off"
+    value = done.stdout.strip()
+    return value if value in ("off", "lock", "poweroff") else "off"
+
+
+def hex_of(value):
+    """As the kernel writes it in PRODUCT: lower case, no leading zeros"""
+    return format(int(value, 16), "x")
+
+
+def rule_line(vendor, product):
+    return (f'ACTION=="remove", SUBSYSTEM=="usb", ENV{{DEVTYPE}}=="usb_device", ENV{{PRODUCT}}=="{hex_of(vendor)}/{hex_of(product)}/*", '
+            f'RUN+="{UNIT_START}"')
+
+
+def write_atomic(path, text, mode):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    handle, name = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".amethystora-pull-key")
+    with os.fdopen(handle, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.chmod(name, mode)
+    os.replace(name, path)
+
+
+def reload_rules():
+    if ROOT:
+        return
+    try:
+        subprocess.run(["/usr/bin/udevadm", "control", "--reload"], capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def rule_device():
+    """The device the rule on disk is for, from its comment, when the rule's own vendor and product are that device's: else None"""
+    try:
+        with open(RULES, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    commented = [line[len(DEVICE_COMMENT):] for line in lines if line.startswith(DEVICE_COMMENT)]
+    rules = [line for line in lines if line.startswith("ACTION")]
+    device = parse(commented[0]) if len(commented) == 1 else None
+    if not device or len(rules) != 1 or rules[0] != rule_line(device[0], device[1]):
+        return None
+    return device
+
+
+def apply():
+    """The rule exists while PULL_KEY is lock or poweroff and a device is chosen, and only then: it is written whole and
+    left alone when it is already as it should be, so that a service that runs this after each pull reloads nothing"""
+    device = chosen()
+    if config("PULL_KEY") == "off" or not device:
+        try:
+            os.unlink(RULES)
+        except FileNotFoundError:
+            return 0
+    else:
+        text = f"{COMMENT}\n{DEVICE_COMMENT}{':'.join(device)}\n{rule_line(device[0], device[1])}\n"
+        try:
+            with open(RULES, encoding="utf-8") as f:
+                if f.read() == text:
+                    return 0
+        except OSError:
+            pass
+        write_atomic(RULES, text, 0o644)
+    reload_rules()
+    return 0
+
+
+def need_root():
+    if os.getuid() != 0 and not ROOT:
+        print("This changes the machine: run it as root, or use ame security pull-key.", file=sys.stderr)
+        sys.exit(77)
+
+
+def choose(device_id):
+    need_root()
+    parsed = parse(device_id)
+    if not parsed:
+        print("That is not a device ID: ame security pull-key device lists them.", file=sys.stderr)
+        return 64
+    if device_id not in [found for found, _ in watchable()]:
+        print("That device is not plugged in, or has no serial number of its own, or is a hub.", file=sys.stderr)
+        return 65
+    write_atomic(DEVICE, device_id + "\n", 0o644)
+    return apply()
+
+
+def forget():
+    need_root()
+    try:
+        os.unlink(DEVICE)
+    except FileNotFoundError:
+        pass
+    return apply()
+
+
+def status():
+    device = chosen()
+    name = ""
+    plugged = False
+    if device:
+        for found, shown in watchable():
+            if found == ":".join(device):
+                plugged, name = True, shown
+    # "rule" is true only when the rule on disk is the one for the chosen device, as this helper writes it
+    json.dump({"key": config("PULL_KEY"), "device": ":".join(device) if device else None, "name": name or None,
+               "plugged_in": plugged, "rule": bool(device) and rule_device() == device}, sys.stdout)
+    sys.stdout.write("\n")
+    return 0
+
+
+def present(device):
+    vendor, product, serial = device
+    for found_vendor, found_product, found_serial, _name, _hub in devices():
+        if (found_vendor, found_product) == (vendor, product) and found_serial == serial:
+            return True
+    return False
+
+
+def run(words):
+    try:
+        done = subprocess.run(words, capture_output=True, text=True, timeout=20, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done
+
+
+def preparing_for_sleep():
+    done = run([f"{BIN}/busctl", "--system", "get-property", "org.freedesktop.login1", "/org/freedesktop/login1",
+                "org.freedesktop.login1.Manager", "PreparingForSleep"])
+    return bool(done and done.returncode == 0 and done.stdout.split()[-1:] == ["true"])
+
+
+def now_ms():
+    """CLOCK_MONOTONIC in milliseconds, which is what the journal's monotonic stamps use"""
+    if ROOT and os.environ.get("AMETHYSTORA_PULLKEY_NOW_MS", "").isdigit():
+        return int(os.environ["AMETHYSTORA_PULLKEY_NOW_MS"])
+    return int(time.monotonic() * 1000)
+
+
+def woke_recently():
+    """Whether the computer left a sleep state in the last few seconds. A journal that cannot be read says no: a removal
+    must not be ignored for want of knowing"""
+    done = run([f"{BIN}/journalctl", "-b", "--no-pager", "-o", "json", "--output-fields=__MONOTONIC_TIMESTAMP",
+                f"MESSAGE_ID={LEFT_SLEEP}"])
+    if not done or done.returncode != 0:
+        return False
+    last = None
+    for line in done.stdout.splitlines():
+        try:
+            last = max(last or 0, int(json.loads(line)["__MONOTONIC_TIMESTAMP"]) // 1000)
+        except (ValueError, KeyError, TypeError):
+            continue
+    return last is not None and 0 <= now_ms() - last < AFTER_WAKE * 1000
+
+
+def act():
+    key = config("PULL_KEY")
+    # The rule is what started this, and the record the watcher keeps exact: not the file in /var/lib, which only remembers a choice
+    device = rule_device()
+    if key == "off" or not device:
+        return 0
+    time.sleep(WAIT)
+    if present(device):
+        print("pull-key: the device is back, nothing to do")
+        return 0
+    if preparing_for_sleep():
+        print("pull-key: the computer is going to sleep, so a removal is not a pull")
+        return 0
+    if woke_recently():
+        print("pull-key: the computer has just woken, so a removal is not a pull")
+        return 0
+    if key == "lock":
+        print("pull-key: the chosen device was pulled out, locking every session")
+        done = run([f"{BIN}/loginctl", "lock-sessions"])
+    else:
+        print("pull-key: the chosen device was pulled out, powering off")
+        # In order, which syncs the disks, but not waiting for an app that holds the shutdown back
+        done = run([f"{BIN}/systemctl", "poweroff", "-i"])
+    return 0 if done and done.returncode == 0 else 1
+
+
+def main(argv):
+    if argv == ["list"]:
+        for found, name in watchable():
+            sys.stdout.write(f"{found}\t{name}\n")
+        return 0
+    if argv == ["status"]:
+        return status()
+    if len(argv) == 2 and argv[0] == "choose":
+        return choose(argv[1])
+    if argv == ["forget"]:
+        return forget()
+    if argv == ["apply"]:
+        need_root()
+        return apply()
+    if argv == ["act"]:
+        need_root()
+        return act()
+    usage()
+    return 64
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

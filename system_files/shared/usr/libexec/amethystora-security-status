@@ -1549,6 +1549,33 @@ fi
 COMMAND="ame security usb"
 report optional usb-protection "${USB}" "$(gettext "USB protection")" "${USB_TEXT}"
 
+# Pull the key (PULL_KEY, ame security pull-key): on only when a mode is chosen, a device is chosen and the rule that watches it is
+# written; a mode with no device does nothing, which is said as such
+PULL_KEY_MODE="$(/usr/libexec/amethystora-security-config PULL_KEY)"
+PULL_KEY_STATUS="$(/usr/libexec/amethystora-pull-key status 2>/dev/null)"
+COMMAND="ame security pull-key"
+# The lock screen turned off for the whole machine (dconf's system databases, read with no home: an account's own setting is its own and is not looked at)
+LOCK_SCREEN_OFF="$(HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent dconf read /org/gnome/desktop/lockdown/disable-lock-screen 2>/dev/null)"
+if [[ "${PULL_KEY_MODE}" == off ]]; then
+    report optional pull-key off "$(gettext "Pull the key")" \
+        "$(gettext "Lock the screen, or power the computer off, when a USB device you choose is pulled out")"
+elif [[ "$(jq -r '.device // empty' <<<"${PULL_KEY_STATUS:-null}" 2>/dev/null)" == "" || "$(jq -r '.rule' <<<"${PULL_KEY_STATUS:-null}" 2>/dev/null)" != true ]]; then
+    # No device chosen, or the rule on disk is not the helper's for it (the watcher says the rule changed)
+    report optional pull-key unavailable "$(gettext "Pull the key")" \
+        "$(gettext "Lock the screen, or power the computer off, when a USB device you choose is pulled out")" \
+        "$(gettext "It is turned on but no device is chosen, or the rule that watches it is not the one made for it, so pulling a device does nothing")"
+elif [[ "${PULL_KEY_MODE}" == lock && "${LOCK_SCREEN_OFF}" == true ]]; then
+    report optional pull-key unavailable "$(gettext "Pull the key")" \
+        "$(gettext "The screen locks when the USB device you chose is pulled out")" \
+        "$(gettext "The lock screen is turned off for this whole computer, so locking does nothing")"
+elif [[ "${PULL_KEY_MODE}" == lock ]]; then
+    report optional pull-key on "$(gettext "Pull the key")" \
+        "$(gettext "The screen locks when the USB device you chose is pulled out, in every account that has not turned its lock screen off")"
+else
+    report optional pull-key on "$(gettext "Pull the key")" \
+        "$(gettext "The computer powers off when the USB device you chose is pulled out")"
+fi
+
 # This account's own, in its home (amethystora-private-folder)
 if [[ -f "${HOME:-}/.local/share/amethystora/private/gocryptfs.conf" ]]; then PRIVATE=on; else PRIVATE=off; fi
 COMMAND="ame security private-folder"

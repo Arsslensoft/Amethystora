@@ -65,6 +65,14 @@ done
 [[ "$("${CONFIG}" TRIAGE)" == on && "$("${CONFIG}" --profile)" == light ]] || fail "a profile touched what sends away"
 "${CONFIG}" profile default
 [[ "$("${CONFIG}" TRIAGE)" == off ]] || fail "back to the defaults left what sends away on"
+# Pull the key is a lock of the person's own, like walk-away lock: no profile but off and default touches it
+"${CONFIG}" set PULL_KEY lock
+for profile in light balanced thorough; do
+    "${CONFIG}" profile "${profile}"
+    [[ "$("${CONFIG}" PULL_KEY)" == lock && "$("${CONFIG}" --profile)" == "${profile}" ]] || fail "profile ${profile} touched pull the key"
+done
+"${CONFIG}" profile default
+[[ "$("${CONFIG}" PULL_KEY)" == off ]] || fail "back to the defaults left pull the key on"
 # Every setting is in the file, said or as a comment, where somebody editing it by hand finds it
 for key in $("${CONFIG}" --list --json | jq -r '.settings[].key'); do
     grep -qE "^#?${key}=" /etc/amethystora/security.conf || fail "${key} is not in security.conf"

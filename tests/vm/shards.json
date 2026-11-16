@@ -41,6 +41,8 @@
     "70-backups.sh": 5.8,
     "74-vault.sh": 22,
     "75-deja-dup.sh": 4.2,
+    "77-pull-key.sh": 6,
+    "78-lab-devices.sh": 4,
     "80-control.sh": 20.9,
     "83-logins.sh": 6.2,
     "84-duress.sh": 7.7,

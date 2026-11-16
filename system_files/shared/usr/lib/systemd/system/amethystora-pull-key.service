@@ -1,0 +1,17 @@
+[Unit]
+Description=Lock or power off, because the USB device chosen for it was pulled out
+Documentation=file:///usr/share/amethystora/manual/pull-the-key.md
+
+[Service]
+Type=oneshot
+# PULL_KEY off is the whole of "off": the udev rule may still start this, and nothing then runs. Started by that rule only
+# (/etc/udev/rules.d/90-amethystora-pull-key.rules, written by ame security pull-key), so the unit is never enabled
+ExecCondition=/usr/libexec/amethystora-security-config --is PULL_KEY lock poweroff
+ExecStart=/usr/libexec/amethystora-pull-key act
+# A rule left behind by a key turned off by hand: taken away here (apply leaves a rule that is right alone, and reloads nothing)
+ExecStopPost=-/usr/libexec/amethystora-pull-key apply
+# A second of waiting for the device to come back, then a lock or a poweroff
+TimeoutStartSec=45
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes

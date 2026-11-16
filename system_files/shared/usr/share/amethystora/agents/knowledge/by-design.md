@@ -28,6 +28,22 @@ Symptom: a keyboard's configuration tool, a microcontroller board or a USB DAC w
 in at the screen but not over SSH or for another account. Confirm: the device's rule in
 `/usr/lib/udev/rules.d` uses `TAG+="uaccess"`. Change: nothing to change: log in at the machine.
 
+### A debug probe, a serial adapter or a logic analyser is root's (until lab devices are on)
+
+Symptom: a flashing or debugging tool (OpenOCD, a probe's own app, an Arduino or ESP tool, PulseView) says permission denied
+on a probe, on `/dev/ttyUSB0` or `/dev/ttyACM0`, or cannot open a logic analyser, though it works as root. Confirm: `lsusb` shows
+the device, `getfacl` on its node does not name the user, and `/etc/udev/rules.d/70-amethystora-lab-devices.rules` is absent.
+Change: `ame system lab-devices list` says which of the plugged-in devices it covers (the agent may run that); the user
+runs `ame system lab-devices on`, which says first what it gives the person at the seat and asks. A serial adapter is a modem's
+too, which is why it is a choice. Software-defined radios and many analysers need nothing: the system's own rules give
+them to the person at the seat.
+
+### Pulling a device locks or powers off the computer (only with pull the key on)
+
+Symptom: the screen locked, or the computer powered off, when a USB device came out. Confirm: `ame security status` names it
+under what is off unless turned on; `journalctl -t amethystora-pull-key`. Change: the user's choice, `ame security pull-key off` stops it; the
+agent never runs that, and does not choose the device. Plugging the device back in unlocks nothing.
+
 ### USB devices plugged in later are refused (only with USBGuard on)
 
 Symptom: a new USB device does nothing. Confirm: `systemctl is-active usbguard.service`, `usbguard

@@ -1371,6 +1371,18 @@ grep -q "^const SECURITY = '/usr/bin/amethystora-security';" "${UI_EXTENSION}/mo
 grep -q "^const CONFIG = '/usr/libexec/amethystora-security-config';" "${UI_EXTENSION}/modules/privacy/away.js"
 [[ "$(/usr/libexec/amethystora-security-config WALK_AWAY)" == off ]]
 [[ "$(/usr/libexec/amethystora-security-config --list --json | jq -r '.settings[] | select(.key == "WALK_AWAY") | .group')" == logins ]]
+# Pull the key (ame security pull-key; manual: pull-the-key.md): a security switch of the logins group, off as the image ships,
+# one udev rule written only on request and accepted by the watcher only as the helper writes it, a unit that reads its key, and
+# no rule in the image; it stands alone (nothing of it names another feature)
+[[ "$(/usr/libexec/amethystora-security-config PULL_KEY)" == off ]]
+[[ "$(/usr/libexec/amethystora-security-config --list --json | jq -r '.settings[] | select(.key == "PULL_KEY") | .group')" == logins ]]
+test -x /usr/libexec/amethystora-pull-key
+grep -q '^pull-key ACTION="" DEVICE="":' /usr/share/amethystora/just/security.just
+test ! -e /etc/udev/rules.d/90-amethystora-pull-key.rules
+test ! -e /usr/lib/udev/rules.d/90-amethystora-pull-key.rules
+grep -q 'pull_key_rule_as_written' /usr/libexec/amethystora-security-watch
+grep -qx 'ExecCondition=/usr/libexec/amethystora-security-config --is PULL_KEY lock poweroff' /usr/lib/systemd/system/amethystora-pull-key.service
+bash /ctx/build_files/shared/test-pull-key.sh
 # GNOME's own rest reminders are what ame desktop breaks writes: the key and its two kinds of break are there
 [[ "$(GSETTINGS_BACKEND=memory gsettings get org.gnome.desktop.break-reminders selected-breaks)" == "@as []" ]]
 GSETTINGS_BACKEND=memory gsettings list-keys org.gnome.desktop.break-reminders.eyesight | grep -qx interval-seconds

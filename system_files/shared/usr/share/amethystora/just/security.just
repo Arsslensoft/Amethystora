@@ -832,6 +832,10 @@ settings SETTING="" VALUE="":
                 exit 64
             fi
             title="$(jq -r .title <<<"${entry}")"
+            # Pulling the key has a device to choose and a rule to write, which its own command does
+            if [[ "${key}" == PULL_KEY ]]; then
+                exec ame security pull-key "${value}"
+            fi
             # Site checking is a choice in browser protection, which allows Osprey in the browsers
             if [[ "${key}" == OSPREY ]]; then
                 exec ame security browser osprey "${value}"
@@ -1253,6 +1257,92 @@ vscodium-extensions ACTION="":
 [positional-arguments]
 walk-away ACTION="":
     @ame security settings walk-away "${1:-}"
+
+# The screen locked, or the computer powered off, when the USB device you chose is pulled out (PULL_KEY in security.conf,
+# off as the image ships). ACTION is off, lock or poweroff, or device, which says which device to watch (and takes its ID,
+# which `ame security pull-key device` lists, as a second word). It stands alone: no other feature starts it or is started by it
+[positional-arguments]
+pull-key ACTION="" DEVICE="":
+    #!/usr/bin/bash
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source gettext.sh
+    config=/usr/libexec/amethystora-security-config
+    helper=/usr/libexec/amethystora-pull-key
+    action="${1:-}"
+    given="${2:-}"
+    cancel="$(gettext "Cancel")"
+    # The device that is chosen, empty for none
+    chosen() { "${helper}" status | jq -r '.device // empty'; }
+    # Which device to watch: one plugged in now, with a serial number of its own
+    pick() {
+        local id="" name line i lines=() ids=()
+        if [[ -n "${given}" ]]; then
+            id="${given}"
+        else
+            while IFS=$'\t' read -r found name; do
+                [[ -n "${found}" ]] || continue
+                lines+=("${name}  (${found})")
+                ids+=("${found}")
+            done < <("${helper}" list)
+            if [[ ${#ids[@]} -eq 0 ]]; then
+                echo "$(gettext "No USB device with a serial number of its own is plugged in. Plug in the one to tie to this computer, then run this again. A hub, and a device without a serial number, cannot be told from others of its make.")"
+                return 1
+            fi
+            echo "$(gettext "Choose a device that no program can make leave the bus: a plain USB stick or a security key, not a phone or a development board. A program of your account that can reset the device you choose can lock every session, or power the computer off, without anyone pulling it.")"
+            line="$(gum choose --header "$(gettext "Which USB device is pulled out to lock or power off?")" "${lines[@]}" "${cancel}")" || return 1
+            [[ "${line}" != "${cancel}" ]] || return 1
+            for i in "${!lines[@]}"; do
+                [[ "${lines[i]}" == "${line}" ]] && id="${ids[i]}"
+            done
+        fi
+        sudo "${helper}" choose "${id}" || return 1
+        echo "$(eval_gettext "Watching \${id}.")"
+        # USB protection blocks a device it was not told about: blocked, it is never plugged in to be pulled out
+        if systemctl is-enabled --quiet usbguard.service 2>/dev/null; then
+            echo "$(gettext "USB protection is on: this device has to be allowed, or it is blocked when it is plugged in and there is nothing to pull. ame security usb allow does that.")"
+        fi
+    }
+    if [[ -z "${action}" ]]; then
+        "${helper}" status | jq -r '"\(.key)  \(.device // "-")"'
+        action="$(gum choose --header "$(gettext "Pull the key")" off lock poweroff device "${cancel}")" || exit 0
+    fi
+    case "${action}" in
+        device)
+            pick || exit 0
+            if ! "${config}" --is PULL_KEY lock poweroff; then
+                echo "$(gettext "It does nothing until it is on: ame security pull-key lock, or poweroff.")"
+            fi
+            ;;
+        off)
+            sudo "${config}" set PULL_KEY off
+            sudo "${helper}" apply
+            echo "$(gettext "Pulling the device out does nothing now.")"
+            ;;
+        lock | poweroff)
+            if [[ -z "$(chosen)" ]]; then
+                pick || exit 0
+            fi
+            entry="$("${config}" --list --json | jq -c '.settings[] | select(.key == "PULL_KEY")')"
+            jq -r .text <<<"${entry}" | fold -s -w 96
+            echo
+            jq -r .explain <<<"${entry}" | fold -s -w 96
+            if [[ "${action}" == poweroff ]]; then
+                echo
+                echo "$(gettext "Power off ends everything at once, in order but without waiting for an app that holds the shutdown back, so what is not saved is lost.")"
+            fi
+            gum confirm "$(gettext "Turn it on, knowing that?")" || exit 0
+            sudo "${config}" set PULL_KEY "${action}"
+            sudo "${helper}" apply
+            device="$(chosen)"
+            echo "$(eval_gettext "On: \${action}. Pulling out \${device} does it.")"
+            ;;
+        "" | "${cancel}" | Cancel) exit 0 ;;
+        *)
+            echo "usage: ame security pull-key off|lock|poweroff|device [ID]"
+            exit 64
+            ;;
+    esac
 
 # What the security watcher noticed: accounts, what starts by itself, settings, keyboard readers
 [positional-arguments]

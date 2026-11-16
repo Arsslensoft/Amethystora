@@ -541,6 +541,7 @@ fn tile_icon(id: &str) -> &'static str {
         "disk-unlock" => "chip",
         "usb-protection" => "plug",
         "private-folder" => "folder",
+        "pull-key" => "key",
         "browser-protection" | "browser-privacy" => "monitor",
         "site-checking" => "scan",
         "key-remapping" => "keyboard",
@@ -799,6 +800,8 @@ fn value_words(value: &str) -> String {
         "strict" => t!("Strict"),
         "skip" => t!("Skip"),
         "run" => t!("Run"),
+        "lock" => t!("Lock"),
+        "poweroff" => t!("Power off"),
         _ => value.to_string(),
     }
 }

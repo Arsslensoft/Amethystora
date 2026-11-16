@@ -333,6 +333,8 @@ async function reboot(machine) {
     // ...or to power it off: started again once QEMU has ended, as a person presses the power button
     await agent(vm, { op: 'exec', command: `rm -f ${NEXT_BOOT}` }, 10);
     say(`${lane(m)}the machine powers itself off`);
+    // USB devices the phase asked to have pulled out (usb_next) go now: the power off is what pulling one does (77-pull-key.sh)
+    await usb(vm);
     const off = new RegExp(`^${vm}: stopped`, 'm');
     for (const began = Date.now(); !off.test((await call('vm_list')).content[0].text); await sleep(5000)) {
       if (Date.now() - began > 900000) throw new Error('the VM did not power itself off within 15 minutes');
@@ -405,6 +407,7 @@ async function screenNext(vm) {
 
 // USB devices plugged out, then in, as a phase that ended with 101 asked (usb_next), before the next one
 let drives = 0;
+let chardevs = 0;
 async function usb(vm) {
   let request = null;
   try {
