@@ -916,7 +916,7 @@ find accounts by their folders in `/var/home` as well, and never filter on `uid 
   consoles (`duress=deny` in `system-auth`), and runs the owner's action as root either way, once per boot.
   pam_fprintd tells the finger apart only in the image's own fprintd build (`packaging/fprintd`, built in
   the fprintd layer): upstream's `VerifyFingerMatched` signal and its signals sent only to the
-  claiming client, both unreleased after 1.94.5, plus Amethystora's patch to pam_fprintd. The feature
+  claiming client, both unreleased after 1.94.5, plus Amethystora's patches to pam_fprintd (the duress finger, and signals taken from fprintd's own connection only). The feature
   `with-duress-fingerprint` is the per-machine switch: `08-hardening.sh` turns the link to `system-auth` and
   `fingerprint-auth` in the vendor `local`, `sssd` and `winbind` profiles into copies with one `{if}` each,
   so that with it off authselect writes the same bytes as before, and `amethystora-domain-logins` keeps it

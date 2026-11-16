@@ -37,10 +37,11 @@ own each time an image is built (build_files/base/12-tour.sh).
 
 fprintd (GPL-2.0-or-later, https://gitlab.freedesktop.org/libfprint/fprintd),
 which reads fingerprints, is not the package as Fedora builds it either. Each
-image build makes it again from Fedora's spec with seven patches, kept in
+image build makes it again from Fedora's spec with eight patches, kept in
 packaging/fprintd of the repository under fprintd's licence: six of fprintd's
-own, from its development after its release 1.94.5, and one of Amethystora's,
-the duress finger in pam_fprintd. Its source package travels in the image, in
+own, from its development after its release 1.94.5, and two of Amethystora's,
+the duress finger in pam_fprintd and its taking fprintd's signals from fprintd's
+own connection only. Its source package travels in the image, in
 usr/src/amethystora.
 
 Solaar's udev rules (GPL-2.0-or-later, https://github.com/pwr-Solaar/Solaar),

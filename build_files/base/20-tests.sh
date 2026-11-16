@@ -4228,6 +4228,8 @@ test -x "${DURESS}"
 "${DURESS}" supported
 [[ "$(rpm -q --queryformat '%{RELEASE}\n' fprintd fprintd-pam | grep -c '\.amethystora\.')" == 2 ]]
 test -s "/usr/src/amethystora/$(rpm -q --queryformat '%{SOURCERPM}' fprintd-pam)"
+# ...whose pam_fprintd takes fprintd's signals from fprintd's own connection (0008): a rebase that drops it fails here
+grep -q GetNameOwner /usr/lib64/security/pam_fprintd.so
 test -x /usr/libexec/amethystora-duress-service
 python3 -m py_compile /usr/libexec/amethystora-duress-service
 [[ "$("${DURESS}" status)" == off ]]
