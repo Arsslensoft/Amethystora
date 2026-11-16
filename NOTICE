@@ -50,11 +50,29 @@ solaar-udev package, are changed when an image is built: the line that gives
 /dev/uinput to whoever sits at the machine is taken out, and the file says so
 (build_files/base/08-hardening.sh). Its source is Fedora's package.
 
+QEMU's /etc/qemu/bridge.conf (GPL-2.0-or-later, https://www.qemu.org) from Fedora's qemu-common package is replaced
+on the developer images: the line that lets qemu-bridge-helper attach to virbr0 is taken out, and the file says so
+(system_files/dx/etc/qemu/bridge.conf). Its source is Fedora's package.
+
 OpenRGB's udev rules (GPL-2.0-only AND GPL-3.0-or-later, https://openrgb.org),
 /usr/lib/udev/rules.d/60-openrgb.rules from Fedora's openrgb-udev-rules package,
 are changed when an image is built: the two lines that give every i2c bus and
 /dev/port to whoever sits at the machine are taken out, and the file says so
 (build_files/base/08-hardening.sh). Its source is Fedora's package.
+
+Input Remapper's D-Bus policy (GPL-3.0-or-later, https://github.com/sezanzeb/input-remapper),
+/usr/share/dbus-1/system.d/inputremapper.Control.conf from Fedora's input-remapper package,
+is changed when an image is built: the service's name may be owned by root alone and
+its calls sent by root and the members of wheel only, where the package lets every
+account do both, and the file says so (build_files/base/08-hardening.sh). Its source is
+Fedora's package.
+
+libratbag's D-Bus policy (MIT, https://github.com/libratbag/libratbag),
+/usr/share/dbus-1/system.d/org.freedesktop.ratbag1.conf from Fedora's libratbag-ratbagd
+package, is changed when an image is built: the service's calls may be sent, and its
+signals heard, by root and the members of wheel only, where the package lets every
+account do both, and the file says so (build_files/base/08-hardening.sh). Its source is
+Fedora's package.
 
 The desktop theme switcher takes its design and its colour palettes from Omakub
 and its fork Omabuntu. Each says in its README that it is released under the
