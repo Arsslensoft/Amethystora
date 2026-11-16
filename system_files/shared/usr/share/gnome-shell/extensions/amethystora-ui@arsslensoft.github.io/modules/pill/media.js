@@ -26,6 +26,7 @@ import * as Mpris from 'resource:///org/gnome/shell/ui/mpris.js';
 import * as Slider from 'resource:///org/gnome/shell/ui/slider.js';
 import {getMixerControl} from 'resource:///org/gnome/shell/ui/status/volume.js';
 
+import {pictureFits} from '../agent/pictures.js';
 import {buttonRow, cardButton, retire} from './clock.js';
 import {Levels} from './levels.js';
 import {albumColour, plateTint} from './tint.js';
@@ -47,6 +48,8 @@ const LEVEL_STEP = 0.08;
 // How small a copy of the cover its colour is read from, and the largest file read
 const TINY = 16;
 const LARGEST_COVER = 8 << 20;
+// How much of a cover's start is read to see what size it declares
+const COVER_HEAD = 64 * 1024;
 
 // One list of players for the shell's life when GNOME's own is not where it is looked for, so that turning the
 // module off and on does not make another
@@ -86,15 +89,49 @@ export function coverPath(url) {
     return path;
 }
 
+// Gives the widget its cover once the file is known to be a plain one of at most LARGEST_COVER bytes whose header
+// declares a picture of a size the shell may decode: St loads a background image whole, on the main thread, so that
+// is asked first and off it. A cover that fails any of it is not shown
+function showCover(widget, path) {
+    const cancellable = new Gio.Cancellable();
+    widget.connect('destroy', () => cancellable.cancel());
+    const file = Gio.File.new_for_path(path);
+    file.query_info_async('standard::type,standard::size', Gio.FileQueryInfoFlags.NONE, GLib.PRIORITY_LOW, cancellable, (f, result) => {
+        let info;
+        try {
+            info = f.query_info_finish(result);
+        } catch {
+            return;
+        }
+        if (info.get_file_type() !== Gio.FileType.REGULAR || info.get_size() > LARGEST_COVER)
+            return;
+        f.read_async(GLib.PRIORITY_LOW, cancellable, (g, opened) => {
+            let stream;
+            try {
+                stream = g.read_finish(opened);
+            } catch {
+                return;
+            }
+            stream.read_bytes_async(COVER_HEAD, GLib.PRIORITY_LOW, cancellable, (s, head) => {
+                let fits = false;
+                try {
+                    fits = pictureFits(s.read_bytes_finish(head).toArray());
+                } catch {}
+                stream.close_async(GLib.PRIORITY_LOW, null, null);
+                if (fits && !cancellable.is_cancelled())
+                    widget.style = `background-image: url("${path}");`;
+            });
+        });
+    });
+}
+
 // A picture of the track: its cover with round corners, or the player's icon, or a note
 function artwork(player, size, styleClass) {
     const path = coverPath(read(player, 'trackCoverUrl', ''));
     if (path) {
-        return new St.Widget({
-            style_class: styleClass,
-            style: `background-image: url("${path}");`,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
+        const widget = new St.Widget({style_class: styleClass, y_align: Clutter.ActorAlign.CENTER});
+        showCover(widget, path);
+        return widget;
     }
     const gicon = read(player, 'app', null)?.get_icon?.() ?? null;
     const icon = new St.Icon({

@@ -3,8 +3,9 @@
 # use, read from its accessibility tree, for Amethystora UI's access module, which puts a letter on each. Run as the
 # account, by the shell, only while the letters show.
 #
-#   amethystora-letters PID TITLE
-#       finds the active window of process PID (or else the active window titled TITLE) in the accessibility tree,
+#   amethystora-letters PID
+#       reads one line from stdin, `title TITLE`, then finds the active window of process PID (or else the active window
+#       titled TITLE) in the accessibility tree,
 #       prints one JSON line {"frame": [x, y, w, h], "items": [[x, y, w, h], ...]} of its controls that show, in the
 #       window's own coordinates (or {"error": WHY}), then reads stdin: `press N` does control N's action (a click, or the
 #       focus for a field) and ends; stdin closing ends it with nothing done
@@ -167,12 +168,14 @@ def press(Atspi, node):
 
 
 def main(argv):
-    if len(argv) != 3 or not argv[1].isdigit():
-        print('usage: amethystora-letters PID TITLE', file=sys.stderr)
+    if len(argv) != 2 or not argv[1].isdigit():
+        print('usage: amethystora-letters PID   (then `title TITLE` on standard input)', file=sys.stderr)
         return 64
+    first = sys.stdin.readline(2048)
+    title = first[6:].strip() if first.startswith('title ') else ''
     try:
         Atspi = atspi()
-        frame = frame_of(Atspi, int(argv[1]), argv[2])
+        frame = frame_of(Atspi, int(argv[1]), title)
     except Exception as e:
         say({'error': 'tree'})
         print(f'amethystora-letters: {e}', file=sys.stderr)

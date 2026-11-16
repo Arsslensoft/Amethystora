@@ -63,6 +63,23 @@ for (const [what, data] of [
 ])
     if (pictureFits(data)) fail(`${what} should not fit`);
 
+// Text laid out to make a backtracking pattern run for ages is refused at once, and by a walk that cannot backtrack
+for (const [what, head] of [
+    ['empty comments', '<!---->'.repeat(580)],
+    ['comments that each end at the next', '<!--'.repeat(1000)],
+    ['a DOCTYPE with many ]', '<!DOCTYPE a [' + '] '.repeat(2000)],
+    ['many DOCTYPEs', '<!DOCTYPE a [x]>'.repeat(250)],
+    ['a long declaration', '<?xml' + ' ?'.repeat(2000)],
+]) {
+    const data = new TextEncoder().encode(head).subarray(0, 4096);
+    const started = Date.now();
+    const size = pictureSize(data);
+    if (Date.now() - started > 50) fail(what + ' took ' + (Date.now() - started) + ' ms');
+    if (size !== null) fail(what + ' should not be a picture');
+}
+eq(pictureSize(new TextEncoder().encode('<!---->'.repeat(100) + '<!DOCTYPE a [x] >\n<SVG width="5" height="6">')),
+    {width: 5, height: 6}, 'svg after many comments and a DOCTYPE');
+
 // The byte ceilings, whatever the header says
 const heavy = new Uint8Array(MAX_PICTURE_BYTES + 1);
 heavy.set(png(10, 10));

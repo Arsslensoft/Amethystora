@@ -39,6 +39,12 @@ const SETTLE_MS = 120;
 const SECRET_HINT = 'x-kde-passwordManagerHint';
 // How long a text set from a phone is still known as that phone's, so that the change it makes is not sent back
 const ECHO_MS = 3000;
+// The clipboard's text types, in the order they are asked for. The text is read through Mutter's own transfer, which
+// takes a size, so a copy of any length costs no more than MAX_BYTES + 1 bytes and an app that never sends it can be
+// given up on; St's get_text takes neither
+const TEXT_TYPES = ['text/plain;charset=utf-8', 'UTF8_STRING', 'text/plain', 'STRING'];
+// How long an app that owns the clipboard has to hand its text over
+const PATIENCE_MS = 2000;
 
 function locked() {
     return Main.sessionMode.isLocked || Main.screenShield?.locked === true;
@@ -62,6 +68,7 @@ export class Bridge {
         this._receiving = false;
         this._timer = 0;
         this._reads = 0;
+        this._reading = null;
         this._applied = null;
     }
 
@@ -97,8 +104,10 @@ export class Bridge {
         if (this._timer)
             GLib.source_remove(this._timer);
         this._timer = 0;
-        // A reading already asked for is ignored when it arrives
+        // A reading already asked for is ignored when it arrives, and a transfer going on is ended
         this._reads++;
+        this._reading?.cancel();
+        this._reading = null;
     }
 
     // The primary selection, which a mere highlighting changes, is not the clipboard and is never looked at
@@ -120,13 +129,40 @@ export class Bridge {
     _read() {
         if (!this._sending || locked())
             return;
-        const clipboard = St.Clipboard.get_default();
-        if (clipboard.get_mimetypes(St.ClipboardType.CLIPBOARD).includes(SECRET_HINT))
+        const selection = global.display.get_selection();
+        const offered = selection.get_mimetypes(Meta.SelectionType.SELECTION_CLIPBOARD) ?? [];
+        // Nothing for an image or files, which have no text
+        const type = TEXT_TYPES.find(t => offered.includes(t));
+        if (!type || offered.includes(SECRET_HINT))
             return;
+        this._reading?.cancel();
         const read = ++this._reads;
-        clipboard.get_text(St.ClipboardType.CLIPBOARD, (c, text) => {
-            // Nothing for an image or files, which have no text
-            if (read !== this._reads || !this._sending || locked() || !text || !fits(text))
+        const cancellable = new Gio.Cancellable();
+        this._reading = cancellable;
+        const stream = Gio.MemoryOutputStream.new_resizable();
+        let timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PATIENCE_MS, () => {
+            timer = 0;
+            cancellable.cancel();
+            return GLib.SOURCE_REMOVE;
+        });
+        selection.transfer_async(Meta.SelectionType.SELECTION_CLIPBOARD, type, MAX_BYTES + 1, stream, cancellable, (s, result) => {
+            if (timer)
+                GLib.source_remove(timer);
+            if (this._reading === cancellable)
+                this._reading = null;
+            let bytes;
+            try {
+                s.transfer_finish(result);
+                stream.close(null);
+                bytes = stream.steal_as_bytes();
+            } catch {
+                return;
+            }
+            // A copy that reached the extra byte is longer than is passed on
+            if (bytes.get_size() > MAX_BYTES || read !== this._reads || !this._sending || locked())
+                return;
+            const text = new TextDecoder().decode(bytes.toArray());
+            if (!text || !fits(text))
                 return;
             // A one-time code the pill copied (pill/code.js) is no text to send anywhere
             if (text === globalThis[Symbol.for('amethystora.clipboard.secret')])

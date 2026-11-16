@@ -9,6 +9,47 @@ export const MAX_TEXT_BYTES = 8 * 1024 * 1024;
 export const MAX_PICTURE_PIXELS = 36 * 1000 * 1000;
 export const MAX_PICTURE_SIDE = 16384;
 
+// The root element's opening tag, in an array, when <svg> follows the XML declaration, comments and DOCTYPE at the top
+// of the text, or null. A plain walk with indexOf: nothing here can backtrack, however the bytes are arranged
+function svgRoot (head) {
+    const blank = at => { while (at < head.length && /\s/.test(head[at])) at++; return at; };
+    const lower = (at, text) => head.substr(at, text.length).toLowerCase() === text;
+    let at = blank(0);
+    for (;;) {
+        let end;
+        if (lower(at, '<?xml')) {
+            end = head.indexOf('>', at + 5);
+            if (end < 0 || end - 1 < at + 5 || head[end - 1] !== '?')
+                return null;
+        } else if (head.startsWith('<!--', at)) {
+            end = head.indexOf('-->', at + 4);
+            if (end < 0)
+                return null;
+            end += 2;
+        } else if (lower(at, '<!doctype')) {
+            end = at + 9;
+            while (end < head.length && head[end] !== '>' && head[end] !== '[')
+                end++;
+            if (head[end] === '[') {
+                let close = head.indexOf(']', end + 1);
+                while (close >= 0 && head[blank(close + 1)] !== '>')
+                    close = head.indexOf(']', close + 1);
+                if (close < 0)
+                    return null;
+                end = blank(close + 1);
+            }
+            if (head[end] !== '>')
+                return null;
+        } else {
+            if (!lower(at, '<svg') || /\w/.test(head[at + 4] ?? ' '))
+                return null;
+            end = head.indexOf('>', at + 4);
+            return end < 0 ? null : [head.slice(at, end + 1)];
+        }
+        at = blank(end + 1);
+    }
+}
+
 // The width and height a picture's header declares, from its magic bytes (never from the type the app said), or null
 // for data that is no PNG, GIF, JPEG, WebP or SVG that can be read
 export function pictureSize (data) {
@@ -61,8 +102,7 @@ export function pictureSize (data) {
     }
     if (/[\u0000-\u0008\u000b\u000e-\u001f]/.test(head))
         return null;
-    const found = /^\s*(?:<\?xml[^>]*\?>\s*|<!--[\s\S]*?-->\s*|<!DOCTYPE[^>[]*(?:\[[\s\S]*?\]\s*)?>\s*)*(<svg\b[^>]*>)/i.exec(head);
-    const root = found ? [found[1]] : null;
+    const root = svgRoot(head);
     if (root) {
         const attr = name => {
             const m = new RegExp(`\\s${name}\\s*=\\s*["']\\s*([0-9.]+)\\s*(px|pt|mm|cm|in|pc|em|ex|%)?\\s*["']`, 'i').exec(root[0]);

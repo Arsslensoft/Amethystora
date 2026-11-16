@@ -121,7 +121,8 @@ class OpenerDialog extends ModalDialog.ModalDialog {
         words.add_child(label(name, 'amethystora-tools-users-name'));
         const size = plain(app.size, 16);
         const from = app.installed ? _('Installed') : size ? _('From Flathub, %s').format(size) : _('From Flathub');
-        const detail = [plain(app.summary, 120), from].filter(part => part).join(' · ');
+        // The app's id is shown with where it comes from, so that what is installed is what was shown
+        const detail = [plain(app.id, 80), from, plain(app.summary, 120)].filter(part => part).join(' · ');
         words.add_child(label(detail, 'amethystora-tools-users-detail', true));
         // Said before the click: an app claims by itself what it opens, and installing it starts it on this file
         if (!app.installed)
