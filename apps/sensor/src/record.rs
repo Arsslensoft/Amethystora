@@ -59,6 +59,8 @@ pub struct Record {
     pub target_comm: Vec<u8>,
     pub target_mnt: u32,
     pub own_mnt: u32,
+    /// The host's mount namespace, to tell whether `own_mnt` is it (0 when not known).
+    pub host_mnt: u32,
     /// Wall-clock time of the event, in nanoseconds since the epoch.
     pub time_ns: u128,
 }
@@ -153,6 +155,17 @@ fn path_items(r: &Record) -> Vec<PathItem> {
             }
             items
         }
+        // A rename that only the keys watching reads saw (a secret moved out of sight) names the file's old path
+        // first, as a read of it does
+        SOP_RENAME if r.keys != 0 && r.keys & !keys::READ_KEYS == 0 && !r.dir.is_empty() => vec![
+            PathItem { name: child(&r.dir, &r.name), nametype: "DELETE", mode: r.obj_mode, object: true },
+            PathItem {
+                name: if r.dir2.is_empty() { absolute(&r.path2, &r.cwd) } else { child(&r.dir2, &r.name2) },
+                nametype: "CREATE",
+                mode: r.obj_mode,
+                object: true,
+            },
+        ],
         SOP_RENAME => {
             let old = if r.dir.is_empty() { absolute(&r.path2, &r.cwd) } else { child(&r.dir, &r.name) };
             let new = if r.dir2.is_empty() { absolute(&r.path2, &r.cwd) } else { child(&r.dir2, &r.name2) };
@@ -215,6 +228,11 @@ egid={} sgid={} fsgid={} tty=",
     line.extend_from_slice(b" subj=? ");
     let key_names = keys::names_of(r.keys);
     enc(&mut line, "key", key_names.join("\x01").as_bytes());
+    // Whether the actor ran in the host's mount namespace, so that the program above is a path of the host's and
+    // not one its own namespace made up. Written only where the sensor knows both.
+    if r.own_mnt != 0 && r.host_mnt != 0 {
+        line.extend_from_slice(format!(" hostmnt={}", u8::from(r.own_mnt == r.host_mnt)).as_bytes());
+    }
     line.push(b'\n');
     out.write_all(&line)?;
 
@@ -375,6 +393,52 @@ mod tests {
         assert!(text.contains("type=OBJ_PID msg=audit(0.000:7): opid=1234 oauid=1000 ouid=1000 oses=-1 obj=? ocomm=\"sleep\" omnt=4026531841 mnt=4026531841"), "{text}");
         assert!(text.contains("item=0 name=\"/usr/bin/sleep\""), "{text}");
         assert!(text.contains("nametype=UNKNOWN"), "{text}");
+    }
+
+    #[test]
+    fn says_whether_the_actor_ran_in_the_host_namespace() {
+        let open = |own_mnt, host_mnt| Record {
+            op: SOP_OPEN,
+            syscall: 257,
+            keys: 1 << 9,
+            dir: b"/var/home/a/.ssh".to_vec(),
+            name: b"id_ed25519".to_vec(),
+            exe: b"/usr/bin/restic".to_vec(),
+            own_mnt,
+            host_mnt,
+            ..Default::default()
+        };
+        let line = |r: &Record| written(r).lines().next().unwrap().to_string();
+        assert!(line(&open(4026531841, 4026531841)).ends_with(" hostmnt=1"));
+        assert!(line(&open(4026532900, 4026531841)).ends_with(" hostmnt=0"));
+        // Not known on either side: no field, as in a record auditd writes
+        assert!(!line(&open(0, 4026531841)).contains("hostmnt"));
+        assert!(!line(&open(4026532900, 0)).contains("hostmnt"));
+    }
+
+    #[test]
+    fn a_secret_moved_is_named_by_its_old_path_first() {
+        let rename = |keys| Record {
+            op: SOP_RENAME,
+            syscall: 82,
+            keys,
+            dir: b"/var/home/a/.ssh".to_vec(),
+            name: b"id_ed25519".to_vec(),
+            dir2: b"/var/home/a/.ssh".to_vec(),
+            name2: b"t".to_vec(),
+            obj_mode: 0o100600,
+            parent_mode: 0o040700,
+            ..Default::default()
+        };
+        let text = written(&rename(1 << 9));
+        assert!(text.contains("items=2"), "{text}");
+        assert!(text.contains("item=0 name=\"/var/home/a/.ssh/id_ed25519\""), "{text}");
+        assert!(text.contains("item=1 name=\"/var/home/a/.ssh/t\""), "{text}");
+        assert!(!text.contains("nametype=PARENT"), "{text}");
+        // A rename that a key watching writes saw too keeps the kernel's order, the folders first
+        let text = written(&rename((1 << 9) | (1 << 2)));
+        assert!(text.contains("item=0 name=\"/var/home/a/.ssh/\""), "{text}");
+        assert!(text.contains("nametype=PARENT"), "{text}");
     }
 
     #[test]

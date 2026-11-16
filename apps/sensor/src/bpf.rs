@@ -21,8 +21,10 @@ fn required_mask(prog: &str) -> u32 {
         "file_open" | "task_kill" | "bpf_call" => u32::MAX,
         "open_refused" => keys::WRITE_KEYS | keys::READ_KEYS,
         "vfs_unlink_exit" | "vfs_rmdir_exit" | "vfs_mkdir_exit" | "vfs_mknod_exit" | "vfs_symlink_exit"
-        | "vfs_link_exit" | "vfs_rename_entry" | "vfs_rename_exit" | "notify_change_exit" | "vfs_truncate_exit"
-        | "vfs_setxattr_exit" | "vfs_removexattr_exit" | "vfs_set_acl_exit" | "vfs_remove_acl_exit" => keys::WRITE_KEYS,
+        | "notify_change_exit" | "vfs_truncate_exit" | "vfs_setxattr_exit" | "vfs_removexattr_exit"
+        | "vfs_set_acl_exit" | "vfs_remove_acl_exit" => keys::WRITE_KEYS,
+        // A rename or a link of a file watched for reads is recorded under its read key too
+        "vfs_link_exit" | "vfs_rename_entry" | "vfs_rename_exit" => keys::WRITE_KEYS | keys::READ_KEYS,
         "file_open_input" => keys::INPUT_BIT,
         "bprm_check" | "process_exec" | "execve_exit" | "execveat_exit" => keys::EXEC_KEYS,
         "module_file" | "module_loaded" | "finit_module_exit" | "init_module_exit" | "delete_module_exit" => {
@@ -64,8 +66,10 @@ pub fn load(enabled_keys: u32, probe: bool) -> Result<Loaded, Box<dyn std::error
     // The keys it runs for, into .rodata, before load: a key that is off leaves its code out, pruned by the
     // verifier. Its own pid goes into .bss the same way, so no window exists where it does not know itself.
     // Both must take, or the sensor would run blind (no keys) or not recognise its own opens (no pid), so a
-    // failure here is fatal rather than a silent no-op.
+    // failure here is fatal rather than a silent no-op. The thread that registers folders is this one until
+    // the daemon hands that to its worker (run.rs).
     let self_tgid = std::process::id();
+    let self_tid = unsafe { libc::syscall(libc::SYS_gettid) } as u32;
     let mut set_rodata = false;
     let mut set_bss = false;
     for mut map in open.maps_mut() {
@@ -78,8 +82,9 @@ pub fn load(enabled_keys: u32, probe: bool) -> Result<Loaded, Box<dyn std::error
             }
         } else if name_is(map.name(), "bss") {
             if let Some(buf) = map.initial_value_mut() {
-                if buf.len() >= 4 {
+                if buf.len() >= 8 {
                     buf[0..4].copy_from_slice(&self_tgid.to_ne_bytes());
+                    buf[4..8].copy_from_slice(&self_tid.to_ne_bytes());
                     set_bss = true;
                 }
             }

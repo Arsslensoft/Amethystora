@@ -191,6 +191,7 @@ fn record_from_json(v: &serde_json::Value) -> record::Record {
         target_comm: bytes("target_comm"),
         target_mnt: u32f("target_mnt"),
         own_mnt: u32f("own_mnt"),
+        host_mnt: u32f("host_mnt"),
         time_ns: v.get("time").and_then(Value::as_u64).map(|s| s as u128 * 1_000_000_000).unwrap_or(0),
     }
 }

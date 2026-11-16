@@ -87,6 +87,39 @@ expect "a link made, as done" \
 expect "a folder removed, as done" \
     '.key == "persistence" and (.text | contains(" successfully deleted /etc/systemd/system/amethystora-sensor-test.d using "))'
 
+# The loop that drains the ring buffer says it is alive, with or without an event (heartbeat, in seconds since boot
+# as /proc/uptime counts them), and registering new folders does not hold it up: a tree of folders moved into a
+# watched place is registered by a worker, while a write to a watched file is still recorded at once.
+beat_age() { echo $(($(cut -d. -f1 /proc/uptime) - $(cat /run/amethystora/sensor/heartbeat 2>/dev/null || echo 0))); }
+check "the sensor's heartbeat is fresh" test "$(beat_age)" -le 15
+before="$(wc -l <"${HISTORY}" 2>/dev/null || echo 0)"
+tree=/etc/systemd/amethystora-sensor-tree
+mkdir -p "${tree}"
+for i in $(seq 1 1500); do mkdir -p "${tree}/d${i}/sub"; done
+mkdir -p "${tree}/m/mnt"
+mount -t tmpfs none "${tree}/m/mnt"
+mv "${tree}" /etc/systemd/system/amethystora-sensor-tree.d
+bash -c ': >>/etc/passwd'
+check "the sensor's heartbeat is fresh while it registers a tree" test "$(beat_age)" -le 15
+# The tree's folders are watched once the worker has opened them; a mount inside it is not the tree
+sleep 10
+touch /etc/systemd/system/amethystora-sensor-tree.d/d1500/sub/amethystora-sensor-deep.service
+touch /etc/systemd/system/amethystora-sensor-tree.d/m/mnt/amethystora-sensor-mounted.service
+sleep 4
+: >>/etc/passwd
+sleep 3
+systemctl start amethystora-security-watch.service
+found="$(tail -n +"$((before + 1))" "${HISTORY}" 2>/dev/null)"
+expect "a write to an account file while a tree is registered" '.key == "identity" and (.text | contains("/etc/passwd"))'
+expect "a file in the deepest folder of a tree moved in" '.key == "persistence" and (.text | contains("amethystora-sensor-deep.service"))'
+if jq -e -s 'any(.[]; (.text | contains("amethystora-sensor-mounted.service")))' <<<"${found}" >/dev/null 2>&1; then
+    not_ok "a mount inside a watched tree was registered as part of it"
+else
+    ok "a mount inside a watched tree is not registered as part of it"
+fi
+umount "/etc/systemd/system/amethystora-sensor-tree.d/m/mnt" 2>/dev/null
+rm -rf /etc/systemd/system/amethystora-sensor-tree.d
+
 # How much the sensor's maps and ring buffer cost, for the record
 rss="$(systemctl show -p MemoryCurrent --value amethystora-sensor.service 2>/dev/null)"
 [[ "${rss}" =~ ^[0-9]+$ ]] && echo "# sensor memory: $((rss / 1024 / 1024)) MB"

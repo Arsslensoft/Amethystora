@@ -36,6 +36,8 @@ log="${work}/audit.log"
 {"op":18,"syscall":62,"result":0,"keys":["sensor"],"args":["4d2","13","0","0"],"exe":"/usr/bin/kill"}
 {"op":1,"syscall":257,"result":3,"keys":["credentials"],"flags":134217728,"dir":"/var/home/alice/.config/my app","name":"creds.json","cwd":"/var/home/alice","mode":"0100600","exe":"/usr/bin/cat"}
 {"op":1,"syscall":257,"result":3,"keys":["credentials"],"flags":134217728,"dir":"/var/home/alice/.ssh","name":"id_rsa","cwd":"/var/home/alice","mode":"0100600","exe":"/usr/bin/cat"}
+{"op":1,"syscall":257,"result":3,"keys":["credentials"],"flags":134217728,"dir":"/var/home/alice/.ssh","name":"id_ed25519","cwd":"/var/home/alice","mode":"0100600","exe":"/usr/bin/restic","own_mnt":4026532900,"host_mnt":4026531841}
+{"op":8,"syscall":82,"result":0,"keys":["decoy"],"dir":"/var/home/alice/.ssh","name":"id_backup","dir2":"/var/home/alice/.ssh","name2":"t","mode":"0100600","exe":"/usr/bin/mv"}
 {"op":1,"syscall":257,"result":3,"keys":["hardening"],"dir":"/etc","name":"a file","mode":"0100644","exe":"/usr/bin/vi"}
 EVENTS
 
@@ -77,6 +79,15 @@ expect "successfully killed-pid using /usr/bin/kill"
 cred="$(LC_ALL=C ausearch -if "${log}" -m SYSCALL,CWD,PATH -k credentials -i </dev/null 2>/dev/null)"
 grep -qF -- "/var/home/alice/.ssh/id_rsa" <<<"${cred}" || note "the credentials raw record lost its path"
 grep -qF -- "/var/home/alice/.config/my app/creds.json" <<<"${cred}" || note "a credential path with a space did not decode"
+
+# An actor in a mount namespace other than the host's says so at the end of its SYSCALL line, and ausearch still
+# reads the event as it does any other
+grep -q 'exe="/usr/bin/restic" subj=? key="credentials" hostmnt=0$' "${log}" || note "an actor outside the host's mount namespace is not marked hostmnt=0"
+expect "opened-file /var/home/alice/.ssh/id_ed25519 using /usr/bin/restic"
+grep -c ' hostmnt=' "${log}" | grep -qx 1 || note "only an event that carries both namespaces is marked"
+# A secret renamed before it is read names its old path first, which is the path the watcher takes
+moved="$(LC_ALL=C ausearch -if "${log}" -m SYSCALL,CWD,PATH -k decoy -r </dev/null 2>/dev/null)"
+grep -qF 'item=0 name="/var/home/alice/.ssh/id_backup"' <<<"${moved}" || note "a renamed decoy key does not name its old path first"
 
 [[ "${fail}" -eq 0 ]] && echo "test-sensor-records: ok"
 exit "${fail}"
