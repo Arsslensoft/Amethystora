@@ -27,10 +27,16 @@ const DOCK_MS: f64 = 200.0;
 thread_local! {
     /// Start fresh was pressed: the card stays away for as long as this window lives, however often the page is drawn again
     static FRESH: Cell<bool> = const { Cell::new(false) };
+    /// Not now was pressed on the Windows card
+    static MOVE_AWAY: Cell<bool> = const { Cell::new(false) };
+    /// This window has offered Move in from Windows, so that it stays while the page is drawn again
+    static MOVE_OFFERED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The list's entry that starts from a backup (`ame backup restore-from`)
 const BACKUP_ENTRY: &str = "start-from-backup";
+/// The list's entry that moves in from a Windows disk (`ame system move-in`), available while the partition table shows one
+const MOVE_ENTRY: &str = "move-in";
 
 /// The entries the page shows, by id, in its order
 const ROWS: [&str; 5] = ["theme", "style", "dock-magnify", "pointer", "layout"];
@@ -352,6 +358,24 @@ fn first_look_file() -> PathBuf {
     state.join("amethystora").join("first-look.json")
 }
 
+/// Whether the page offers Move in from Windows: once for an account, the first time the list says a Windows disk is there; later windows
+/// offer it no more (it is still an entry of Control's System page)
+fn move_in_offer() -> bool {
+    if MOVE_OFFERED.with(Cell::get) {
+        return true;
+    }
+    let file = first_look_file().with_file_name("move-in-offered");
+    if file.exists() {
+        return false;
+    }
+    if let Some(folder) = file.parent() {
+        let _ = std::fs::create_dir_all(folder);
+    }
+    let _ = std::fs::write(&file, "");
+    MOVE_OFFERED.with(|offered| offered.set(true));
+    true
+}
+
 /// Written whole under another name and moved into place, with a copy beside it; once
 fn record_shown() {
     let file = first_look_file();
@@ -442,25 +466,50 @@ impl Control {
         button
     }
 
-    /// Have a backup? A card above the choices: Start fresh puts it away, Bring it all back runs the list's entry in a terminal
-    fn backup_card(&self) -> gtk::Widget {
+    /// A card above the choices that offers one of the list's entries, which runs in a terminal: the first button puts the card away (and sets
+    /// `away`, so that it stays away while this window lives), the second runs the entry
+    fn offer_card(&self, title: &str, text: &str, away_label: &str, go_label: &str, entry: &'static str, away: &'static std::thread::LocalKey<Cell<bool>>) -> gtk::Widget {
         let card = ui::vbox(8, &["welcome-card", "welcome-backup"]);
-        card.append(&ui::label(&t!("Have a backup?").to_uppercase(), &["welcome-label"]));
-        card.append(&ui::label(&t!("New computer, or the old one was lost. Plug in your backup disk, and have your recovery key ready."), &["lead"]));
+        card.append(&ui::label(&title.to_uppercase(), &["welcome-label"]));
+        card.append(&ui::label(text, &["lead"]));
         let buttons = ui::hbox(8, &["welcome-backup-buttons"]);
         let hide = card.clone();
-        buttons.append(&ui::button(&t!("Start fresh"), None, &["seg"], move || {
-            FRESH.with(|fresh| fresh.set(true));
+        buttons.append(&ui::button(away_label, None, &["seg"], move || {
+            away.with(|away| away.set(true));
             hide.set_visible(false);
         }));
         let me = self.me.clone();
-        buttons.append(&ui::button(&t!("Bring it all back"), None, &["seg", "chosen"], move || {
+        buttons.append(&ui::button(go_label, None, &["seg", "chosen"], move || {
             if let Some(this) = me.upgrade() {
-                this.act(BACKUP_ENTRY);
+                this.act(entry);
             }
         }));
         card.append(&buttons);
         card.upcast()
+    }
+
+    /// Have a backup? Start fresh puts it away, Bring it all back runs the list's entry in a terminal
+    fn backup_card(&self) -> gtk::Widget {
+        self.offer_card(
+            &t!("Have a backup?"),
+            &t!("New computer, or the old one was lost. Plug in your backup disk, and have your recovery key ready."),
+            &t!("Start fresh"),
+            &t!("Bring it all back"),
+            BACKUP_ENTRY,
+            &FRESH,
+        )
+    }
+
+    /// Coming from Windows? A disk that may hold it is in this computer: Not now puts it away, Move in runs the list's entry in a terminal
+    fn move_card(&self) -> gtk::Widget {
+        self.offer_card(
+            &t!("Coming from Windows?"),
+            &t!("There is a disk here that may hold Windows. Copy your Documents, Pictures, Music, Videos and Desktop from it. The disk is only read, and nothing you have is replaced."),
+            &t!("Not now"),
+            &t!("Move in"),
+            MOVE_ENTRY,
+            &MOVE_AWAY,
+        )
     }
 
     /// The page itself, drawn again whenever the list comes back
@@ -480,6 +529,13 @@ impl Control {
         // Have a backup? (R7-55): the list's own entry, run as its card runs it, in a terminal, where the recovery key is typed
         if !FRESH.with(Cell::get) && list.as_deref().is_some_and(|list| list.items.iter().any(|item| item.id == BACKUP_ENTRY && item.available)) {
             view.append(&self.backup_card());
+        }
+        // Coming from Windows? Once, and only while the list says a disk that may hold it is there
+        if !MOVE_AWAY.with(Cell::get)
+            && list.as_deref().is_some_and(|list| list.items.iter().any(|item| item.id == MOVE_ENTRY && item.available))
+            && move_in_offer()
+        {
+            view.append(&self.move_card());
         }
 
         let card = ui::hbox(16, &["welcome-card"]);

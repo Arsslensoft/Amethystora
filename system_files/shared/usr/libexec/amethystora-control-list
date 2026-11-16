@@ -393,10 +393,13 @@ read_in_background agents amethystora-agent list
 read_in_background policy amethystora-agent policy --json
 read_in_background plugins /usr/libexec/amethystora-plugins list --json
 read_in_background webapps amethystora-webapp list --json
+read_in_background kits /usr/libexec/amethystora-kit list --json
 read_in_background image /usr/bin/amethystora-rollback-helper --choices
 read_in_background bling amethystora-bling status
 read_in_background backgrounds amethystora-theme bg list
 read_in_background raid /usr/libexec/amethystora-raid status --json
+# Move in from Windows: whether the partition table shows something that may be Windows (it mounts nothing and asks for no password)
+read_in_background move-in /usr/libexec/amethystora-move-in find --offer
 read_in_background start-times /usr/libexec/amethystora-start-times status --fields
 # Devices kept from waking the computer: only a machine that kept one has the rules file, and only that one asks the helper
 [[ -s /etc/udev/rules.d/90-amethystora-wake.rules ]] && read_in_background wake-devices /usr/libexec/amethystora-sleep-report list --names
@@ -3572,6 +3575,15 @@ USAGE="ame system bring-over"
 item system bring-over action "${ gettext "Bring everything from your old computer"; }" \
     "${ gettext "Your folders and bookmarks from the disk of another computer you plugged in. The disk is mounted read-only and nothing is written to it (an XFS or btrfs disk that was not shut down cleanly asks first); an encrypted one asks for its recovery key, which is not kept; no password is read."; }" \
     "" moving#bring-everything-from-your-old-computer
+# Move in from Windows: the first look offers it too, only while the partition table shows a disk that may hold Windows
+COMMAND=(ame system move-in)
+TERMINAL=true
+BUTTON="${ gettext "Move in…"; }"
+[[ "${ ended move-in; }" == 0 ]] || REASON="${ gettext "No Windows disk was found."; }"
+USAGE="ame system move-in"
+item system move-in action "${ gettext "Move in from Windows"; }" \
+    "${ gettext "The Documents, Pictures, Music, Videos and Desktop of a Windows account, from its disk. The disk is only read, never changed; a BitLocker disk asks for its recovery key, which is not kept; a file you already have is never replaced."; }" \
+    "" move-in
 GROUP=""
 
 # The pools of disks, as `amethystora-raid status --json` has them, and the system's disks when it spans

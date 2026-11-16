@@ -1707,6 +1707,12 @@ test -x /usr/libexec/amethystora-move
 grep -q '^move \*ARGS:' /usr/share/amethystora/just/system.just
 test -x /usr/libexec/amethystora-bring-over
 bash /ctx/build_files/shared/test-bring-over.sh /usr/libexec/amethystora-bring-over
+# Move in from Windows: the Windows disk of this computer or one plugged in is mounted read-only and never written, a BitLocker volume's key is
+# typed and kept nowhere, nothing a person has is replaced, OneDrive's placeholders are counted, a stopped copy carries on; the kernel can read NTFS
+test -x /usr/libexec/amethystora-move-in
+grep -q '^move-in \*ARGS:' /usr/share/amethystora/just/system.just
+bash /ctx/build_files/shared/test-move-in.sh /usr/libexec/amethystora-move-in
+grep -qE '^CONFIG_NTFS3_FS=[ym]$' /usr/lib/modules/*/config
 # Send to anyone (R7-66): offered and off; Warp only after a yes, from Flathub, by the one helper that installs; the relay said first
 test -x /usr/libexec/amethystora-send-anyone
 grep -q '^send-anyone ACTION="":' /usr/share/amethystora/just/desktop.just

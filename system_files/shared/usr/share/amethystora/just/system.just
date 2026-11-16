@@ -509,6 +509,16 @@ move *ARGS:
 bring-over *ARGS:
     @/usr/libexec/amethystora-bring-over "$@"
 
+# Move in from Windows: the Documents, Pictures, Music, Videos and Desktop of a Windows account, from the Windows disk of this computer or
+# one plugged in. The disk is only read (mounted read-only, never written); a BitLocker disk asks for its recovery key, which is
+# never kept; a file you already have is never replaced (the copy goes beside it); files only in OneDrive are counted and left;
+# stop it and run it again to carry on. `find`, `look PART` and `copy PART ACCOUNT` are the same in steps, with --json
+[no-cd]
+[no-exit-message]
+[positional-arguments]
+move-in *ARGS:
+    @/usr/libexec/amethystora-move-in "$@"
+
 # A warning before the disk dies: the disks the system is on have their health read hourly, and a notice says once when
 # one begins to fail, with Back up now. Off, nothing is read (STATE: on, off or status; without it, it says what they said)
 [positional-arguments]
