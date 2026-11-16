@@ -14,7 +14,11 @@
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::net::{IpAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -185,6 +189,80 @@ pub fn handshake_receiver<S: Read + Write>(s: &mut S) -> Result<Keys> {
     }
     let nonce: [u8; 16] = third[66..].try_into().expect("sixteen bytes");
     Ok(crypto::agree(Role::Receiver, &own, &third[1..66], &nonce)?)
+}
+
+/// Reads and writes of a stream that stop when `until` has passed, however slowly the other end goes on
+struct Until<'a> {
+    stream: &'a TcpStream,
+    until: Instant,
+}
+
+impl Read for Until<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let left = self.until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        self.stream.set_read_timeout(Some(left))?;
+        (&*self.stream).read(buf)
+    }
+}
+
+impl Write for Until<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let left = self.until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        self.stream.set_write_timeout(Some(left))?;
+        (&*self.stream).write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        (&*self.stream).flush()
+    }
+}
+
+/// How many connections may be in the middle of their handshake at once, and how long each has
+const HANDSHAKES_AT_ONCE: usize = 8;
+pub const HANDSHAKE_WAIT: Duration = Duration::from_secs(10);
+
+/// The new computer's wait: connections from `is_home` addresses are given `HANDSHAKE_WAIT` each, in threads of their own,
+/// and the first to finish the handshake is the one taken. One that sends something else, or nothing, or goes on too
+/// slowly, is dropped and the wait goes on, so that it keeps no one else out. `None` when `until` comes first.
+pub fn wait_for_sender(listener: &TcpListener, until: Instant, is_home: &dyn Fn(IpAddr) -> bool) -> Result<Option<(TcpStream, Keys)>> {
+    listener.set_nonblocking(true)?;
+    let (tx, rx) = mpsc::channel();
+    let running = Arc::new(AtomicUsize::new(0));
+    loop {
+        if let Ok(found) = rx.try_recv() {
+            return Ok(Some(found));
+        }
+        match listener.accept() {
+            Ok((stream, from)) => {
+                // Not a network named home, or too many at once: dropped before a word is read
+                if !is_home(from.ip()) || running.load(Ordering::SeqCst) >= HANDSHAKES_AT_ONCE {
+                    continue;
+                }
+                running.fetch_add(1, Ordering::SeqCst);
+                let (tx, running) = (tx.clone(), running.clone());
+                std::thread::spawn(move || {
+                    let done = stream.set_nonblocking(false).map_err(Error::from).and_then(|()| handshake_receiver(&mut Until { stream: &stream, until: Instant::now() + HANDSHAKE_WAIT }));
+                    if let Ok(keys) = done {
+                        let _ = tx.send((stream, keys));
+                    }
+                    running.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                if Instant::now() >= until {
+                    return Ok(None);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
 }
 
 /// Both people say what they see; both must say yes
@@ -449,7 +527,9 @@ mod tests {
     }
 
     fn temp(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("amethystora-move-{name}-{}", std::process::id()));
+        // One folder to a call: tests run side by side, and `old_home()` is asked for by several
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!("amethystora-move-{name}-{}-{}", std::process::id(), CALLS.fetch_add(1, Ordering::SeqCst)));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         root
@@ -692,6 +772,40 @@ mod tests {
         let left: Vec<_> = std::fs::read_dir(new.join("Documents")).map(|d| d.flatten().collect()).unwrap_or_default();
         assert!(left.is_empty(), "no half file stays: {left:?}");
         let _ = std::fs::remove_dir_all(&new);
+    }
+
+    #[test]
+    fn a_connection_that_does_not_finish_the_handshake_keeps_no_one_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let until = Instant::now() + Duration::from_secs(20);
+        let waiting = std::thread::spawn(move || wait_for_sender(&listener, until, &|_| true));
+        // One that says nothing and stays, one that sends what is not the move, one that drops out half way
+        let silent = TcpStream::connect(address).unwrap();
+        let mut garbage = TcpStream::connect(address).unwrap();
+        garbage.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
+        let mut half = TcpStream::connect(address).unwrap();
+        write_plain(&mut half, &[b'1', 1, 2, 3]).unwrap();
+        drop(half);
+        std::thread::sleep(Duration::from_millis(300));
+        let mut real = TcpStream::connect(address).unwrap();
+        real.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        let sender_keys = handshake_sender(&mut real).unwrap();
+        let (_, receiver_keys) = waiting.join().unwrap().unwrap().expect("the real sender is taken");
+        assert_eq!(sender_keys.digits, receiver_keys.digits, "the same key on both sides");
+        drop((silent, garbage));
+    }
+
+    #[test]
+    fn an_address_that_is_not_home_is_not_taken_and_the_wait_ends() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        let waiting = std::thread::spawn(move || wait_for_sender(&listener, until, &|_| false));
+        let mut stranger = TcpStream::connect(address).unwrap();
+        stranger.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let _ = handshake_sender(&mut stranger);
+        assert!(waiting.join().unwrap().unwrap().is_none());
     }
 
     #[test]

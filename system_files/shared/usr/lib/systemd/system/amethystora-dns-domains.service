@@ -10,7 +10,7 @@ Type=exec
 ExecStart=/usr/libexec/amethystora-dns domains-watch
 Restart=on-failure
 RestartSec=10
-# It asks NetworkManager and systemd-resolved over their sockets (resolvectl lists a link by its name over netlink) and changes nothing on disk
+# It listens to NetworkManager and systemd-resolved on the system bus (gdbus monitor, nmcli monitor) and asks them over their sockets (resolvectl lists a link by its name over netlink) and changes nothing on disk
 CPUWeight=20
 IOWeight=20
 MemoryHigh=30M

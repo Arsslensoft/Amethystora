@@ -63,6 +63,8 @@ pub enum Out {
     Rejected,
     TimedOut,
     ClockSkew { peer: i64, ours: i64 },
+    /// The phone speaks a protocol whose verification key has no timestamp: no new pairing is made with it
+    OlderProtocol,
     /// A device we hold as paired asked again and was answered, without asking the person
     Confirmed,
 }
@@ -74,6 +76,8 @@ pub enum Refusal {
     /// There is nothing to answer or cancel
     NothingPending,
     AlreadyPaired,
+    /// The device speaks a protocol older than 8, which only a pairing that exists keeps
+    OlderProtocol,
 }
 
 #[derive(Debug)]
@@ -112,6 +116,9 @@ impl Machine {
                 }
                 if self.phase != Phase::Idle {
                     return Err(Refusal::Busy);
+                }
+                if self.peer_protocol < 8 {
+                    return Err(Refusal::OlderProtocol);
                 }
                 let deadline = now + limits::PAIR_WAIT_SECS;
                 self.phase = Phase::Outgoing { timestamp: now, deadline };
@@ -188,8 +195,11 @@ impl Machine {
             // Nothing on the wire tells an acceptance from a request but our own state
             return vec![Out::StorePin, Out::Withdraw, Out::Paired];
         }
-        // A request. A protocol 8 request without a timestamp is not one; any timestamp must be fresh
-        if self.peer_protocol >= 8 && timestamp.is_none() {
+        // A request. A new pairing is made only with a protocol whose key has the timestamp in it
+        if self.peer_protocol < 8 {
+            return vec![Out::OlderProtocol];
+        }
+        if timestamp.is_none() {
             return Vec::new();
         }
         if let Some(t) = timestamp {
@@ -293,24 +303,44 @@ mod tests {
         assert_eq!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(1_792_739_000) }, NOW), vec![Out::ClockSkew { peer: 1_792_739_000, ours: NOW }]);
         assert_eq!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(1_792_741_240_000) }, NOW).len(), 1);
         assert!(m.is_idle());
-        // 1,800 seconds is still fresh, 1,801 is not
+        // The window is limits::PAIR_FRESH_SECS either way: that many seconds is fresh, one more is not
+        let fresh = limits::PAIR_FRESH_SECS;
         let mut m = Machine::new(8);
-        assert!(matches!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(NOW - 1800) }, NOW)[0], Out::Prompt { .. }));
+        assert!(matches!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(NOW - fresh) }, NOW)[0], Out::Prompt { .. }));
         let mut m = Machine::new(8);
-        assert!(matches!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(NOW + 1801) }, NOW)[0], Out::ClockSkew { .. }));
+        assert!(matches!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(NOW + fresh) }, NOW)[0], Out::Prompt { .. }));
+        let mut m = Machine::new(8);
+        assert!(matches!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(NOW + fresh + 1) }, NOW)[0], Out::ClockSkew { .. }));
+        let mut m = Machine::new(8);
+        assert!(matches!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(NOW - fresh - 1) }, NOW)[0], Out::ClockSkew { .. }));
+        // Ten minutes old is no request for a new pairing
+        let mut m = Machine::new(8);
+        assert_eq!(run(&mut m, false, Input::Peer { pair: true, timestamp: Some(NOW - 600) }, NOW), vec![Out::ClockSkew { peer: NOW - 600, ours: NOW }]);
+        assert!(m.is_idle());
     }
 
     #[test]
-    fn a_protocol_8_request_needs_its_timestamp_and_a_protocol_7_one_does_not() {
+    fn a_new_pairing_needs_protocol_8_and_its_timestamp() {
         let mut m = Machine::new(8);
         assert_eq!(run(&mut m, false, Input::Peer { pair: true, timestamp: None }, NOW), vec![]);
+        // A protocol 7 key has no timestamp in it: no new pairing is made with it, with a timestamp or without, asked either way
+        for timestamp in [None, Some(T), Some(NOW)] {
+            let mut m = Machine::new(7);
+            assert_eq!(run(&mut m, false, Input::Peer { pair: true, timestamp }, NOW), vec![Out::OlderProtocol]);
+            assert!(m.is_idle(), "no prompt, nothing to accept");
+            assert_eq!(m.step(false, Input::Accept, NOW), Err(Refusal::NothingPending));
+        }
         let mut m = Machine::new(7);
-        let out = run(&mut m, false, Input::Peer { pair: true, timestamp: None }, NOW);
-        assert_eq!(out, vec![Out::Prompt { outgoing: false, key_timestamp: None, deadline: NOW + 30 }]);
-        // A protocol 7 key never has a timestamp in it, even when the request carries one
+        assert_eq!(m.step(false, Input::Ask, NOW), Err(Refusal::OlderProtocol));
+        assert!(m.is_idle());
+    }
+
+    #[test]
+    fn a_device_paired_at_protocol_7_is_still_answered() {
+        // What is kept is kept: the connection was authenticated by the pin, and the pairing is not asked again
         let mut m = Machine::new(7);
-        let out = run(&mut m, false, Input::Peer { pair: true, timestamp: Some(T) }, NOW);
-        assert_eq!(out, vec![Out::Prompt { outgoing: false, key_timestamp: None, deadline: NOW + 30 }]);
+        assert_eq!(run(&mut m, true, Input::Peer { pair: true, timestamp: None }, NOW), vec![Out::Send { pair: true, timestamp: Some(NOW) }, Out::Confirmed]);
+        assert_eq!(run(&mut m, true, Input::Peer { pair: false, timestamp: None }, NOW + 1), vec![Out::DropPin, Out::Unpaired]);
     }
 
     #[test]
