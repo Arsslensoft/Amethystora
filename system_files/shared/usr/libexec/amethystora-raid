@@ -113,7 +113,12 @@ as_root_quietly() {
     if [[ ${EUID} -eq 0 ]]; then "$@"; else sudo -n "$@"; fi </dev/null 2>/dev/null
 }
 
+# Without text among its arguments, gum style reads the text on standard input: a secret goes that way, never on a command line
 box() { gum style --border rounded --padding "0 1" --width 80 "$@"; }
+
+# A folder made by root where only root can write, to mount on, copy through and write into: one in the account's
+# own /tmp could be renamed or swapped for a link between two of root's steps
+root_tmp() { as_root mktemp -d -p "${R}/run"; }
 
 # Sizes as disk makers give them: 1.0 TB is 10^12 bytes
 human() {
@@ -703,7 +708,7 @@ cmd_status() {
     if [[ "${1:-}" == --json ]]; then
         printf '%s\n' "${status}"
     else
-        jq -r "${TEXT_JQ}" <<<"${status}"
+        jq -r "${TEXT_JQ}" <<<"${status}" | disk_text
     fi
 }
 
@@ -762,10 +767,20 @@ pick_disk() {  # SPARE-JSON HEADER [DISK]
     printf '%s\n' "${picked%% *}"
 }
 
+# What a disk's maker wrote (its model, its serial) reaches the terminal only after amethystora-security-text has
+# taken the control characters out; a helper that cannot be run leaves them out the plain way
+disk_text() {
+    local text
+    text="$(cat)"
+    [[ -n "${text}" ]] || return 0
+    printf '%s\n' "${text}" | "${AMETHYSTORA_SECURITY_TEXT:-/usr/libexec/amethystora-security-text}" --lines --max 300 2>/dev/null ||
+        printf '%s\n' "${text}" | LC_ALL=C tr -d '\000-\010\013-\037\177'
+}
+
 # A line for each spare disk, its path first: what gum choose shows, without the commas it splits on
 disk_labels() {
     jq -r "${HUMAN_JQ}"' .[] | "\(.path)  \(.size | human)  \(.model)\(if .serial != "" then "  " + .serial else "" end)\(if .usb then "  USB" else "" end)"
-        | gsub(","; " ")'
+        | gsub(","; " ")' | disk_text
 }
 
 # What a disk holds now, so that "ntfs Windows" or BitLocker stands out before it is erased
@@ -774,7 +789,7 @@ disk_plan() {  # SPARE-JSON PATH
         | "\(.path)  \(.model)  \(.serial)  \(.size | human)",
           "    now: " + (if .contents == [] then "nothing anyone can read"
                        else [.contents[] | .fstype + (if (.label // "") != "" then " \"\(.label)\"" else "" end)] | join(", ") end),
-          (if .usb then "    on USB: a loose cable takes it out of the pool, so keep it plugged in." else empty end)' <<<"$1"
+          (if .usb then "    on USB: a loose cable takes it out of the pool, so keep it plugged in." else empty end)' <<<"$1" | disk_text
 }
 
 ask_erase() {
@@ -828,9 +843,15 @@ luks_format() {  # PART KEY POOL
     as_root cryptsetup luksFormat --type luks2 --batch-mode "${LUKS_PBKDF[@]}" --label "raid-$3" --key-file "$2" "$1"
 }
 
-# The recovery key in slot 1, as the text a person types: no newline
-add_recovery() {  # PART KEY RECOVERY
-    printf '%s' "$3" | as_root cryptsetup luksAddKey "${LUKS_PBKDF[@]}" --key-file "$2" --new-key-slot 1 "$1" /dev/stdin
+# The recovery key in slot 1 (or SLOT), as the text a person types: no newline
+add_recovery() {  # PART KEY RECOVERY [SLOT]
+    printf '%s' "$3" | as_root cryptsetup luksAddKey "${LUKS_PBKDF[@]}" --key-file "$2" --new-key-slot "${4:-1}" "$1" /dev/stdin
+}
+
+# The first slot from 2 on that a LUKS2 header leaves free
+spare_slot() {  # PART
+    as_root cryptsetup luksDump --dump-json-metadata "$1" 2>/dev/null | jq -er '[.keyslots | keys[] | tonumber] as $used
+        | first(range(2; 32) | select(. as $slot | $used | index($slot) | not))'
 }
 
 # A line added to a file of root's, on a line of its own, the file made with MODE if it is not there
@@ -854,13 +875,27 @@ next_index() {  # POOL
     echo $((${highest:-0} + 1))
 }
 
-# The partitions of a pool's disks that are there, encrypted, and none of the ones given
+# The partitions of a pool's disks that are there, encrypted, and none of the ones given: the ones whose LUKS
+# UUID the pool's own lines in /etc/crypttab, which root wrote, name. A partition's label says nothing of that.
 pool_luks_parts() {  # POOL EXCEPT...
-    local pool="$1"
+    local pool="$1" uuids
     shift
-    lsblk -J -o PATH,PARTLABEL,FSTYPE 2>/dev/null | jq -r --arg pool "${pool}" '.. | objects
-        | select(.fstype == "crypto_LUKS" and ((.partlabel // "") | test("^raid-" + $pool + "-[0-9]+$"))
+    uuids="$(as_root cat "${CRYPTTAB}" 2>/dev/null | crypt_lines_of "${pool}" | awk '{ print $2 }')"
+    lsblk -J -o PATH,FSTYPE,UUID 2>/dev/null | jq -r --arg uuids "${uuids}" '($uuids | split("\n")) as $known | .. | objects
+        | select(.fstype == "crypto_LUKS" and ((.uuid // "") as $uuid | $uuid != "" and ($known | index($uuid)) != null)
             and (.path as $path | $ARGS.positional | index($path) | not)) | .path' --args "$@"
+}
+
+# The btrfs devices of a pool that are there, from what the machine recorded of them: the mappings of the pool's
+# lines in /etc/crypttab and, for a pool that is not encrypted, the partitions made for it. One that only
+# carries the pool's filesystem UUID is not one.
+pool_btrfs_devices() {  # POOL UUID
+    local mappings
+    mappings="$(as_root cat "${CRYPTTAB}" 2>/dev/null | crypt_lines_of "$1" | awk '{ print "/dev/mapper/" $1 }')"
+    lsblk -J -o PATH,FSTYPE,UUID,PARTLABEL 2>/dev/null | jq -r --arg uuid "$2" --arg pool "$1" --arg mappings "${mappings}" '
+        ($mappings | split("\n") | map(select(. != ""))) as $maps | .. | objects | select(.fstype == "btrfs" and .uuid == $uuid)
+        | select(if $maps == [] then ((.partlabel // "") | test("^raid-" + $pool + "-[0-9]+$"))
+                 else (.path as $path | $maps | index($path)) != null end) | .path'
 }
 
 # A disk made ready to join a pool: partitioned, and for an encrypted pool formatted with the pool's key,
@@ -888,7 +923,7 @@ prepare_disk() {  # DISK POOL ENCRYPTED [OUTGOING-PARTITION]
 # Slot 1 of a new disk gets the pool's recovery key, typed in, which also shows that it is still known.
 # Left empty, every disk of the pool gets a new one, and the old one stops working.
 recovery_for() {  # POOL NEW-PART [OUTGOING-PART]
-    local name="$1" part="$2" key="${KEYS}/raid-$1.key" recovery members=() member
+    local name="$1" part="$2" key="${KEYS}/raid-$1.key" recovery members=() member spare spares=() i
     mapfile -t members < <(pool_luks_parts "${name}" "${part}" "${3:-}")
     while [[ ${#members[@]} -gt 0 ]]; do
         recovery="$(gum input --password --width 80 \
@@ -903,14 +938,21 @@ recovery_for() {  # POOL NEW-PART [OUTGOING-PART]
         fi
         echo "That is not the recovery key of ${name}." >&2
     done
+    # The new key goes into a spare slot of every disk and is shown before any old key is taken out: a failure
+    # on the way leaves the old key opening them
     recovery="$(new_recovery_key)"
     for member in "${members[@]}"; do
-        as_root cryptsetup luksKillSlot --batch-mode "${member}" 1 >/dev/null 2>&1
-        add_recovery "${member}" "${key}" "${recovery}" >&2 || return 1
+        spare="$(spare_slot "${member}")" && add_recovery "${member}" "${key}" "${recovery}" "${spare}" >&2 || return 1
+        spares+=("${spare}")
     done
     add_recovery "${part}" "${key}" "${recovery}" >&2 || return 1
-    box "The new recovery key of ${name}:" "" "    ${recovery}" "" \
-        "Write it down: the old one no longer opens the disks of the pool that are here. It opens them on any Linux machine, and without it a pool whose system disk is lost is lost too." >&2
+    printf '%s\n' "The new recovery key of ${name}:" "" "    ${recovery}" "" \
+        "Write it down: the old one no longer opens the disks of the pool that are here. It opens them on any Linux machine, and without it a pool whose system disk is lost is lost too." | box >&2 || return 1
+    for i in "${!members[@]}"; do
+        as_root cryptsetup luksKillSlot --batch-mode "${members[i]}" 1 >/dev/null 2>&1
+        add_recovery "${members[i]}" "${key}" "${recovery}" >&2 || return 1
+        as_root cryptsetup luksKillSlot --batch-mode "${members[i]}" "${spares[i]}" >&2 || return 1
+    done
 }
 
 # A long operation (a replace, a balance) in a unit of its own, so that closing the terminal does not stop
@@ -1159,8 +1201,9 @@ cmd_create() {
     box "The pool ${name} is ready at ${MNT}/${name}, in the Files sidebar, with room for about $(human "$(df -B1 --output=avail "${MNT}/${name}" | tail -n 1)")." \
         "" "A pool is not a backup: a file deleted, or encrypted by ransomware, is gone from every disk at once. ame backup keeps copies elsewhere."
     if [[ -n "${recovery}" ]]; then
-        box --border-foreground 3 "Its recovery key, shown only this once:" "" "    ${recovery}" "" \
-            "Write it down. It opens these disks on any Linux machine, and without it a pool whose system disk is lost is lost too."
+        printf '%s\n' "Its recovery key, shown only this once:" "" "    ${recovery}" "" \
+            "Write it down. It opens these disks on any Linux machine, and without it a pool whose system disk is lost is lost too." |
+            box --border-foreground 3
     fi
 }
 
@@ -1182,8 +1225,7 @@ open_pool() {  # STATUS NAME
         echo "All the disks of $2 are there: it is mounted at ${MNT}/$2."
         return 0
     fi
-    member="$(lsblk -J -o PATH,FSTYPE,UUID 2>/dev/null |
-        jq -r --arg uuid "${uuid}" '[.. | objects | select(.fstype == "btrfs" and .uuid == $uuid) | .path] | first // empty')"
+    member="$(pool_btrfs_devices "$2" "${uuid}" | head -n 1)"
     [[ -n "${member}" ]] || { echo "None of the disks of $2 is there, or none could be unlocked." >&2; return 1; }
     as_root install -d -m 0755 "${MNT}/$2"
     if as_root mount -t btrfs -o degraded,compress=zstd:1 "${member}" "${MNT}/$2"; then
@@ -1411,7 +1453,7 @@ cmd_replace() {
         die "${name} is too full to be rebuilt: btrfs needs a gigabyte free on each disk that is left. Delete what you can spare$([[ "${system}" == true ]] || echo " from ${MNT}/${name}"), then run ame system raid replace ${name} again. Nothing was erased."
     mapfile -t lines < <(jq -r '.devices | sort_by((.missing or .smart == "failed" or .error_count > 0) | not)[]
         | "disk \(.devid)  " + (if (.disk.model // "") != "" then "\(.disk.model) \(.disk.serial // "")" else "" end)
-          + (if .missing then "  missing" elif .smart == "failed" then "  failing" elif .error_count > 0 then "  \(.error_count) errors" else "  fine" end)' <<<"${pool}")
+          + (if .missing then "  missing" elif .smart == "failed" then "  failing" elif .error_count > 0 then "  \(.error_count) errors" else "  fine" end)' <<<"${pool}" | disk_text)
     choice="$(gum choose --header "Which disk of $(pool_words "${name}") goes?" "${lines[@]}")" || exit 0
     devid="$(awk '{ print $2; exit }' <<<"${choice}")"
     as_root true || exit 1
@@ -1793,9 +1835,9 @@ copy_esp() {  # FROM-ESP TO-ESP BOOT-UUID
     as_root mkfs.vfat -F 32 -n EFI "$2" >/dev/null || return 1
     # Read where it is mounted, at /boot/efi: a second mount of it, read-only, is refused
     mounted="$(findmnt -rn -o TARGET --source "$1" | head -n 1)"
-    from="${mounted:-$(mktemp -d)}" to="$(mktemp -d)"
+    from="${mounted:-$(root_tmp)}" to="$(root_tmp)" || return 1
     if ! { [[ -n "${mounted}" ]] || as_root mount -o ro "$1" "${from}"; }; then
-        rmdir "${from}" "${to}"
+        as_root rmdir "${from}" "${to}"
         return 1
     fi
     if as_root mount "$2" "${to}"; then
@@ -1803,8 +1845,8 @@ copy_esp() {  # FROM-ESP TO-ESP BOOT-UUID
         as_root cp -r "${from}/." "${to}/" && point_esp "${to}" "$3" && code=0
         as_root umount "${to}"
     fi
-    rmdir "${to}"
-    [[ -n "${mounted}" ]] || { as_root umount "${from}"; rmdir "${from}"; }
+    as_root rmdir "${to}"
+    [[ -n "${mounted}" ]] || { as_root umount "${from}"; as_root rmdir "${from}"; }
     return "${code}"
 }
 
@@ -1825,11 +1867,11 @@ point_esp_at() {  # ESP BOOT-UUID
         point_esp "${at}" "$2"
         return
     fi
-    at="$(mktemp -d)"
-    as_root mount "$1" "${at}" || { rmdir "${at}"; return 1; }
+    at="$(root_tmp)" || return 1
+    as_root mount "$1" "${at}" || { as_root rmdir "${at}"; return 1; }
     point_esp "${at}" "$2"
     as_root umount "${at}"
-    rmdir "${at}"
+    as_root rmdir "${at}"
 }
 
 # An fstab line made nofail: the first disk's EFI partition is one of two once the system is mirrored, and the
@@ -1947,11 +1989,11 @@ mirror_onto() {  # STATUS [DISK]
         --raid-devices=2 missing "${new_boot}" >&2 || die "${new_boot} could not be made a RAID member."
     as_root mkfs.ext4 -q -F "${BOOT_MD}" || die "/boot's mirror could not be made."
     md_uuid="$(as_root blkid -p -s UUID -o value "${BOOT_MD}")"
-    copy="$(mktemp -d)"
+    copy="$(root_tmp)" || die "A folder to copy /boot through could not be made."
     as_root mount "${BOOT_MD}" "${copy}" || die "/boot's mirror could not be mounted."
     as_root rsync -aHA --one-file-system /boot/ "${copy}/" || { as_root umount "${copy}"; die "/boot could not be copied."; }
     as_root umount "${copy}"
-    rmdir "${copy}"
+    as_root rmdir "${copy}"
 
     echo "Copying the EFI partition…"
     copy_esp "${esp}" "${new_esp}" "${md_uuid}" || die "The EFI partition could not be copied."
@@ -2023,7 +2065,7 @@ mirror_join() {
                 [[ "$(systemctl show -p ActiveState --value "${fsck_unit}" 2>/dev/null)" == activating ]] || break
             sleep 0.5
         done
-        from="$(mktemp -d)" to="$(mktemp -d)"
+        from="$(mktemp -d -p /run)" to="$(mktemp -d -p /run)"
         if mount -o ro "${boot_part}" "${from}" && mount "${BOOT_MD}" "${to}" &&
             rsync -aHA --delete --exclude=/lost+found "${from}/" "${to}/"; then
             umount "${from}" "${to}"

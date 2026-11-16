@@ -84,10 +84,12 @@ copy_theme() {
 # $prefix is whatever directory GRUB loaded its config from, on the device it booted from, so the
 # theme is found without having to look up the boot filesystem's UUID.
 write_user_cfg() {
-    local staged
+    local staged mode=0644
     staged="$(mktemp)"
 
     if [[ -f ${USER_CFG} ]]; then
+        # The file keeps the mode it had: grub2-setpassword writes its password hash there at 0600
+        mode="$(stat -c %a "${USER_CFG}")"
         [[ -f "${USER_CFG}.amethystora.bak" ]] || cp -a "${USER_CFG}" "${USER_CFG}.amethystora.bak"
         sed "/^${BEGIN_MARK}$/,/^${END_MARK}$/d" "${USER_CFG}" >"${staged}"
     fi
@@ -112,7 +114,7 @@ EOF
         die "the generated user.cfg is not valid GRUB script, nothing was changed"
     }
 
-    install -Dm0644 "${staged}" "${USER_CFG}"
+    install -Dm"${mode}" "${staged}" "${USER_CFG}"
     rm -f "${staged}"
     command -v restorecon >/dev/null 2>&1 && restorecon "${USER_CFG}" || true
 }

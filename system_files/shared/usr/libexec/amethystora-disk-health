@@ -124,7 +124,7 @@ cmd_check() {
     if [[ -n "${news}" ]] && compgen -G "${ROOT}/run/user/[1-9][0-9][0-9][0-9]*/bus" >/dev/null; then
         now="$(jq -c --argjson n "${news}" 'map(if .serial == $n.serial and .path == $n.path then .told = {state, errors} else . end)' <<<"${now}")"
         if [[ -z "${ROOT}" ]]; then
-            systemd-run --collect --quiet -p TimeoutStartSec=infinity --description="Tell about the system's disk" \
+            systemd-run --collect --quiet --expand-environment=no -p TimeoutStartSec=infinity --description="Tell about the system's disk" \
                 /usr/libexec/amethystora-disk-health notify "$(jq -r '.state' <<<"${news}")" "$(jq -r 'if .model == "" then .path else .model end' <<<"${news}")"
         else
             printf 'told %s\n' "$(jq -r '.path + " " + .state' <<<"${news}")"
@@ -180,7 +180,7 @@ in_session() { # USER UID COMMAND...
     local user="$1" uid="$2"
     shift 2
     runuser -u "${user}" -- env "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus" "XDG_RUNTIME_DIR=/run/user/${uid}" \
-        systemd-run --user --collect --quiet -- "$@" || true
+        systemd-run --user --collect --quiet --expand-environment=no -- "$@" || true
 }
 
 tell_one() { # USER UID SUMMARY BODY
