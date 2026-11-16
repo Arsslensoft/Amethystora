@@ -26,10 +26,10 @@ if [[ $# -gt 0 ]]; then
     exit 2
 fi
 if [[ "${EUID}" -ne 0 ]]; then
-    exec pkexec /usr/libexec/amethystora-deployments
+    exec /usr/bin/pkexec /usr/libexec/amethystora-deployments
 fi
 
-bootc status --format=json | jq -c --slurpfile policy /etc/containers/policy.json '
+/usr/bin/bootc status --format=json | jq -c --slurpfile policy /etc/containers/policy.json '
     # Whether policy.json asks a signature of an image: the most specific scope naming its repository
     # decides, and the default when none does (containers-policy.json(5))
     def signed($image):

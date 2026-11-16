@@ -72,7 +72,7 @@ gum confirm "Confirm rebase to ${rebase_target}?" || exit 0
 
 # A sealed image has neither rpm-ostree nor its configuration
 if [[ -e /usr/share/amethystora/sealed ]] || grep -q "^LockLayering=true" /etc/rpm-ostreed.conf; then
-  pkexec bootc switch --enforce-container-sigpolicy "${rebase_target}"
+  /usr/bin/pkexec /usr/bin/bootc switch --enforce-container-sigpolicy "${rebase_target}"
 else
   rpm-ostree rebase ostree-image-signed:docker://"${rebase_target}"
 fi

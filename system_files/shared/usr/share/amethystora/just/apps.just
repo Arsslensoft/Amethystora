@@ -176,6 +176,8 @@ android ACTION="":
                 echo "$(gettext "Waydroid cannot draw with NVIDIA's driver, so on this image Android draws in software: fine for most apps, slow for games.")"
             fi
             gum confirm "$(gettext "Set up Android apps?")" || exit 0
+            # The image keeps the container's unit masked, since its D-Bus service would start it for any account
+            sudo systemctl unmask waydroid-container.service
             sudo systemctl enable --now waydroid-container.service
             # Fedora's package leaves the download channels empty, so they are named here
             sudo waydroid init -c https://ota.waydro.id/system -v https://ota.waydro.id/vendor
@@ -189,6 +191,8 @@ android ACTION="":
             echo "$(gettext "Ready. Open Waydroid from the app grid; the first start takes a minute.")"
             ;;
         "${start_label}" | "Start" | start)
+            # Android set up before the image masked the unit has it unmasked here
+            if sudo test -e /var/lib/waydroid/waydroid.cfg; then sudo systemctl unmask waydroid-container.service; fi
             sudo systemctl start waydroid-container.service
             setsid -f waydroid show-full-ui >/dev/null 2>&1
             ;;
@@ -202,6 +206,7 @@ android ACTION="":
             gum confirm --default=false "$(gettext "Remove Android, with every app and everything saved in it?")" || exit 0
             waydroid session stop 2>/dev/null || true
             sudo systemctl disable --now waydroid-container.service
+            sudo systemctl mask waydroid-container.service
             close_devices
             # The container's mounts of Android's images go a moment after its service stops: any still there are taken
             # off first, and rm stays on the one file system, so that it never reaches into a mount
@@ -209,9 +214,18 @@ android ACTION="":
             for _ in $(seq 20); do [[ -n "$(mounts)" ]] || break; sleep 0.5; done
             for mount in $(mounts); do sudo umount "${mount}" 2>/dev/null || sudo umount -l "${mount}" || true; done
             sudo rm -rf --one-file-system /var/lib/waydroid
-            # What Android saved in the home belongs to the container's own users, not to you
-            sudo rm -rf -- "${XDG_DATA_HOME:-${HOME}/.local/share}/waydroid"
             rm -f "${XDG_DATA_HOME:-${HOME}/.local/share}"/applications/waydroid.*.desktop
+            # What Android saved in the home belongs to the container's own users, not to you, so root removes it: only
+            # a real folder that lies inside your home, found as you see it, and never across a mount
+            data="${XDG_DATA_HOME:-${HOME}/.local/share}/waydroid"
+            if [[ -e "${data}" || -L "${data}" ]]; then
+                if [[ -d "${data}" && ! -L "${data}" && "$(realpath -e -- "${data}")" == "$(realpath -- "${HOME}")"/* ]]; then
+                    sudo rm -rf --one-file-system -- "$(realpath -e -- "${data}")"
+                else
+                    echo "$(eval_gettext "\${data} is not a folder inside your home, so it was left alone. Remove it yourself if it is Android's.")"
+                    exit 1
+                fi
+            fi
             echo "$(gettext "Removed. Waydroid itself stays in the image, set up only when you ask.")"
             ;;
         *) exit 0 ;;
@@ -254,18 +268,21 @@ opentabletdriver ACTION="":
             echo "$(gettext "It moves the pointer through /dev/uinput, which the image keeps from apps: a virtual keyboard can type into any window. This gives it back to whoever sits at the machine (ame security virtual-input), and so to every app that may reach all of /dev, the Chromium browsers among them.")"
             gum confirm "$(gettext "Set up OpenTabletDriver?")" || exit 0
             sudo /usr/libexec/amethystora-hardening set virtual-input off
+            # What root installs is a copy root made and checked in a folder of its own, never the account's download
             TMP="$(mktemp -d)"
-            trap 'rm -rf "${TMP}"' EXIT
+            ROOT_TMP="$(sudo mktemp -d)"
+            trap 'rm -rf "${TMP}"; sudo rm -rf "${ROOT_TMP}"' EXIT
             url="https://github.com/OpenTabletDriver/OpenTabletDriver/releases/download/${OTD_TAG}/opentabletdriver-${OTD_TAG#v}_linux-x64_binary.tar.gz"
             curl -fL --progress-bar -o "${TMP}/otd.tar.gz" "${url}"
-            if [[ "$(sha256sum "${TMP}/otd.tar.gz" | cut -d" " -f1)" != "${OTD_SHA256}" ]]; then
+            sudo install -m 0600 "${TMP}/otd.tar.gz" "${ROOT_TMP}/otd.tar.gz"
+            if [[ "$(sudo sha256sum "${ROOT_TMP}/otd.tar.gz" | cut -d" " -f1)" != "${OTD_SHA256}" ]]; then
                 echo "$(eval_gettext "The download does not match the checksum pinned for \${OTD_TAG}. Nothing was installed.")"
                 exit 1
             fi
-            tar -xzf "${TMP}/otd.tar.gz" -C "${TMP}" --strip-components=1 \
+            sudo tar -xzf "${ROOT_TMP}/otd.tar.gz" -C "${ROOT_TMP}" --strip-components=1 --no-same-owner \
                 opentabletdriver/etc/udev/rules.d/70-opentabletdriver.rules
             # https://opentabletdriver.net/Wiki/Documentation/RequiredPermissions
-            sudo install -m 0644 "${TMP}/etc/udev/rules.d/70-opentabletdriver.rules" "${RULES}"
+            sudo install -m 0644 "${ROOT_TMP}/etc/udev/rules.d/70-opentabletdriver.rules" "${RULES}"
             printf 'blacklist hid_uclogic\nblacklist wacom\n' | sudo tee "${BLACKLIST}" >/dev/null
             sudo udevadm control --reload-rules
             flatpak install --system -y flathub "${APP}"
@@ -340,8 +357,10 @@ xbox-adapter ACTION="":
             echo
             echo "$(gettext "The adapter is a MediaTek MT7612U chip, and Linux's Wi-Fi driver for that chip (mt76x2u) would take it first, so this keeps that driver from loading: a USB Wi-Fi stick with the same chip (Netgear A6210 and many AC1200 sticks) stops working until ame apps xbox-adapter off.")"
             gum confirm "$(gettext "Set up the Xbox wireless adapter?")" || exit 0
+            # What root installs is a copy root made and checked in a folder of its own, never the account's download
             TMP="$(mktemp -d)"
-            trap 'rm -rf "${TMP}"' EXIT
+            ROOT_TMP="$(sudo mktemp -d)"
+            trap 'rm -rf "${TMP}"; sudo rm -rf "${ROOT_TMP}"' EXIT
             while read -r id url package file sum; do
                 curl -fL --progress-bar -o "${TMP}/${id}.cab" "${url}"
                 if [[ "$(sha256sum "${TMP}/${id}.cab" | cut -d" " -f1)" != "${package}" ]]; then
@@ -349,14 +368,14 @@ xbox-adapter ACTION="":
                     exit 1
                 fi
                 cabextract -q -F "${file}" -d "${TMP}/${id}" "${TMP}/${id}.cab"
-                if [[ "$(sha256sum "${TMP}/${id}/${file}" | cut -d" " -f1)" != "${sum}" ]]; then
+                sudo install -m 0600 "${TMP}/${id}/${file}" "${ROOT_TMP}/xone_dongle_${id}.bin"
+                if [[ "$(sudo sha256sum "${ROOT_TMP}/xone_dongle_${id}.bin" | cut -d" " -f1)" != "${sum}" ]]; then
                     echo "$(gettext "The firmware in it does not match its pinned checksum. Nothing was installed.")"
                     exit 1
                 fi
-                mv "${TMP}/${id}/${file}" "${TMP}/xone_dongle_${id}.bin"
             done < <(grep -v '^#' "${PINS}")
             sudo install -d -m 0755 "${FIRMWARE}"
-            sudo install -m 0644 "${TMP}"/xone_dongle_*.bin "${FIRMWARE}/"
+            sudo bash -c 'install -m 0644 "$1"/xone_dongle_*.bin "$2"/' _ "${ROOT_TMP}" "${FIRMWARE}"
             sudo restorecon -R "${FIRMWARE}" 2>/dev/null || true
             sudo install -m 0644 /usr/share/amethystora/xone/xone.conf "${BLACKLIST}"
             sudo rpm-ostree kargs --append-if-missing="${KARG}" >/dev/null
@@ -418,6 +437,11 @@ cli:
     # shellcheck source=/dev/null
     source gettext.sh
     brewfile=/usr/share/amethystora/homebrew/cli.Brewfile
+    # Homebrew's folder belongs to the first account made: only that account installs into it and uses what is in it
+    if [[ -d /home/linuxbrew/.linuxbrew && ! -O /home/linuxbrew/.linuxbrew ]]; then
+        echo "$(gettext "Homebrew belongs to another account on this computer, so the command line tools cannot be installed from this one.")"
+        exit 1
+    fi
     echo "$(gettext "This turns the terminal's extras on in your shell's settings, and installs these from Homebrew:")"
     sed -n 's/^brew "\(.*\)"$/\1/p' "${brewfile}" | paste -sd' ' | fold -s -w 78
     gum confirm "$(gettext "Install the command line tools?")" || exit 0

@@ -81,7 +81,7 @@ why_not() {
         echo sealed
         return
     fi
-    status="$(bootc status --format=json)"
+    status="$(/usr/bin/bootc status --format=json)"
     if [[ "$(jq -r '.status.staged != null and (.status.staged.downloadOnly | not)' <<<"${status}")" != true ]]; then
         echo none
     elif [[ "$(jq -r '.status.staged.softRebootCapable' <<<"${status}")" != true ]]; then
@@ -171,7 +171,7 @@ keep_open_apps() {
 }
 
 as_root() {
-    if [[ "${EUID}" -eq 0 ]]; then "do_$1"; else pkexec "${SELF}" "$1"; fi
+    if [[ "${EUID}" -eq 0 ]]; then "do_$1"; else /usr/bin/pkexec "${SELF}" "$1"; fi
 }
 
 do_restart() {
@@ -198,7 +198,7 @@ do_restart() {
 case "$1" in
     status | prepare | reset)
         if [[ "${EUID}" -ne 0 ]]; then
-            exec pkexec "${SELF}" "$1"
+            exec /usr/bin/pkexec "${SELF}" "$1"
         fi
         "do_$1"
         ;;

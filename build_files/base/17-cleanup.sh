@@ -93,8 +93,10 @@ systemctl enable amethystora-flatpak-remotes.service
 # `ame security input-remapper` turns it on for them.
 systemctl disable input-remapper.service
 # The same for Android apps, whose container runs as root (ame apps android), and for the sched-ext CPU
-# schedulers, which replace the kernel's own (ame system scheduler)
-systemctl disable waydroid-container.service
+# schedulers, which replace the kernel's own (ame system scheduler). Waydroid's unit is masked, not disabled:
+# its D-Bus service (id.waydro.Container) would start it as root for any account that calls it, and its Stop,
+# Freeze and GetSession check nobody. Only `ame apps android` unmasks it.
+systemctl mask waydroid-container.service
 systemctl disable scx_loader.service
 # L2TP/IPsec VPNs (NetworkManager-l2tp, 04-packages.sh): Fedora's kernel blacklists every module of
 # kernel-modules-extra that a net- alias would let any account load, and the plugin's L2TP daemon gets

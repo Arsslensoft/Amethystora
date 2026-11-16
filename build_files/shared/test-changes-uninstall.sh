@@ -76,6 +76,12 @@ mkdir -p "${HOME}/.var/app/org.example.Newer"
 undo "app:org.example.Newer" | jq -e '.ok == true and (.words | contains("stays in the trash"))' >/dev/null || fail "a folder made since was not said to leave the old one in the trash"
 [[ -e "${TRASH}/files/org.example.Newer/settings" && ! -e "${HOME}/.var/app/org.example.Newer/settings" ]] || fail "the older folder was moved over a newer one"
 
+# What the trash holds under an app's name is moved back only as a folder: a link there stays in the trash
+ln -s "${HOME}" "${TRASH}/files/org.example.Linked"
+printf '[Trash Info]\nPath=%s\nDeletionDate=%s\n' "${HOME}/.var/app/org.example.Linked" "$(date '+%Y-%m-%dT%H:%M:%S')" >"${TRASH}/info/org.example.Linked.trashinfo"
+undo "app:org.example.Linked" | jq -e '.ok == true and (.words | contains("stays in the trash"))' >/dev/null || fail "a link in the trash was not left there"
+[[ -L "${TRASH}/files/org.example.Linked" && ! -e "${HOME}/.var/app/org.example.Linked" ]] || fail "a link in the trash became an app's folder"
+
 if [[ "${failed}" != 0 ]]; then
     exit 1
 fi

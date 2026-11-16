@@ -98,6 +98,9 @@ bus_names() {
         inside && /=(talk|own)$/ { sub(/=.*/, ""); print }' "$1"
 }
 
+# The account's home under both of its names (/home is a link to /var/home)
+HOME_REAL="$(realpath -m -- "${HOME}")"
+
 # What a keyfile of permissions reaches, one id a line
 reaches() {
     local file="$1" sockets devices filesystems entry path
@@ -123,6 +126,12 @@ reaches() {
     for entry in "${entries[@]}"; do
         [[ -n "${entry}" && "${entry}" != !* ]] || continue
         path="${entry%%:*}"
+        # The home under its absolute name is the home
+        case "${path}" in
+            /home | /var/home | "${HOME}" | "${HOME_REAL}") path="~" ;;
+            "${HOME}"/*) path="~/${path#"${HOME}"/}" ;;
+            "${HOME_REAL}"/*) path="~/${path#"${HOME_REAL}"/}" ;;
+        esac
         if [[ "${entry}" == *:ro ]]; then
             case "${path}" in
                 host | host-os | host-etc) seen[host-read]=1 ;;
@@ -143,7 +152,11 @@ reaches() {
             xdg-config | xdg-config/autostart* | xdg-config/systemd* | xdg-data | xdg-data/applications* | \
                 "~/.config" | "~/.config/autostart"* | "~/.config/systemd"* | "~/.local" | "~/.local/bin"* | \
                 "~/.local/share" | "~/.local/share/applications"* | "~/.bashrc" | "~/.bash_profile" | \
-                "~/.profile" | "~/.zshrc" | "~/.config/fish"*) seen[autostart]=1 ;;
+                "~/.profile" | "~/.zshrc" | "~/.config/fish"* | \
+                xdg-data/systemd* | xdg-data/dbus-1* | xdg-data/nautilus* | xdg-config/environment.d* | xdg-config/kitty* | \
+                "~/.local/share/systemd"* | "~/.local/share/dbus-1"* | "~/.local/share/nautilus"* | \
+                "~/.config/environment.d"* | "~/.config/kitty"* | "~/bin"* | "~/.zshenv" | "~/.zprofile" | "~/.zsh"* | \
+                "~/.bash_login") seen[autostart]=1 ;;
         esac
     done
     # Changing the home folder or everything takes in the places programs start from, and changing

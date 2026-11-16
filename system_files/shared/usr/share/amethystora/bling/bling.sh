@@ -6,8 +6,19 @@
 [ "${BLING_SOURCED:-0}" -eq 1 ] && return
 BLING_SOURCED=1
 
+# Homebrew's folder belongs to one account, so everything in it is that account's program (/etc/profile.d/brew.sh).
+# Any other account uses a tool only from outside it, and runs nothing from it by opening a shell.
+__bling_has() {
+    __bling_found="$(command -v "$1")" || return 1
+    [ -O /home/linuxbrew/.linuxbrew ] && return 0
+    case "${__bling_found}" in
+        /home/linuxbrew/.linuxbrew/*) return 1 ;;
+    esac
+    return 0
+}
+
 # ls aliases
-if [ "$(command -v eza)" ]; then
+if __bling_has eza; then
     alias ll='eza -l --icons=auto --group-directories-first'
     alias l.='eza -d .*'
     alias ls='eza'
@@ -15,7 +26,7 @@ if [ "$(command -v eza)" ]; then
 fi
 
 # ugrep for grep
-if [ "$(command -v ug)" ]; then
+if __bling_has ug; then
     alias grep='ug'
     alias egrep='ug -E'
     alias fgrep='ug -F'
@@ -25,7 +36,7 @@ if [ "$(command -v ug)" ]; then
 fi
 
 # bat for cat
-if [ "$(command -v bat)" ]; then
+if __bling_has bat; then
     alias cat='bat --style=plain --pager=never'
 fi
 
@@ -44,15 +55,15 @@ if [ "${BLING_SHELL}" = "bash" ]; then
     [ -f "${HOMEBREW_PREFIX}/etc/profile.d/bash-preexec.sh" ] && . "${HOMEBREW_PREFIX}/etc/profile.d/bash-preexec.sh"
 fi
 
-[ "$(command -v direnv)" ] && eval "$(direnv hook "${BLING_SHELL}")"
+__bling_has direnv && eval "$(direnv hook "${BLING_SHELL}")"
 # Atuin shell integration is disabled by default
 # The atuin binary is still installed and available for manual use
 # To enable shell integration, uncomment the following line or add it to your shell config:
 # [ "$(command -v atuin)" ] && eval "$(atuin init "${BLING_SHELL}" ${ATUIN_INIT_FLAGS})"
-[ "$(command -v starship)" ] && eval "$(starship init "${BLING_SHELL}")"
-[ "$(command -v zoxide)" ] && eval "$(zoxide init "${BLING_SHELL}")"
+__bling_has starship && eval "$(starship init "${BLING_SHELL}")"
+__bling_has zoxide && eval "$(zoxide init "${BLING_SHELL}")"
 
-if command -v mise >/dev/null 2>&1; then
+if __bling_has mise; then
   # Check for Bash
   if [ "${BLING_SHELL}" = "bash" ]; then
     if [ "$MISE_BASH_AUTO_ACTIVATE" != "0" ]; then
@@ -66,3 +77,6 @@ if command -v mise >/dev/null 2>&1; then
     fi
   fi
 fi
+
+unset -f __bling_has
+unset __bling_found
