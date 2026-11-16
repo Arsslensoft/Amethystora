@@ -94,6 +94,10 @@ if grep "bootc switch" /usr/share/anaconda/interactive-defaults.ks | grep -v -- 
     exit 1
 fi
 
+# ...and relabels what Anaconda wrote with the policy's own user: started from its window it writes as the
+# live account's, and installer.ks's label checks then failed the installation
+grep -q -- 'restorecon -F -r /etc /var' /usr/share/anaconda/interactive-defaults.ks
+
 # ...and keeps the image's firewall, without the ssh Anaconda adds by itself
 grep -qx -- "firewall --use-system-defaults" /usr/share/anaconda/interactive-defaults.ks
 

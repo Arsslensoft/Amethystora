@@ -37,7 +37,10 @@ mkdir -p "${deploy}/var/lib/amethystora" && touch "${deploy}/var/lib/amethystora
 # /var/log first, which Anaconda makes only after this, to copy its logs into: made then, it would take
 # /var's label, and journald could not keep the journal in it
 mkdir -p "${deploy}/var/log"
-chroot "${deploy}" restorecon -r /etc /var
+# -F: started from the installer's window, Anaconda runs in the live account's session, and what it writes
+# is unconfined_u's. Without it restorecon leaves the user part alone, and the checks below failed every
+# installation made from the window ("Installation failed"), which an unattended one in the lab never showed
+chroot "${deploy}" restorecon -F -r /etc /var
 [ "$(chroot "${deploy}" stat -c %C /etc/shadow)" = system_u:object_r:shadow_t:s0 ]
 [ "$(chroot "${deploy}" stat -c %C /var/log)" = system_u:object_r:var_log_t:s0 ]
 if [ -e "${deploy}/usr/lib/bootc/kargs.d/00-nvidia.toml" ] && mokutil --sb-state 2>/dev/null | grep -qi enabled; then
