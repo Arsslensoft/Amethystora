@@ -276,6 +276,7 @@ grep -q 'pam_fprintd.so duress=deny' /etc/pam.d/system-auth && grep -q 'pam_fpri
     not_ok "the PAM setup with duress on" "$(grep -n 'fprintd\|duress\|pam_unix' /etc/pam.d/system-auth /etc/pam.d/fingerprint-auth /etc/pam.d/password-auth)"
 check "the drift check takes the duress setup for the image's own" "${DURESS}" authselect
 check "nothing keeps either action from running" "${DURESS}" check
+check "an action handed over on standard input is stored as it came, and still holds" sh -c "'${DURESS}' action fingerprint - <'${WORK}/action' && cmp '${WORK}/action' /etc/amethystora/duress.d/action-fingerprint && '${DURESS}' check fingerprint"
 
 # --- 3. Where each is let in, and where refused ---------------------------------------------------------------
 

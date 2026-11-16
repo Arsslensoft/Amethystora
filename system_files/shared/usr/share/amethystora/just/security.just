@@ -241,14 +241,19 @@ duress ACTION="":
                 ;;
             *) exit 0 ;;
         esac
+        # Read once: the file is the account's, so what is shown is what root is handed on standard input,
+        # never what the file holds by then
+        local content
+        content="$(cat "${file}"; printf x)"
+        content="${content%x}"
+        rm -f "${file}"
         echo "$(gettext "The action, which runs as root:")"
         echo
-        cat "${file}"
+        printf '%s' "${content}"
         echo
         gum confirm "${question}" || exit 0
         sudo /usr/libexec/amethystora-security-config note duress action
-        sudo "${duress}" action "${src}" "${file}"
-        rm -f "${file}"
+        printf '%s' "${content}" | sudo "${duress}" action "${src}" -
     }
     case "${action}" in
         "${setup_finger}" | setup)
