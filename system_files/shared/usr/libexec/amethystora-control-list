@@ -3778,6 +3778,16 @@ item system disk-warning switch "${ gettext "A warning before the disk fails"; }
     "${DISK_WARNING}" disks#when-a-disk-may-be-failing
 GROUP=""
 
+# Seat access to debug probes, USB serial adapters and logic analysers: its rules file in /etc is the switch, which the helper
+# copies only after saying what it gives (a terminal)
+# on only for the image's own file: a file of that name that is not is drift, which the helper calls changed
+if [[ "${ /usr/libexec/amethystora-lab-devices status; }" == on ]]; then LAB_DEVICES=on; else LAB_DEVICES=off; fi
+switch_choices true ame system lab-devices
+USAGE="ame system lab-devices on|off"
+item system lab-devices switch "${ gettext "Lab devices"; }" \
+    "${ gettext "Debug probes, USB serial adapters and logic analysers given to you, the person at the machine, so that flashing and debugging tools open them without a password. They are root's as the image ships."; }" \
+    "${LAB_DEVICES}" devices#lab-devices
+
 # What the notice after a night's battery kept from waking the computer, with the way back here: that notice is said once,
 # and a dismissed one is gone. The helper's names are plain text; a device with no name shows its ID
 if [[ "${ ended wake-devices; }" == 0 ]]; then

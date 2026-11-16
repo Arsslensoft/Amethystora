@@ -48,6 +48,8 @@ program cannot reach it: a keyboard configurator, Steam Input, a tablet driver, 
 9. **A DisplayLink dock's driver did not load.** Only a dock with a device of vendor `17e9` in `lsusb`: one
    whose video comes over USB-C's DisplayPort needs no driver. Tell: `ame system drivers` says `displaylink:`
    and what stands in the way, `mokutil --sb-state`, `cat /sys/kernel/security/lockdown`.
+10. **A debug probe, serial adapter or logic analyser is root's.** Tell: permission denied on it as the account, `lsusb` shows it,
+   `/etc/udev/rules.d/70-amethystora-lab-devices.rules` is absent; `ame system lab-devices list` names it as covered.
 
 ## Fix
 
@@ -103,6 +105,11 @@ Secure Boot on: the user runs `ame security secure-boot` (root) (restart), and a
 screen. Secure Boot off: enrolling alone does nothing. The user turns Secure Boot on in the firmware and enrolls,
 or runs `ame security lockdown off` (root) (restart), which costs protection; never run either yourself.
 
+### 10. Lab devices
+
+The user runs `ame system lab-devices on`: it says what it gives the person at the seat, asks, then plugging the device in
+again is enough. Serial adapters are a modem's too: say so. Never write a rule by hand with `MODE="0666"`.
+
 ## Verify
 
 - `state security-settings` with the switch's name.
@@ -120,3 +127,4 @@ or runs `ame security lockdown off` (root) (restart), which costs protection; ne
 - The HID rule: `sudo rm /etc/udev/rules.d/72-zz-keyboard.rules` (root), then plug the device in again.
 - Each `ame security` switch above: the same command with `on`; key remapping with `off`.
 - The Xbox wireless adapter: `ame apps xbox-adapter off` (root) (restart).
+- Lab devices: `ame system lab-devices off` (root).

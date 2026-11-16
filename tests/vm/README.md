@@ -103,7 +103,7 @@ reboot too (it keeps the boot id, so systemd's `SoftRebootsCount` is compared as
 `{"powers_off": true}` it waits for the machine to power itself off, then starts it. Exit status 101
 (`continue_phase`) runs the next phase in the same boot, for what outlasts a phase's 30 minutes; a phase that calls
 `usb_next JSON` first has USB devices plugged out and in before it, as a person would (`{"unplug": ["stick"],
-"plug": ["stick", "keyboard"]}`: two USB sticks with serials of their own and a plain keyboard, `USB_DEVICES` in
+"plug": ["stick", "keyboard"]}`: two USB sticks with serials of their own, a plain keyboard and an FTDI serial adapter, `serial`, which is `ttyUSB0`, `USB_DEVICES` in
 `run.mjs`).
 
 A suite whose second line is `# vmlab-vm: installer` runs on a second machine, installed as the installer

@@ -1,0 +1,182 @@
+#!/usr/bin/python3 -I
+"""amethystora-lab-devices: seat access to debug probes, USB serial adapters and logic analysers (`ame system lab-devices`).
+
+    amethystora-lab-devices status        on, off, or changed (a file of that name in /etc that is not the image's)
+    amethystora-lab-devices list          the devices plugged in now that the rules cover: ID, a tab, its name, a tab, what it is
+    amethystora-lab-devices what          every kind of device the rules cover: what it is, a tab, its IDs
+    amethystora-lab-devices on | off      as root: copy the image's rules into /etc/udev/rules.d, or take them away
+
+The rules are /usr/share/amethystora/lab-devices/70-amethystora-lab-devices.rules, each device by its vendor and product with
+TAG+="uaccess" and a comment above it saying what it is and where its ID comes from. `on` copies that file byte for byte, which is
+how the security watcher knows it: a file of that name that is not the image's is drift."""
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.environ.get("AMETHYSTORA_LABDEV_ROOT", "")
+SHIPPED = f"{ROOT}/usr/share/amethystora/lab-devices/70-amethystora-lab-devices.rules"
+TARGET = f"{ROOT}/etc/udev/rules.d/70-amethystora-lab-devices.rules"
+USB = f"{ROOT}/sys/bus/usb/devices"
+LONGEST_NAME = 48
+RULE = re.compile(r'^SUBSYSTEM=="(?P<subsystem>usb|tty|hidraw)", (?:ENV\{DEVTYPE\}=="usb_device", )?ATTRS?\{idVendor\}=="(?P<vendor>[0-9a-f]{4})", '
+                  r'ATTRS?\{idProduct\}=="(?P<products>[0-9a-f]{4}(?:\|[0-9a-f]{4})*)", TAG\+="uaccess"$')
+
+
+def usage():
+    print("usage: amethystora-lab-devices status | list | what | on | off", file=sys.stderr)
+    sys.exit(64)
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read(256).strip()
+    except OSError:
+        return ""
+
+
+def clean(text):
+    """A name a device gives itself, as a line of text that cannot read as a link or a command"""
+    line = "".join(c if c.isprintable() else " " for c in text)
+    line = re.sub(r"[/\\]", " ", line)
+    line = re.sub(r"(?i)\bwww\d{0,3}\.", "www ", line)
+    return " ".join(line.split())[:LONGEST_NAME]
+
+
+def rules():
+    """[(label, subsystem, vendor, [products])] from the image's file: the label is the first comment line above each rule"""
+    found, comment = [], []
+    try:
+        with open(SHIPPED, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return found
+    for line in lines:
+        if line.startswith("#"):
+            comment.append(line[1:].strip())
+            continue
+        match = RULE.match(line)
+        if match and comment:
+            found.append((comment[0], match["subsystem"], match["vendor"], match["products"].split("|")))
+        comment = []
+    return found
+
+
+def state():
+    if not os.path.exists(TARGET):
+        return "off"
+    try:
+        with open(TARGET, "rb") as a, open(SHIPPED, "rb") as b:
+            return "on" if a.read() == b.read() else "changed"
+    except OSError:
+        return "changed"
+
+
+def plugged():
+    """Every USB device plugged in now: (vendor, product, name, folder)"""
+    out = []
+    try:
+        entries = sorted(os.listdir(USB))
+    except OSError:
+        return out
+    for entry in entries:
+        folder = os.path.join(USB, entry)
+        vendor, product = read(f"{folder}/idVendor"), read(f"{folder}/idProduct")
+        if re.fullmatch(r"[0-9a-f]{4}", vendor) and re.fullmatch(r"[0-9a-f]{4}", product):
+            out.append((vendor, product, clean(read(f"{folder}/product")), folder))
+    return out
+
+
+def covered():
+    """[(vendor, product, name, label, folder)] for the devices plugged in that a rule names, once each"""
+    table = {}
+    for label, _subsystem, vendor, products in rules():
+        for product in products:
+            table.setdefault((vendor, product), label)
+    return [(v, p, name or f"{v}:{p}", table[(v, p)], folder) for v, p, name, folder in plugged() if (v, p) in table]
+
+
+def list_devices():
+    for vendor, product, name, label, _folder in covered():
+        sys.stdout.write(f"{vendor}:{product}\t{name}\t{label}\n")
+    return 0
+
+
+def what():
+    seen = {}
+    for label, _subsystem, vendor, products in rules():
+        seen.setdefault(label, [])
+        seen[label] += [f"{vendor}:{product}" for product in products]
+    for label, ids in seen.items():
+        sys.stdout.write(f"{label}\t{' '.join(dict.fromkeys(ids))}\n")
+    return 0
+
+
+def need_root():
+    if os.getuid() != 0 and not ROOT:
+        print("This changes the machine: run it as root, or use ame system lab-devices.", file=sys.stderr)
+        sys.exit(77)
+
+
+def reload_rules(devices):
+    if ROOT:
+        return
+    try:
+        subprocess.run(["/usr/bin/udevadm", "control", "--reload"], capture_output=True, timeout=10, check=False)
+        # A device plugged in now takes the new grant at once, without being plugged in again: its own events and its children's
+        for _v, _p, _n, _label, folder in devices:
+            subprocess.run(["/usr/bin/udevadm", "trigger", f"--parent-match={os.path.realpath(folder)}"],
+                           capture_output=True, timeout=10, check=False)
+        subprocess.run(["/usr/bin/udevadm", "settle", "--timeout=10"], capture_output=True, timeout=15, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def switch_on():
+    need_root()
+    if not rules():
+        print("The image's rules are missing or unreadable.", file=sys.stderr)
+        return 66
+    os.makedirs(os.path.dirname(TARGET), exist_ok=True)
+    handle, name = tempfile.mkstemp(dir=os.path.dirname(TARGET), prefix=".amethystora-lab")
+    os.close(handle)
+    shutil.copyfile(SHIPPED, name)
+    os.chmod(name, 0o644)
+    os.replace(name, TARGET)
+    reload_rules(covered())
+    return 0
+
+
+def switch_off():
+    need_root()
+    devices = covered()
+    try:
+        os.unlink(TARGET)
+    except FileNotFoundError:
+        pass
+    reload_rules(devices)
+    return 0
+
+
+def main(argv):
+    if argv == ["status"]:
+        print(state())
+        return 0
+    if argv == ["list"]:
+        return list_devices()
+    if argv == ["what"]:
+        return what()
+    if argv == ["on"]:
+        return switch_on()
+    if argv == ["off"]:
+        return switch_off()
+    usage()
+    return 64
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

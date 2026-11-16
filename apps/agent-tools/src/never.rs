@@ -104,6 +104,10 @@ pub fn refusal(argv: &[String]) -> Option<String> {
     if program == "btrfs" && argv.windows(2).any(|pair| pair[0] == "subvolume" && pair[1] == "delete") {
         return Some("it deletes a subvolume, and with it maybe a snapshot".into());
     }
+    // Lab devices' helper: giving the seat the probes, adapters and analysers is the person's; the root helper would otherwise run it
+    if program == "amethystora-lab-devices" && !matches!(argv.get(1).map(String::as_str), Some("list" | "status" | "what")) {
+        return Some("giving the person at the machine access to debug probes, serial adapters and analysers loosens a protection: the user turns it on".into());
+    }
     if program == "amethystora-raid" && argv.get(1).map(String::as_str) != Some("status") {
         return Some("pools of disks are made, changed and erased only by the user, in a terminal".into());
     }
@@ -363,12 +367,24 @@ fn ame_refusal(args: &[String]) -> Option<String> {
         {
             Some("the agent's own shortcuts are the user's to change".into())
         }
-        ["system", "move" | "bring-over", ..] => Some("moving a person's folders between computers is the user's, with their eyes on both screens".into()),
+        ["system", "move" | "bring-over" | "move-in", ..] => Some("moving a person's folders between computers is the user's, with their eyes on both screens".into()),
+        // Seat access to debug probes, serial adapters and logic analysers loosens what the image keeps root's: only reading which are plugged in
+        ["system", "lab-devices", rest @ ..] if rest.first() != Some(&"list") => {
+            Some("giving the person at the machine access to debug probes, serial adapters and analysers loosens a protection: the user turns it on".into())
+        }
         ["system", "raid", rest @ ..] if rest.first() != Some(&"status") => {
             Some("pools of disks are made, changed and erased only by the user, in a terminal".into())
         }
         // It decides what the computer starts, by writing to the boot partition
         ["update", "boot-guard", _, ..] => Some("going back from an update that does not start is the user's to switch".into()),
+        // A development service pulls an image, runs a container and may delete the data it holds: the person's. Listing them
+        // and the ports (and the graphics card check, which fetches only when --pull or --deep says so) only read
+        ["dev", "service", verb, ..] if *verb != "list" => {
+            Some("a development service pulls an image, runs a container and may delete its data: the user adds, starts, stops and removes it".into())
+        }
+        ["dev", "gpu", rest @ ..] if rest.iter().any(|word| matches!(*word, "--pull" | "--deep")) => {
+            Some("fetching the image the graphics card check runs is the user's: the agent may run ame dev gpu without --pull or --deep".into())
+        }
         ["security", rest @ ..] => security_refusal(rest),
         _ => None,
     }

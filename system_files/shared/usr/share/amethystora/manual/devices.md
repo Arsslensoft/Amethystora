@@ -81,6 +81,28 @@ Set the pen's pressure, its buttons and the part of the screen the tablet covers
 grid. `ame apps opentabletdriver off` takes it all away, and the kernel's drivers come back after a restart. The
 **Drawing tablets** switch on [Control](control.md)'s **Apps** page does either in a terminal.
 
+## Lab devices
+
+Debug probes, USB serial adapters and logic analysers belong to root until you say otherwise, so a flashing tool or a
+debugger from Flathub, or one you installed yourself, says *permission denied* on them. One command gives them to you,
+the person at the machine:
+
+```bash
+ame system lab-devices list   # which of the devices plugged in now it covers
+ame system lab-devices on     # says what it gives, asks, and copies its rules into /etc
+ame system lab-devices off
+```
+
+- It covers ST-LINK, J-Link, DAPLink, Black Magic and Raspberry Pi probes, the USB port of ESP32 chips, FTDI, CP210x,
+  CH340 and PL2303 serial adapters, Arduino Uno and Leonardo boards, and Saleae and sigrok logic analysers. Each is given
+  by its vendor and product, to you and to the apps that may reach devices, never to every account or over SSH.
+- A debug probe reads and writes the memory of the board it is connected to, firmware included. A serial adapter is a
+  modem's too: a program of yours that opens one can talk to whatever is on its other end. That is why it is a choice.
+- Radios (RTL-SDR, HackRF, Airspy, bladeRF, SDRplay) and many analysers need nothing: the system already gives them to
+  you. Keyboards are never given this way, whatever chip they are built on.
+- The same switch is **Lab devices** on [Control](control.md)'s **System** page. A device already plugged in may need to be
+  plugged in again. Security's report says when it is on.
+
 ## Cameras
 
 Virtual cameras (OBS's, for instance) work without anything to install, through the loopback module built into the

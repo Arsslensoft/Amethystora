@@ -4216,6 +4216,17 @@ grep -q 'SUBSYSTEM=="usb".*AMETHYSTORA_USB_KEYBOARD}=="1", TAG-="uaccess"' "${ru
 udevadm verify "${rules}" 2>/dev/null ||
     ! udevadm verify --help >/dev/null 2>&1
 bash /ctx/build_files/shared/test-hid-keyboards.sh
+# Lab devices (ame system lab-devices; manual: devices.md#lab-devices): debug probes, USB serial adapters and logic analysers given
+# to the person at the seat by vendor and product, copied into /etc only on request and accepted by the watcher only as shipped;
+# test-lab-devices.sh holds the file to uaccess rules by vendor and product, each with its source, sorted before the rules that
+# take a keyboard's grant back, and none the system's own hardware database already gives
+test -x /usr/libexec/amethystora-lab-devices
+test -s /usr/share/amethystora/lab-devices/70-amethystora-lab-devices.rules
+test ! -e /etc/udev/rules.d/70-amethystora-lab-devices.rules
+test ! -e /usr/lib/udev/rules.d/70-amethystora-lab-devices.rules
+test -e /usr/lib/udev/rules.d/73-seat-late.rules
+grep -q '^lab-devices ACTION="":' /usr/share/amethystora/just/system.just
+bash /ctx/build_files/shared/test-lab-devices.sh
 # OpenRGB's two lines that gave every i2c bus and /dev/port to the seat (08-hardening.sh takes them out) are gone, and no
 # rule of the image tags an i2c node but the display brightness switch's own file, which the switch copies into /etc
 for rules in /usr/lib/udev/rules.d/*.rules /etc/udev/rules.d/*.rules; do

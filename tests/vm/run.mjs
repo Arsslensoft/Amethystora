@@ -75,6 +75,8 @@ const USB_DEVICES = {
   stick: { driver: 'usb-storage', serial: 'VMLAB-STICK-1', port: '2' },
   keyboard: { driver: 'usb-kbd', port: '3' },
   stick2: { driver: 'usb-storage', serial: 'VMLAB-STICK-2', port: '4' },
+  // An FTDI serial adapter (0403:6001, ttyUSB0 in the guest), its other end nowhere (78-lab-devices.sh)
+  serial: { driver: 'usb-serial', chardev: true, port: '5' },
 };
 // The lab's disk passphrase, and the PIN a suite enrols the TPM with, both handed to systemd-cryptsetup as
 // credentials so that nobody has to type them (next_boot can have one typed instead). The PIN goes under both of
@@ -423,6 +425,11 @@ async function usb(vm) {
       const node = `vmlab-drive-${++drives}`;
       await qmp(vm, 'blockdev-add', { driver: 'null-co', 'node-name': node, size: 64 * 1024 * 1024, 'read-zeroes': true });
       Object.assign(args, { drive: node, serial: device.serial });
+    }
+    if (device.chardev) {
+      const id = `vmlab-chardev-${++chardevs}`;
+      await qmp(vm, 'chardev-add', { id, backend: { type: 'null', data: {} } });
+      args.chardev = id;
     }
     await qmp(vm, 'device_add', args);
   }

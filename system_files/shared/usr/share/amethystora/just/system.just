@@ -569,6 +569,64 @@ wake-device *ARGS:
             ;;
     esac
 
+# Seat access to the devices an engineer's tools open: debug probes, USB serial adapters, logic analysers. ACTION is on, off
+# or list (which of the devices it covers are plugged in now); without one, it asks
+[positional-arguments]
+lab-devices ACTION="":
+    #!/usr/bin/bash
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source gettext.sh
+    helper=/usr/libexec/amethystora-lab-devices
+    action="${1:-}"
+    state="$("${helper}" status)"
+    cancel="$(gettext "Cancel")"
+    if [[ -z "${action}" ]]; then
+        if [[ "${state}" == off ]]; then
+            echo "$(gettext "Lab devices are off: debug probes, USB serial adapters and logic analysers are root's.")"
+        else
+            echo "$(gettext "Lab devices are on.")"
+        fi
+        action="$(gum choose --header "$(gettext "Lab devices")" on off list "${cancel}")" || exit 0
+    fi
+    case "${action}" in
+        list)
+            found=false
+            while IFS=$'\t' read -r id name label; do
+                [[ -n "${id}" ]] || continue
+                found=true
+                echo "${name}  (${id}): ${label}"
+            done < <("${helper}" list)
+            if [[ "${found}" == false ]]; then
+                echo "$(gettext "No device the lab devices rules cover is plugged in.")"
+            elif [[ "${state}" == off ]]; then
+                echo
+                echo "$(gettext "They are root's until you turn them on: ame system lab-devices on.")"
+            fi
+            ;;
+        on)
+            echo "$(gettext "This gives you, the person at the machine, and the apps that may reach devices, the following when they are plugged in. Other accounts and SSH get none of it.")"
+            echo
+            while IFS=$'\t' read -r label _; do
+                echo "  ${label}"
+            done < <("${helper}" what | awk -F'\t' '!seen[$1]++')
+            echo
+            echo "$(gettext "A debug probe reads and writes the memory of the board it is connected to, firmware included, and a program that opens a serial adapter can talk to whatever is on its other end: it is a modem's too. Software-defined radios and many analysers need nothing of this: the system gives them already.")"
+            gum confirm "$(gettext "Give them to the person at the machine?")" || exit 0
+            sudo "${helper}" on
+            echo "$(gettext "On. A device plugged in now may need to be plugged in again.")"
+            ;;
+        off)
+            sudo "${helper}" off
+            echo "$(gettext "Off. The devices are root's again, once they are plugged in again.")"
+            ;;
+        "" | "${cancel}" | Cancel) exit 0 ;;
+        *)
+            echo "usage: ame system lab-devices on|off|list"
+            exit 64
+            ;;
+    esac
+
 # Show all messages from this boot
 logs-this-boot:
     sudo journalctl --no-hostname -b 0
