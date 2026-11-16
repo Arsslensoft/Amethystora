@@ -1978,6 +1978,13 @@ disk-unlock ACTION="":
         gum confirm "$(gettext "Enrol anyway?")" || exit 0
     fi
     echo "$(gettext "Type the disk passphrase when asked, once for each encrypted disk of the system. It keeps working afterwards: this adds a second way in, not a replacement, so a cleared TPM or a replaced board does not lock you out of your disk.")"
+    # systemd hardens the PIN with Argon2id and by itself takes up to half of the machine's memory for one disk. A
+    # system on several disks opens them all at once in the initramfs, where two such keys need all of it: the
+    # unlock is killed for want of memory and the start ends in emergency mode (the lab, systemd 262). So the
+    # system's disks share that half.
+    if [[ ${#DEVICES[@]} -gt 1 ]]; then
+        FLAGS+=("--tpm2-argon2id-memory=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) * 1024 / 2 / ${#DEVICES[@]}))")
+    fi
     # Any key the TPM held before goes once this one is in (never the new one): one enrolled with other
     # PCRs, or none, as an older unlocker did, would otherwise open the disk without these checks
     for DEVICE in "${DEVICES[@]}"; do

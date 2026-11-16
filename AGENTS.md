@@ -1368,6 +1368,9 @@ replaces, adds, opens and forgets them. Its plan, done and tested in the VM lab 
   `amethystora-raid root-luks`, never the first LUKS device on the machine, which may be a pool's. On
   an image that is not sealed it enrols the TPM only with a PIN: there the boot menu and initramfs are
   plain files, and a shell from the boot menu or a look-alike LUKS volume changes neither PCR 7 nor 14.
+  systemd 262 hardens the PIN with Argon2id and takes up to half of the memory for one disk, and the initramfs
+  opens the system's disks at once: on several disks the recipe shares that half out (`--tpm2-argon2id-memory`),
+  or the unlock is killed for want of memory and the start ends in emergency mode (suite 55 holds the sum).
   The watcher reads the LUKS header into `status.json` (`disk_unlock`), and the report's
   `disk-unlock-pin` check names a key set up without one.
 

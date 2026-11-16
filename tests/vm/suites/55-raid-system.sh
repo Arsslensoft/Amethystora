@@ -108,6 +108,19 @@ in_esp() {  # PARTITION COMMAND...
 esp_sums() { in_esp "$1" sh -c 'find EFI -type f -print0 | sort -z | xargs -0 sha256sum'; }
 luks_of() { cryptsetup luksUUID "$1"; }
 has_tpm() { cryptsetup luksDump "$1" | grep -q systemd-tpm2; }
+# systemd hardens the PIN with Argon2id, and the system's disks are all opened at once in the initramfs: what their TPM
+# keys need together has to fit in half of the memory, or the start is killed for want of it (seen with two keys at
+# 1.7 GB each in 4 GB)
+tpm_memory_fits() {
+    local part total=0 half
+    for part in "$@"; do
+        total=$((total + $(cryptsetup luksDump --dump-json-metadata "${part}" |
+            jq '[.tokens[] | select(.type == "systemd-tpm2") | .tpm2_argon2id_memcost // 0] | add // 0')))
+    done
+    half=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) * 1024 / 2))
+    ((total > 0 && total <= half)) && ok "the TPM keys of the system's disks need half of the memory at most together" ||
+        not_ok "the TPM keys of the system's disks need ${total} bytes together, of ${half} that may go to them"
+}
 # "Start with a disk missing" is chosen in the boot menu itself, as a person would (next_boot's menu_last): a line
 # in custom.cfg would stay on the half of /boot that was away, which GRUB may read once it is back
 # The TPM, with the lab's PIN, on every disk of the system: ame security disk-unlock on-pin, which asks each
@@ -259,6 +272,7 @@ finished)
     says "ame security disk-unlock enrols the TPM with a PIN" "${out}" 'Done'
     has_tpm "${FIRST_ROOT}" && has_tpm "${NEW_ROOT}" && ok "the TPM holds a key for both of the system's disks" ||
         not_ok "the TPM key is not on both system disks" "$(cryptsetup luksDump "${NEW_ROOT}" | grep -A3 Tokens)"
+    tpm_memory_fits "${FIRST_ROOT}" "${NEW_ROOT}"
     pool_tpm=""
     for p in $(lsblk -nrpo PATH,PARTLABEL | awk '$2 ~ /^raid-data-/ { print $1 }'); do has_tpm "${p}" && pool_tpm+=" ${p}"; done
     [[ -z "${pool_tpm}" ]] && ok "no TPM key on the pool's disks" || not_ok "the TPM got a key for the pool's${pool_tpm}"
@@ -371,6 +385,7 @@ replacing)
     check "the firmware's entry for SPARE-3 is gone, SPARE-4 has one" sh -c \
         "! efibootmgr -v | grep -qi '${NEW_ESP_PARTUUID}' && efibootmgr | grep -q 'Amethystora ($(basename "${REPLACED_DISK}"))'"
     has_tpm "${REPLACED_ROOT}" && ok "the TPM holds a key for SPARE-4" || not_ok "no TPM key on SPARE-4"
+    tpm_memory_fits "${FIRST_ROOT}" "${REPLACED_ROOT}"
     step replaced
     next_boot '{"absent": [3], "credentials": {"cryptsetup.passphrase": null}}'
     reboot_and_continue
