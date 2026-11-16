@@ -137,7 +137,7 @@ devmode ACTION="":
     # would drop, and checks the signature the same way. bootc only where layering is locked, or sealed.
     switch_to() {
         if [[ -e /usr/share/amethystora/sealed ]] || grep -q "^LockLayering=true" /etc/rpm-ostreed.conf; then
-            pkexec bootc switch --enforce-container-sigpolicy "$1"
+            /usr/bin/pkexec /usr/bin/bootc switch --enforce-container-sigpolicy "$1"
         else
             rpm-ostree rebase "ostree-image-signed:docker://$1"
         fi
@@ -561,8 +561,8 @@ wake-device *ARGS:
     helper=/usr/libexec/amethystora-sleep-report
     case "${1:-list}:${2:-}" in
         list:) "${helper}" list --names | awk -F'\t' '{ print ($2 != "" && $2 != $1) ? $1 "  " $2 : $1 }' ;;
-        off:?*) pkexec "${helper}" stop "$2" && echo "$(gettext "It will not wake the computer now.")" ;;
-        on:?*) pkexec "${helper}" allow "$2" && echo "$(gettext "It may wake the computer again.")" ;;
+        off:?*) /usr/bin/pkexec "${helper}" stop "$2" && echo "$(gettext "It will not wake the computer now.")" ;;
+        on:?*) /usr/bin/pkexec "${helper}" allow "$2" && echo "$(gettext "It may wake the computer again.")" ;;
         *)
             echo "usage: ame system wake-device list | off ID | on ID"
             exit 64
