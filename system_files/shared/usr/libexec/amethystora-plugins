@@ -216,13 +216,14 @@ cmd_remove() {
 consent() {
     local id="$1" digest="$2" inspected="$3" previous="$4" key a b
     local -a chosen=() asked=()
-    local -A why=()
+    local -A why=() limits=()
     while IFS=$'\t' read -r key a b; do
         case "${key}" in
             name) export name="${a}"; ;;
             version) export version="${a}"; ;;
             license) export license="${a}"; ;;
             perm) asked+=("${a}"); why["${a}"]="${b}" ;;
+            limit) limits["${a}"]="${b}" ;;
             file) export size="${a}" path="${b}" ;;
         esac
     done <<<"${inspected}"
@@ -248,7 +249,17 @@ consent() {
         eval_gettext "  Its reason: \${reason}"
         echo
         case "${perm}" in
-            network=*) gettext "  A host it may reach is a way for anything it knows to leave this computer."; echo ;;
+            network=*)
+                gettext "  A host it may reach is a way for anything it knows to leave this computer."
+                echo
+                # The most it may send a host in an hour is asked for too (1 MiB is what a host without a limit of its own has)
+                if [[ -n "${limits[${perm#network=}]:-}" && "${limits[${perm#network=}]}" != 1048576 ]]; then
+                    export amount
+                    amount="$(numfmt --to=iec-i --suffix=B "${limits[${perm#network=}]}" 2>/dev/null || echo "${limits[${perm#network=}]} bytes")"
+                    eval_gettext "  It may send up to \${amount} an hour to it (1 MiB is usual)."
+                    echo
+                fi
+                ;;
             window) gettext "  A window can read whatever you copied last while it has the focus, and can look like any other window, a password prompt included; what it reads can reach any other plugin that shares a folder with it."; echo ;;
         esac
         if grep -qxF -- "${perm}" <<<"${previous}"; then
@@ -336,8 +347,11 @@ update_all() {
         inspected="$(pkexec "${ROOT}" inspect "$(field ticket <<<"${out}")")"
         more="$(comm -23 <(awk -F'\t' '$1 == "perm" { print $2 }' <<<"${inspected}" | sort) \
             <("${HOST}" show "${id}" | awk -F'\t' '$1 == "granted" { print $2 }' | sort))"
-        # A higher byte limit for a host is more asked for too (1 MiB an hour is what a host without a limit of its own has)
-        more+="$(awk -F'\t' 'NR == FNR { if ($1 == "limit") have[$2] = $3; next } $1 == "limit" && $3 + 0 > (($2 in have) ? have[$2] : 1048576) + 0 { print $2 }' \
+        # A higher byte limit for a host is more asked for too (1 MiB an hour is what a host without a limit of its own has, so a host that
+        # loses a lower limit of its own is asking for more)
+        more+="$(awk -F'\t' 'NR == FNR { if ($1 == "limit") have[$2] = $3; else if ($1 == "granted" && $2 ~ /^network=/) kept[substr($2, 9)] = 1; next }
+            $1 == "perm" && $2 ~ /^network=/ { asked[substr($2, 9)] = 1 } $1 == "limit" { want[$2] = $3 }
+            END { for (h in kept) if (h in asked && ((h in want) ? want[h] : 1048576) + 0 > ((h in have) ? have[h] : 1048576) + 0) print h }' \
             <("${HOST}" show "${id}") - <<<"${inspected}")"
         if [[ -n "${more}" ]]; then
             export id source

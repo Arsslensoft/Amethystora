@@ -208,7 +208,7 @@ for bus in /run/user/*/bus; do
     fi
     if [[ ${#ACTIONS[@]} -eq 0 && -n "${AGENT_UNIT}" ]] && agent_on "${user}" "${uid}"; then
         runuser -u "${user}" -- env "DBUS_SESSION_BUS_ADDRESS=unix:path=${bus}" "XDG_RUNTIME_DIR=/run/user/${uid}" \
-            systemd-run --user --collect --quiet -- /usr/libexec/amethystora-agent-notice "${AGENT_UNIT}" \
+            systemd-run --user --collect --quiet --expand-environment=no -- /usr/libexec/amethystora-agent-notice "${AGENT_UNIT}" \
             --app-name=Amethystora --urgency="${URGENCY}" --icon=dialog-warning \
             "--action=agent=$(in_language gettext 'Ask the agent')" -- "${SUMMARY}" "${MARKUP_BODY}" || true
         continue

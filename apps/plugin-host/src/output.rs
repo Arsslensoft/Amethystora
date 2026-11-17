@@ -40,6 +40,7 @@ pub fn clean(text: &str, max: usize) -> String {
 const SYSTEM_ICONS: &[&str] = &[
     "amethystora", "org.amethystora.", "media-record", "camera-", "microphone-", "call-", "battery-", "security-", "dialog-password", "system-", "software-update",
     "network-", "audio-input", "screen-shared", "screen-recording",
+    "audio-volume", "airplane-mode", "bluetooth", "power-profile", "night-light", "channel-secure", "channel-insecure",
 ];
 
 /// Whether an icon's name is one of the system's (see SYSTEM_ICONS)
@@ -221,7 +222,7 @@ mod tests {
         // Markup is text: nothing is interpreted, and the shell draws it as it is
         assert_eq!(parse(r#"{"text":"<b>x</b>"}"#, &[]).unwrap()["text"], "<b>x</b>");
         // The system's own icons are never a plugin's to draw
-        for name in ["media-record-symbolic", "camera-web-symbolic", "microphone-sensitivity-high-symbolic", "call-start-symbolic", "battery-caution-symbolic", "software-update-available-symbolic", "security-high-symbolic", "dialog-password-symbolic", "org.amethystora.Vault", "amethystora-security", "network-wireless-symbolic", "system-run-symbolic"] {
+        for name in ["media-record-symbolic", "camera-web-symbolic", "microphone-sensitivity-high-symbolic", "call-start-symbolic", "battery-caution-symbolic", "software-update-available-symbolic", "security-high-symbolic", "dialog-password-symbolic", "org.amethystora.Vault", "amethystora-security", "network-wireless-symbolic", "system-run-symbolic", "airplane-mode-symbolic", "bluetooth-active-symbolic", "power-profile-balanced-symbolic", "audio-volume-high-symbolic", "night-light-symbolic", "channel-secure-symbolic"] {
             assert!(parse(&format!("{{\"icon\":\"{name}\"}}"), &[]).is_err(), "{name}");
         }
         assert!(parse(r#"{"icon":"alarm-symbolic"}"#, &[]).is_ok());

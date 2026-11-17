@@ -1957,6 +1957,9 @@ read_settings() {
         add "${level}" settings - "Defense Evasion" "${key} was turned off, of what the image enforces (ame security ${key%% *})"
     done < <(comm -13 <(printf '%s\n' "${was}" | sed '/^$/d') <(printf '%s\n' "${now}" | sed '/^$/d'))
     now="$(sort "${ROOT}/etc/amethystora/hardening-on" 2>/dev/null)"
+    # Verified Flathub apps only is also the Flathub remote's own setting: it is turned off when the remote lost it
+    AMETHYSTORA_HARDENING_ROOT="${ROOT}" /usr/libexec/amethystora-hardening is-on flathub-verified ||
+        now="$(grep -vxF flathub-verified <<<"${now}")"
     [[ -e "${STATE}/hardening-on.seen" ]] || { printf '%s\n' "${now}" >"${STATE}/hardening-on.seen"; return; }
     was="$(cat "${STATE}/hardening-on.seen")"
     printf '%s\n' "${now}" >"${STATE}/hardening-on.seen"
@@ -2187,7 +2190,7 @@ active_accounts() {
 }
 
 read_accounts() {
-    local key="$1" mode="${READERS[$1]}" feature user uid gid home groups out seen first new id level tactic text allow within rc cut
+    local key="$1" mode="${READERS[$1]}" feature user uid gid home groups out seen first new id level tactic text allow within rc cut file
     feature="$(tr "A-Z_" "a-z-" <<<"${key}")"
     while IFS=: read -r user _ uid gid _ home _; do
         [[ " ${ACTIVE} " == *" ${uid} "* ]] || continue
@@ -2198,25 +2201,33 @@ read_accounts() {
         groups=--init-groups
         id -nu "${uid}" >/dev/null 2>&1 || groups=--clear-groups
         # No stdin: it would be the pipe this loop reads the accounts from, which the account's own programs can
-        # open through /proc and drain, and every account after it would be skipped
+        # open through /proc and drain, and every account after it would be skipped. Nor is its output a pipe, whose
+        # write end any program of the account can open again through /proc, write into, and hold open past the end
+        # of the run (which would keep this waiting): it is a file of root's in a folder only root enters, which is
+        # read once the reader has ended, 4 MiB of it at most
+        mkdir -p -m 0700 "${STATE}/accounts/${uid}"
+        file="${STATE}/accounts/${uid}/${mode}.out"
+        rm -f "${file}"
+        (umask 077; : >"${file}")
         rc=0
-        out="$(timeout 60 setpriv --reuid="${uid}" --regid="${gid}" "${groups}" -- /usr/bin/env -i HOME="${home}" \
-            USER="${user}" LOGNAME="${user}" PATH=/usr/bin:/usr/sbin LANG=C.UTF-8 "${READER}" "${mode}" 2>/dev/null </dev/null)" ||
+        { timeout 60 setpriv --reuid="${uid}" --regid="${gid}" "${groups}" -- /usr/bin/env -i HOME="${home}" \
+            USER="${user}" LOGNAME="${user}" PATH=/usr/bin:/usr/sbin LANG=C.UTF-8 "${READER}" "${mode}" >"${file}" 2>/dev/null </dev/null; } 2>/dev/null ||
             rc=$?
-        # The account's own programs can stop or kill its reader. A run that ran out of time or was ended by a
-        # signal is not a run that found nothing: the second in a row is said, once, as a finding of its own
-        if [[ "${rc}" -eq 124 || "${rc}" -ge 128 ]]; then
+        [[ "$(stat -c %s "${file}" 2>/dev/null || echo 0)" -le 4194304 ]] || rc=1
+        out="$(head -c 4194304 "${file}" 2>/dev/null)"
+        rm -f "${file}"
+        # The account's own programs can stop or kill its reader, and its files can make it fail. A run that did not
+        # end well is not a run that found nothing: the second in a row is said, once, as a finding of its own
+        if [[ "${rc}" -ne 0 ]]; then
             cut="$(cat "${STATE}/accounts/${uid}/${mode}.cut" 2>/dev/null)"
             [[ "${cut}" =~ ^[0-9]+$ ]] || cut=0
-            mkdir -p -m 0700 "${STATE}/accounts/${uid}"
             echo "$((cut + 1))" >"${STATE}/accounts/${uid}/${mode}.cut"
             [[ "${cut}" -eq 1 ]] &&
-                add normal "${feature}" "${user}" "Defense Evasion" "The ${feature} check of ${user}'s account did not finish twice running: it was stopped or took too long, so what it reads is not being checked" \
+                add normal "${feature}" "${user}" "Defense Evasion" "The ${feature} check of ${user}'s account did not finish twice running: it was stopped, took too long or failed, so what it reads is not being checked" \
                     "tell=${user}"
             continue
         fi
         rm -f "${STATE}/accounts/${uid}/${mode}.cut"
-        [[ "${rc}" -eq 0 ]] || continue
         # One line each, its fields apart by the unit separator, which no field keeps: a tab is whitespace to
         # read, which would run an empty field into the next
         out="$(jq -rc 'select(type == "object" and (.id | type == "string") and (.text | type == "string"))
@@ -2231,6 +2242,9 @@ read_accounts() {
         while IFS=$'\x1f' read -r id level tactic text allow within; do
             [[ -n "${id}" && "${first}" == false ]] && grep -qxF -- "${id}" <<<"${new}" || continue
             [[ "${level}" =~ ^(critical|normal|quiet)$ ]] || level=normal
+            # Only an extension's new version is quiet by itself; any other id of the hooks is heard, so that an id
+            # cannot be put into the seen list unheard before the hook it names is planted
+            [[ "${mode}" == dev-hooks && -z "${within}" ]] && level=normal
             [[ -n "${within}" ]] && grep -qxF -- "${within}" <<<"${new}" && level=quiet
             [[ "${ACCOUNT_TACTICS}" == *" ${tactic// /-} "* ]] || tactic=-
             [[ -n "${allow}" ]] && allowed "${feature}" "${allow}" && { level=quiet; ALLOWED_HIT=1; }

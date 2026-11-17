@@ -93,6 +93,8 @@ account bulk 4203
 account omega 4204
 as 4203 bash -c 'cd "$1" && for i in $(seq 350); do mkdir -p ".config/chromium/p$i"; : >".config/chromium/p$i/Cookies"; done' _ "${R}/var/home/bulk"
 as 4204 touch "${R}/var/home/omega/.npmrc"
+# A profile folder whose name holds a line break gets no watch, and adds no line of its own to the list
+as 4204 bash -c 'd="$1/.config/chromium/a"$'"'"'\n'"'"'"tree credentials "; mkdir -p "$d" && : >"$d/Login Data"' _ "${R}/var/home/omega"
 printf 'CREDENTIALS=on\n' >"${T}/security.conf"
 AMETHYSTORA_SECURITY_CONF="${T}/security.conf" AMETHYSTORA_SENSOR_FORCE=sensor bash "${GENERATOR}"
 RUN="${R}/run/amethystora/sensor"
@@ -100,6 +102,9 @@ grep -qx 4203 "${RUN}/skipped" || { echo "a home that cost too much was not said
 grep -qx 4204 "${RUN}/skipped" && { echo "a home that cost little was said"; false; }
 [[ "$(grep -c "^read-file credentials ${R}/var/home/bulk/" "${RUN}/watch.list")" -le 300 ]] || { echo "one home was not bounded"; false; }
 grep -qx "read-file credentials ${R}/var/home/omega/.npmrc" "${RUN}/watch.list" || { echo "the home after it was not read"; false; }
+grep -qE '^(tree|file|exec-tree|read-tree|read-file) [a-z-]+ /' "${RUN}/watch.list" &&
+    ! grep -vqE '^(tree|file|exec-tree|read-tree|read-file) [a-z-]+ /' "${RUN}/watch.list" &&
+    ! grep -qx "tree credentials /Login Data" "${RUN}/watch.list" || { echo "a path with a line break split the watch list"; false; }
 grep -qx 'identity sensor' "${RUN}/plan"
 [[ "$(stat -c %a "${RUN}/watch.list")" == 600 && "$(stat -c %a "${RUN}/plan")" == 600 ]] ||
     { echo "the plan or the watch list can be read by anyone"; false; }

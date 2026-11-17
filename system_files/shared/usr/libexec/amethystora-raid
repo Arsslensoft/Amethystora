@@ -2340,8 +2340,8 @@ cmd_check() {
     write_state "${STATE}/last.json" <<<"${current}"
     # The notification waits for its answer in a unit of its own, while the hourly check carries on. It
     # says the worst news in full, and names the rest.
-    systemd-run --collect --quiet -p TimeoutStartSec=infinity --description="Tell about the pools of disks" \
-        /usr/libexec/amethystora-raid notify "$(jq -r '.[0].summary' <<<"${news}")" \
+    systemd-run --collect --quiet --expand-environment=no -p TimeoutStartSec=infinity --description="Tell about the pools of disks" \
+        -- /usr/libexec/amethystora-raid notify "$(jq -r '.[0].summary' <<<"${news}")" \
         "$(jq -r '.[0].body + (if length > 1 then "\nAlso: " + ([.[1:][].summary | (.[0:1] | ascii_downcase) + .[1:]]
             | reduce .[] as $s ([]; if index([$s]) then . else . + [$s] end) | join("; ")) + "." else "" end)' <<<"${news}")"
 }

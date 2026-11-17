@@ -3455,8 +3455,18 @@ for profile in local sssd winbind; do
         [[ "$(grep -cE "^${stack}[[:space:]]+requisite[[:space:]]+pam_succeed_if\.so quiet service = gdm-password \{include if \"with-guest-login\"\}\$" \
             "/usr/share/authselect/vendor/${profile}/password-auth")" == 1 ]]
     done
+    # ...and first in system-auth's password stack, where passwd would otherwise let the guest give itself a password
+    grep -m1 -E '^password[[:space:]]' "/usr/share/authselect/vendor/${profile}/system-auth" |
+        grep -qF 'pam_succeed_if.so quiet user != amethystora-guest {include if "with-guest-login"}'
 done
 [[ -z "$(grep -n amethystora-guest /etc/authselect/system-auth /etc/authselect/password-auth)" ]]
+grep -qF 'passwd -d "${USER_NAME}"' <(sed -n '/^prepare() {/,/^}/p' /usr/libexec/amethystora-guest)
+# Notices carry other people's words (a disk's name, a file's), which systemd-run must not expand; the watcher knows when
+# "Verified Flathub apps only" was lost from the Flathub remote
+grep -qF -- 'systemd-run --collect --quiet --expand-environment=no -p TimeoutStartSec=infinity' /usr/libexec/amethystora-raid
+grep -qF -- 'systemd-run --user --collect --quiet --expand-environment=no -- /usr/libexec/amethystora-agent-notice' \
+    /usr/libexec/amethystora-notify-users
+grep -qF -- 'amethystora-hardening is-on flathub-verified' /usr/libexec/amethystora-security-watch
 grep -q '^guest-login ACTION="":' /usr/share/amethystora/just/security.just
 # The shelf (plans/beyond/spec-r4-shelf.md, R4-08; manual: clipboard.md#the-shelf): one key, off for a new account, the
 # module beside the Shelf app (the apps' loop above); the shell starts nothing but the app, with the drop on its standard
@@ -4849,6 +4859,9 @@ grep -qx 'BindReadOnlyPaths=/usr/lib/amethystora/kconfig:/boot' \
 # the GNOME keys it reads are set and locked, so that no account turns it off from Settings.
 rpm -q usbguard-dbus >/dev/null
 [[ "$(systemctl is-enabled usbguard-dbus.service 2>/dev/null)" == masked ]]
+# Turning it on leaves USBGuard's own socket to root (the recipe lists and allows through sudo): a group there could add rules
+grep -q 'IPCAllowedGroups=|' /usr/share/amethystora/just/security.just
+grep -q 'IPCAllowedGroups=wheel' /usr/share/amethystora/just/security.just && false
 # The base image's boot-time appstream refresh is masked (it gated graphical.target by ~6-11 s), and the
 # cache is kept fresh by a daily off-boot timer instead. A base bump must not quietly re-add the stall.
 [[ "$(systemctl is-enabled fedora-atomic-desktop-appstream-cache-refresh.service 2>/dev/null)" == masked ]]
@@ -5167,6 +5180,12 @@ for mode in $(grep -E '^declare -A READERS=' /usr/libexec/amethystora-security-w
     grep -qE "^    ${mode}\) " /usr/libexec/amethystora-security-reader
 done
 bash /ctx/build_files/shared/test-security-reader.sh
+# What an account's check prints goes to a file of root's, which no program of the account can open again as it can a
+# pipe, and the process that holds it makes itself non-dumpable before it does anything else; a failed check is said
+grep -qF 'file="${STATE}/accounts/${uid}/${mode}.out"' /usr/libexec/amethystora-security-watch
+grep -qF 'prctl(4, 0, 0, 0, 0)' /usr/libexec/amethystora-security-reader
+grep -qF 'prctl(4, 0, 0, 0, 0)' /usr/libexec/amethystora-integrity
+grep -qx 'OnFailure=amethystora-scan-alert@%n.service' /usr/lib/systemd/system/amethystora-integrity.service
 # Installed apps and the system's files against their updates (APP_INTEGRITY): the check, daily and after each
 # change to the system's Flatpaks, against stand-in repositories, deploys and boot files, an account's own read as
 # that account; and the image has what it imports

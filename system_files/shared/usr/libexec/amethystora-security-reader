@@ -53,45 +53,97 @@ item() {
     jq -nc --arg id "$1" --arg level "$2" --arg tactic "$3" --arg text "$4" --arg allow "${5:-}" --arg within "${6:-}" \
         '{$id, $level, $tactic, $text} + (if $allow != "" then {$allow} else {} end) + (if $within != "" then {$within} else {} end)'
 }
-# A file of the account's, read no further than its first 64 KiB, and for no longer than five seconds
-head_of() { timeout 5 head -c 65536 -- "$1" 2>/dev/null; }
+# A file of the account's, read no further than its first 4 MiB, and for no longer than five seconds
+head_of() { timeout 5 head -c 4194304 -- "$1" 2>/dev/null; }
+# A file the tools read to its end, longer than that: said, since what it holds past what is read here is not seen
+too_long() {
+    [[ "$(stat -c %s -- "$1" 2>/dev/null || echo 0)" -gt 4194304 ]] || return 0
+    item "long:$1" normal "Defense Evasion" "$(tilde "$1") is too long to be read in full: a hook past its first 4 MiB would not be seen here" "$1"
+}
 # A path as the account knows it
 tilde() { [[ "$1" == "${HOME}"/* ]] && echo "~${1#"${HOME}"}" || echo "$1"; }
 short() { sha256sum <<<"$1" | cut -c1-16; }
+# A path a tool's settings name (~/x, or x beside BASE) when it is a plain file inside the home, and where it leads
+home_file() {
+    local path="$1" base="$2"
+    [[ "${path}" == "~/"* ]] && path="${HOME}/${path:2}"
+    [[ "${path}" == /* ]] || path="${base}/${path}"
+    path="$(realpath -e -- "${path}" 2>/dev/null)" || return 1
+    [[ "${path}" == "${HOME}"/* && -f "${path}" ]] && echo "${path}"
+}
+# ~/.ssh/config and the files it brings in with Include, inside the home and four levels deep at most; a pattern
+# is expanded as SSH expands it, relative ones from ~/.ssh
+ssh_files() {
+    local -a todo=("${HOME}/.ssh/config") next
+    local -A seen=()
+    local -a words
+    local depth file rest word match found
+    for depth in 1 2 3 4; do
+        next=()
+        for file in "${todo[@]}"; do
+            [[ -f "${file}" && -z "${seen[${file}]:-}" && ${#seen[@]} -lt 100 ]] || continue
+            seen[${file}]=1
+            echo "${file}"
+            while IFS= read -r rest; do
+                read -ra words <<<"${rest}"
+                for word in "${words[@]}"; do
+                    word="${word//[\"\']/}"
+                    [[ "${word}" == "~/"* ]] && word="${HOME}/${word:2}"
+                    [[ "${word}" == /* ]] || word="${HOME}/.ssh/${word}"
+                    for match in ${word}; do
+                        found="$(home_file "${match}" "${HOME}/.ssh")" && next+=("${found}")
+                    done
+                done
+            done < <(head_of "${file}" | sed -nE 's/^[[:space:]]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][[:space:]=]+//p')
+        done
+        todo=("${next[@]}")
+    done
+}
 
 # Where a developer tool runs code by itself: Python's .pth files, which run each line that starts with
 # "import" at every start of Python (how LiteLLM's compromised release stayed); git's settings that run a
 # command in every repository; SSH's that run one on connecting; npm's shell for scripts and Node's options;
 # and VSCodium's extensions, which update themselves. Virtual environments are everywhere and not walked.
 dev_hooks() {
-    local file line key value dir name version publisher
+    local file line key value dir name version publisher included
+    local -a gitfiles
     shopt -s nullglob
     for file in "${HOME}"/.local/lib/python3*/site-packages/*.pth /home/linuxbrew/.linuxbrew/lib/python3*/site-packages/*.pth; do
+        too_long "${file}"
         while IFS= read -r line; do
             [[ "${line}" =~ ^import[[:space:]] ]] || continue
             item "pth:${file}:$(short "${line}")" normal Persistence \
                 "$(tilde "${file}") runs code at every start of Python: ${line:0:300}" "${file}"
         done < <(head_of "${file}")
     done
-    # git's own settings, includes followed as git follows them; reading them runs nothing
+    # git's own settings, includes followed as git follows them, and the file of each conditional include as well
+    # (git applies those in the repositories they name, which are not asked here); reading them runs nothing
     for file in "${HOME}/.gitconfig" "${HOME}/.config/git/config"; do
         [[ -f "${file}" ]] || continue
-        while IFS= read -r line; do
-            key="${line%% *}"
-            value="${line#* }"
-            item "git:${file}:${key}:$(short "${value}")" normal Persistence \
-                "$(tilde "${file}") sets ${key} to ${value:0:300}: git runs it in every repository" "${file}"
-        done < <(timeout 5 git config --file "${file}" --includes --get-regexp '^core\.(hookspath|fsmonitor|sshcommand)$' 2>/dev/null)
+        gitfiles=("${file}")
+        while read -r _ value; do
+            included="$(home_file "${value}" "${file%/*}")" && gitfiles+=("${included}")
+        done < <(timeout 5 git config --file "${file}" --get-regexp '^includeif\..*\.path$' 2>/dev/null)
+        for included in "${gitfiles[@]}"; do
+            while IFS= read -r line; do
+                key="${line%% *}"
+                value="${line#* }"
+                item "git:${included}:${key}:$(short "${value}")" normal Persistence \
+                    "$(tilde "${included}") sets ${key} to ${value:0:300}: git runs it in every repository" "${included}"
+            done < <(timeout 5 git config --file "${included}" --includes --get-regexp '^core\.(hookspath|fsmonitor|sshcommand)$' 2>/dev/null)
+        done
     done
-    file="${HOME}/.ssh/config"
-    if [[ -f "${file}" ]]; then
+    # ssh_config(5)'s Include brings in more files, whose commands run on connecting just the same
+    while IFS= read -r file; do
+        too_long "${file}"
         while IFS= read -r line; do
             item "ssh:$(short "${line}")" normal Persistence \
                 "$(tilde "${file}") runs a command when SSH connects: ${line:0:300}" "${file}"
         done < <(head_of "${file}" | grep -iE '^[[:space:]]*(ProxyCommand|LocalCommand|KnownHostsCommand|Match[[:space:]].*exec)[[:space:]=]' | sed 's/^[[:space:]]*//')
-    fi
+    done < <(ssh_files)
     file="${HOME}/.npmrc"
     if [[ -f "${file}" ]]; then
+        too_long "${file}"
         while IFS= read -r line; do
             item "npm:$(short "${line}")" normal Persistence \
                 "$(tilde "${file}") changes what npm and Node run: ${line:0:300}" "${file}"
@@ -117,8 +169,18 @@ dev_hooks() {
 # before opening it with an agent, as the manual says. Python reads them, isolated (-I), so that nothing of
 # the account's own Python, its .pth files included, runs inside it; and it parses, never runs, what it reads.
 agent_config() {
-    timeout 20 python3 -I - <<'PY'
-import fnmatch, glob, hashlib, json, os, re, sys
+    # exec: Python is the one process holding the output, and it makes itself non-dumpable first (nothing else of
+    # the account can then reach its output or memory) and keeps its own twenty seconds
+    exec python3 -I - <<'PY'
+import ctypes
+import signal
+import sys
+
+if ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) != 0:
+    sys.exit(70)
+signal.alarm(20)
+
+import fnmatch, glob, hashlib, json, os, re
 
 try:
     import tomllib
@@ -126,6 +188,8 @@ except ImportError:
     tomllib = None
 
 HOME = os.environ["HOME"]
+# The file read last, which a section that fails names
+LAST = HOME
 
 
 def tilde(path):
@@ -133,12 +197,18 @@ def tilde(path):
 
 
 def read(path, limit=1 << 20):
+    global LAST
+    LAST = path
     try:
         with open(path, "rb") as handle:
             data = handle.read(limit + 1)
     except OSError:
         return None
-    return None if len(data) > limit else data.decode("utf-8", "replace")
+    if len(data) > limit:
+        # The agents read a file of any size: what a long one holds past the limit would not be seen here
+        emit(path, "is too long to be read in full", f"more than {limit} bytes", tactic="Defense Evasion")
+        return None
+    return data.decode("utf-8", "replace")
 
 
 def jsonc(text):
@@ -178,6 +248,9 @@ def load(path, kind="json", limit=1 << 20):
         if kind == "toml":
             return tomllib.loads(text) if tomllib else None
         return json.loads(jsonc(text) if kind == "jsonc" else text)
+    except RecursionError:
+        emit(path, "could not be read to the end", "nested too deeply", tactic="Defense Evasion")
+        return None
     except (ValueError, TypeError):
         return None
 
@@ -189,10 +262,12 @@ def words(value):
 
 
 def emit(path, what, detail, level="normal", tactic="Persistence"):
-    detail = " ".join(str(detail).split())[:300]
-    digest = hashlib.sha256(f"{what}\0{detail}".encode()).hexdigest()[:16]
+    # The id covers all of the detail, so that a command changed past the part shown is not the one said before
+    detail = " ".join(str(detail).split())
+    digest = hashlib.sha256(f"{what}\0{detail}".encode("utf-8", "backslashreplace")).hexdigest()[:16]
+    allow = f"{path} {what}: {detail[:300]}" + (f" #{digest}" if len(detail) > 300 else "")
     print(json.dumps({"id": f"{path}:{digest}", "level": level, "tactic": tactic,
-                      "text": f"{tilde(path)} {what}: {detail}", "allow": f"{path} {what}: {detail}"}))
+                      "text": f"{tilde(path)} {what}: {detail[:300]}", "allow": allow}))
 
 
 def hooks(path, table):
@@ -267,177 +342,197 @@ def trusted(path, what, folders):
         emit(path, what, folder, level="quiet", tactic="-")
 
 
-# Claude Code
-path = f"{HOME}/.claude/settings.json"
-data = load(path)
-if isinstance(data, dict):
-    hooks(path, data.get("hooks"))
-    for key in ("apiKeyHelper", "otelHeadersHelper", "awsAuthRefresh", "awsCredentialExport"):
-        if data.get(key):
-            emit(path, f"runs a command as {key}", words(data[key]))
-    for key in ("statusLine", "fileSuggestion"):
-        if isinstance(data.get(key), dict) and data[key].get("command"):
-            emit(path, f"runs a command as {key}", words(data[key]["command"]))
-    if (data.get("permissions") or {}).get("defaultMode") == "bypassPermissions":
-        off(path, "turns Claude Code's checks off", "permissions.defaultMode bypassPermissions")
-    if data.get("enableAllProjectMcpServers") is True:
-        off(path, "starts every project's MCP servers without asking", "enableAllProjectMcpServers")
-# The launcher starts Claude Code in the home folder, so "don't ask again" lands in ~/.claude/settings.local.json
-for path in (f"{HOME}/.claude/settings.json", f"{HOME}/.claude/settings.local.json"):
-    data = load(path)
-    if isinstance(data, dict) and isinstance(data.get("permissions"), dict):
-        pre_allowed(path, data["permissions"].get("allow"), r"mcp__amethystora(?:__([^()]*))?")
-path = f"{HOME}/.claude.json"
-# Claude Code rewrites the rest of this file all the time: only its servers and project permissions count
-data = load(path, limit=16 << 20)
-if isinstance(data, dict):
-    servers(path, data.get("mcpServers"))
-    for project, settings in (data.get("projects") or {}).items():
-        if isinstance(settings, dict):
-            servers(path, settings.get("mcpServers"))
-            trusted(path, f"lets Claude Code use tools without asking in {project}", settings.get("allowedTools"))
-            pre_allowed(path, settings.get("allowedTools"), r"mcp__amethystora(?:__([^()]*))?")
-
-# Codex
-path = f"{HOME}/.codex/config.toml"
-data = load(path, "toml")
-if isinstance(data, dict):
-    if data.get("notify"):
-        emit(path, "runs a command when a turn ends", words(data["notify"]))
-    servers(path, data.get("mcp_servers"))
-    mine = (data.get("mcp_servers") or {}).get("amethystora") if isinstance(data.get("mcp_servers"), dict) else None
-    if isinstance(mine, dict):
-        # Per-tool and server-wide approval: the launcher gives only the read tools "approve", on its command line
-        if mine.get("default_tools_approval_mode") == "approve":
-            allowed_tool(path, None, "default_tools_approval_mode approve")
-        for tool, setting in (mine.get("tools") or {}).items() if isinstance(mine.get("tools"), dict) else []:
-            if isinstance(setting, dict) and setting.get("approval_mode") == "approve":
-                allowed_tool(path, tool, f"tools.{tool}.approval_mode approve")
-    hooks(path, data.get("hooks"))
-    if data.get("sandbox_mode") == "danger-full-access" or data.get("default_permissions") == ":danger-full-access":
-        off(path, "turns Codex's sandbox off", "danger-full-access")
-    if data.get("approval_policy") == "never":
-        off(path, "has Codex never ask", "approval_policy never")
-    trusted(path, "trusts", [p for p, v in (data.get("projects") or {}).items()
-                             if isinstance(v, dict) and v.get("trust_level") == "trusted"])
-path = f"{HOME}/.codex/hooks.json"
-data = load(path)
-if isinstance(data, dict):
-    hooks(path, data.get("hooks", data))
-
-# Gemini CLI
-path = f"{HOME}/.gemini/settings.json"
-data = load(path)
-if isinstance(data, dict):
-    servers(path, data.get("mcpServers"))
-    hooks(path, data.get("hooks"))
-    tools = data.get("tools") or {}
-    for key in ("discoveryCommand", "callCommand"):
-        if isinstance(tools, dict) and tools.get(key):
-            emit(path, f"runs a command as tools.{key}", words(tools[key]))
-    if isinstance(data.get("mcp"), dict) and data["mcp"].get("serverCommand"):
-        emit(path, "runs a command as mcp.serverCommand", words(data["mcp"]["serverCommand"]))
-data = load(f"{HOME}/.gemini/trustedFolders.json")
-if isinstance(data, dict):
-    trusted(f"{HOME}/.gemini/trustedFolders.json", "trusts", [f for f, v in data.items() if v != "DO_NOT_TRUST"])
-for path in sorted(glob.glob(f"{HOME}/.gemini/extensions/*/gemini-extension.json")):
-    data = load(path)
-    if isinstance(data, dict):
-        emit(path, "is an extension Gemini CLI loads", data.get("name") or os.path.basename(os.path.dirname(path)))
-        servers(path, data.get("mcpServers"))
-
-# Antigravity CLI, which names each group of its hooks: {name: {enabled, Event: [...]}}
-path = f"{HOME}/.gemini/antigravity-cli/settings.json"
-data = load(path, "jsonc")
-if isinstance(data, dict):
-    hooks(path, data.get("hooks"))
-    for group in (data.get("hooks") or {}).values() if isinstance(data.get("hooks"), dict) else []:
-        hooks(path, group)
-    for key in ("statusLine", "title"):
-        if isinstance(data.get(key), dict) and data[key].get("command"):
-            emit(path, f"runs a command as {key}", words(data[key]["command"]))
-    if data.get("toolPermission") == "always-proceed":
-        off(path, "has Antigravity CLI never ask", "toolPermission always-proceed")
-    trusted(path, "trusts", data.get("trustedWorkspaces"))
-    if isinstance(data.get("permissions"), dict):
-        pre_allowed(path, data["permissions"].get("allow"), r"mcp\(amethystora/([^)]*)\)")
-for base in (f"{HOME}/.gemini/config", f"{HOME}/.gemini/antigravity-cli"):
-    for path in [f"{base}/hooks.json"] + sorted(glob.glob(f"{base}/plugins/*/hooks.json")):
-        data = load(path, "jsonc")
-        for group in data.values() if isinstance(data, dict) else []:
-            hooks(path, group)
-    for path in [f"{base}/mcp_config.json"] + sorted(glob.glob(f"{base}/plugins/*/mcp_config.json")):
-        data = load(path, "jsonc")
-        if isinstance(data, dict):
-            servers(path, data.get("mcpServers"))
-    for path in sorted(glob.glob(f"{base}/plugins/*/")):
-        emit(path.rstrip("/"), "is a plugin Antigravity CLI loads", os.path.basename(path.rstrip("/")))
-
-# Opencode
-CHANGE_TOOLS = ("change", "software", "run", "undo", "plugin")
-# The launcher starts Opencode in the home folder, which reads its project files from there too
-for path in [f"{HOME}/.config/opencode/{name}" for name in ("config.json", "opencode.json", "opencode.jsonc")] + [
-        f"{HOME}/{name}" for name in ("opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc")]:
-    data = load(path, "jsonc")
-    if not isinstance(data, dict):
-        continue
-    for name, server in (data.get("mcp") or {}).items():
-        if isinstance(server, dict):
-            servers(path, {name: server})
-    for plugin in data.get("plugin") or []:
-        emit(path, "loads the plugin", plugin)
-    permission = data.get("permission")
-    if permission == "allow" or (isinstance(permission, dict) and permission.get("*") == "allow"):
-        off(path, "has Opencode never ask", "permission allow")
-    # An MCP tool's permission is its name, server_tool, or a pattern for it; the launcher's own are in the environment
-    for key, value in permission.items() if isinstance(permission, dict) else []:
-        if value == "allow" and key != "*":
-            for tool in CHANGE_TOOLS:
-                if fnmatch.fnmatchcase(f"amethystora_{tool}", key):
-                    allowed_tool(path, tool, f"permission {key} allow")
-for path in sorted(glob.glob(f"{HOME}/.config/opencode/plugin*/*") + glob.glob(f"{HOME}/.config/opencode/tool*/*")):
-    if os.path.isfile(path) and re.search(r"\.(js|ts|mjs)$", path):
-        body = read(path) or ""
-        emit(path, "is code Opencode loads", hashlib.sha256(body.encode()).hexdigest()[:16])
-
-# Cursor CLI, which reads Claude Code's hooks as well
-data = load(f"{HOME}/.cursor/cli-config.json")
-if isinstance(data, dict) and data.get("approvalMode") == "unrestricted":
-    off(f"{HOME}/.cursor/cli-config.json", "has Cursor run everything without asking", "approvalMode unrestricted")
-if isinstance(data, dict) and isinstance(data.get("permissions"), dict):
-    pre_allowed(f"{HOME}/.cursor/cli-config.json", data["permissions"].get("allow"), r"Mcp\(amethystora:([^)]*)\)")
-data = load(f"{HOME}/.cursor/mcp.json")
-if isinstance(data, dict):
-    servers(f"{HOME}/.cursor/mcp.json", data.get("mcpServers"))
-data = load(f"{HOME}/.cursor/hooks.json")
-if isinstance(data, dict):
-    hooks(f"{HOME}/.cursor/hooks.json", data.get("hooks"))
-
-# Copilot CLI
-data = load(f"{HOME}/.copilot/settings.json")
-if isinstance(data, dict):
-    hooks(f"{HOME}/.copilot/settings.json", data.get("hooks"))
-data = load(f"{HOME}/.copilot/mcp-config.json")
-if isinstance(data, dict):
-    servers(f"{HOME}/.copilot/mcp-config.json", data.get("mcpServers"))
-for path in sorted(glob.glob(f"{HOME}/.copilot/hooks/*.json")):
+def claude_code():
+    # Claude Code
+    path = f"{HOME}/.claude/settings.json"
     data = load(path)
     if isinstance(data, dict):
         hooks(path, data.get("hooks"))
-# What "always allow" saves, by location: {kind: "mcp", serverName, toolName (null is every tool of the server)}
-data = load(f"{HOME}/.copilot/permissions-config.json")
-for location in (data.get("locations") or {}).values() if isinstance(data, dict) and isinstance(data.get("locations"), dict) else []:
-    for approval in (location.get("tool_approvals") or []) if isinstance(location, dict) and isinstance(location.get("tool_approvals"), list) else []:
-        if isinstance(approval, dict) and approval.get("kind") == "mcp" and approval.get("serverName") == "amethystora":
-            allowed_tool(f"{HOME}/.copilot/permissions-config.json", approval.get("toolName"), f"mcp amethystora {approval.get('toolName') or 'every tool'}")
-for path in (f"{HOME}/.copilot/config.json", f"{HOME}/.copilot/settings.json"):
+        for key in ("apiKeyHelper", "otelHeadersHelper", "awsAuthRefresh", "awsCredentialExport"):
+            if data.get(key):
+                emit(path, f"runs a command as {key}", words(data[key]))
+        for key in ("statusLine", "fileSuggestion"):
+            if isinstance(data.get(key), dict) and data[key].get("command"):
+                emit(path, f"runs a command as {key}", words(data[key]["command"]))
+        if (data.get("permissions") if isinstance(data.get("permissions"), dict) else {}).get("defaultMode") == "bypassPermissions":
+            off(path, "turns Claude Code's checks off", "permissions.defaultMode bypassPermissions")
+        if data.get("enableAllProjectMcpServers") is True:
+            off(path, "starts every project's MCP servers without asking", "enableAllProjectMcpServers")
+    # The launcher starts Claude Code in the home folder, so "don't ask again" lands in ~/.claude/settings.local.json
+    for path in (f"{HOME}/.claude/settings.json", f"{HOME}/.claude/settings.local.json"):
+        data = load(path)
+        if isinstance(data, dict) and isinstance(data.get("permissions"), dict):
+            pre_allowed(path, data["permissions"].get("allow"), r"mcp__amethystora(?:__([^()]*))?")
+    path = f"{HOME}/.claude.json"
+    # Claude Code rewrites the rest of this file all the time: only its servers and project permissions count
+    data = load(path, limit=16 << 20)
+    if isinstance(data, dict):
+        servers(path, data.get("mcpServers"))
+        for project, settings in (data.get("projects") if isinstance(data.get("projects"), dict) else {}).items():
+            if isinstance(settings, dict):
+                servers(path, settings.get("mcpServers"))
+                trusted(path, f"lets Claude Code use tools without asking in {project}", settings.get("allowedTools"))
+                pre_allowed(path, settings.get("allowedTools"), r"mcp__amethystora(?:__([^()]*))?")
+
+
+def codex():
+    # Codex
+    path = f"{HOME}/.codex/config.toml"
+    data = load(path, "toml")
+    if isinstance(data, dict):
+        if data.get("notify"):
+            emit(path, "runs a command when a turn ends", words(data["notify"]))
+        servers(path, data.get("mcp_servers"))
+        mine = (data.get("mcp_servers") or {}).get("amethystora") if isinstance(data.get("mcp_servers"), dict) else None
+        if isinstance(mine, dict):
+            # Per-tool and server-wide approval: the launcher gives only the read tools "approve", on its command line
+            if mine.get("default_tools_approval_mode") == "approve":
+                allowed_tool(path, None, "default_tools_approval_mode approve")
+            for tool, setting in (mine.get("tools") or {}).items() if isinstance(mine.get("tools"), dict) else []:
+                if isinstance(setting, dict) and setting.get("approval_mode") == "approve":
+                    allowed_tool(path, tool, f"tools.{tool}.approval_mode approve")
+        hooks(path, data.get("hooks"))
+        if data.get("sandbox_mode") == "danger-full-access" or data.get("default_permissions") == ":danger-full-access":
+            off(path, "turns Codex's sandbox off", "danger-full-access")
+        if data.get("approval_policy") == "never":
+            off(path, "has Codex never ask", "approval_policy never")
+        trusted(path, "trusts", [p for p, v in (data.get("projects") if isinstance(data.get("projects"), dict) else {}).items()
+                                 if isinstance(v, dict) and v.get("trust_level") == "trusted"])
+    path = f"{HOME}/.codex/hooks.json"
     data = load(path)
-    for key in ("allowedTools", "allowed_tools"):
+    if isinstance(data, dict):
+        hooks(path, data.get("hooks", data))
+
+
+def gemini_cli():
+    # Gemini CLI
+    path = f"{HOME}/.gemini/settings.json"
+    data = load(path)
+    if isinstance(data, dict):
+        servers(path, data.get("mcpServers"))
+        hooks(path, data.get("hooks"))
+        tools = data.get("tools") or {}
+        for key in ("discoveryCommand", "callCommand"):
+            if isinstance(tools, dict) and tools.get(key):
+                emit(path, f"runs a command as tools.{key}", words(tools[key]))
+        if isinstance(data.get("mcp"), dict) and data["mcp"].get("serverCommand"):
+            emit(path, "runs a command as mcp.serverCommand", words(data["mcp"]["serverCommand"]))
+    data = load(f"{HOME}/.gemini/trustedFolders.json")
+    if isinstance(data, dict):
+        trusted(f"{HOME}/.gemini/trustedFolders.json", "trusts", [f for f, v in data.items() if v != "DO_NOT_TRUST"])
+    for path in sorted(glob.glob(f"{HOME}/.gemini/extensions/*/gemini-extension.json")):
+        data = load(path)
         if isinstance(data, dict):
-            pre_allowed(path, data.get(key), r"amethystora(?:\(([^)]*)\))?")
-data = load(f"{HOME}/.copilot/config.json")
-if isinstance(data, dict):
-    trusted(f"{HOME}/.copilot/config.json", "trusts", data.get("trustedFolders") or data.get("trusted_folders"))
+            emit(path, "is an extension Gemini CLI loads", data.get("name") or os.path.basename(os.path.dirname(path)))
+            servers(path, data.get("mcpServers"))
+
+
+def antigravity_cli():
+    # Antigravity CLI, which names each group of its hooks: {name: {enabled, Event: [...]}}
+    path = f"{HOME}/.gemini/antigravity-cli/settings.json"
+    data = load(path, "jsonc")
+    if isinstance(data, dict):
+        hooks(path, data.get("hooks"))
+        for group in (data.get("hooks") or {}).values() if isinstance(data.get("hooks"), dict) else []:
+            hooks(path, group)
+        for key in ("statusLine", "title"):
+            if isinstance(data.get(key), dict) and data[key].get("command"):
+                emit(path, f"runs a command as {key}", words(data[key]["command"]))
+        if data.get("toolPermission") == "always-proceed":
+            off(path, "has Antigravity CLI never ask", "toolPermission always-proceed")
+        trusted(path, "trusts", data.get("trustedWorkspaces"))
+        if isinstance(data.get("permissions"), dict):
+            pre_allowed(path, data["permissions"].get("allow"), r"mcp\(amethystora/([^)]*)\)")
+    for base in (f"{HOME}/.gemini/config", f"{HOME}/.gemini/antigravity-cli"):
+        for path in [f"{base}/hooks.json"] + sorted(glob.glob(f"{base}/plugins/*/hooks.json")):
+            data = load(path, "jsonc")
+            for group in data.values() if isinstance(data, dict) else []:
+                hooks(path, group)
+        for path in [f"{base}/mcp_config.json"] + sorted(glob.glob(f"{base}/plugins/*/mcp_config.json")):
+            data = load(path, "jsonc")
+            if isinstance(data, dict):
+                servers(path, data.get("mcpServers"))
+        for path in sorted(glob.glob(f"{base}/plugins/*/")):
+            emit(path.rstrip("/"), "is a plugin Antigravity CLI loads", os.path.basename(path.rstrip("/")))
+
+
+def opencode():
+    # Opencode
+    CHANGE_TOOLS = ("change", "software", "run", "undo", "plugin")
+    # The launcher starts Opencode in the home folder, which reads its project files from there too
+    for path in [f"{HOME}/.config/opencode/{name}" for name in ("config.json", "opencode.json", "opencode.jsonc")] + [
+            f"{HOME}/{name}" for name in ("opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc")]:
+        data = load(path, "jsonc")
+        if not isinstance(data, dict):
+            continue
+        for name, server in (data.get("mcp") if isinstance(data.get("mcp"), dict) else {}).items():
+            if isinstance(server, dict):
+                servers(path, {name: server})
+        for plugin in data.get("plugin") if isinstance(data.get("plugin"), list) else []:
+            emit(path, "loads the plugin", plugin)
+        permission = data.get("permission")
+        if permission == "allow" or (isinstance(permission, dict) and permission.get("*") == "allow"):
+            off(path, "has Opencode never ask", "permission allow")
+        # An MCP tool's permission is its name, server_tool, or a pattern for it; the launcher's own are in the environment
+        for key, value in permission.items() if isinstance(permission, dict) else []:
+            if value == "allow" and key != "*":
+                for tool in CHANGE_TOOLS:
+                    if fnmatch.fnmatchcase(f"amethystora_{tool}", key):
+                        allowed_tool(path, tool, f"permission {key} allow")
+    for path in sorted(glob.glob(f"{HOME}/.config/opencode/plugin*/*") + glob.glob(f"{HOME}/.config/opencode/tool*/*")):
+        if os.path.isfile(path) and re.search(r"\.(js|ts|mjs)$", path):
+            body = read(path) or ""
+            emit(path, "is code Opencode loads", hashlib.sha256(body.encode()).hexdigest()[:16])
+
+
+def cursor_cli():
+    # Cursor CLI, which reads Claude Code's hooks as well
+    data = load(f"{HOME}/.cursor/cli-config.json")
+    if isinstance(data, dict) and data.get("approvalMode") == "unrestricted":
+        off(f"{HOME}/.cursor/cli-config.json", "has Cursor run everything without asking", "approvalMode unrestricted")
+    if isinstance(data, dict) and isinstance(data.get("permissions"), dict):
+        pre_allowed(f"{HOME}/.cursor/cli-config.json", data["permissions"].get("allow"), r"Mcp\(amethystora:([^)]*)\)")
+    data = load(f"{HOME}/.cursor/mcp.json")
+    if isinstance(data, dict):
+        servers(f"{HOME}/.cursor/mcp.json", data.get("mcpServers"))
+    data = load(f"{HOME}/.cursor/hooks.json")
+    if isinstance(data, dict):
+        hooks(f"{HOME}/.cursor/hooks.json", data.get("hooks"))
+
+
+def copilot_cli():
+    # Copilot CLI
+    data = load(f"{HOME}/.copilot/settings.json")
+    if isinstance(data, dict):
+        hooks(f"{HOME}/.copilot/settings.json", data.get("hooks"))
+    data = load(f"{HOME}/.copilot/mcp-config.json")
+    if isinstance(data, dict):
+        servers(f"{HOME}/.copilot/mcp-config.json", data.get("mcpServers"))
+    for path in sorted(glob.glob(f"{HOME}/.copilot/hooks/*.json")):
+        data = load(path)
+        if isinstance(data, dict):
+            hooks(path, data.get("hooks"))
+    # What "always allow" saves, by location: {kind: "mcp", serverName, toolName (null is every tool of the server)}
+    data = load(f"{HOME}/.copilot/permissions-config.json")
+    for location in (data.get("locations") or {}).values() if isinstance(data, dict) and isinstance(data.get("locations"), dict) else []:
+        for approval in (location.get("tool_approvals") or []) if isinstance(location, dict) and isinstance(location.get("tool_approvals"), list) else []:
+            if isinstance(approval, dict) and approval.get("kind") == "mcp" and approval.get("serverName") == "amethystora":
+                allowed_tool(f"{HOME}/.copilot/permissions-config.json", approval.get("toolName"), f"mcp amethystora {approval.get('toolName') or 'every tool'}")
+    for path in (f"{HOME}/.copilot/config.json", f"{HOME}/.copilot/settings.json"):
+        data = load(path)
+        for key in ("allowedTools", "allowed_tools"):
+            if isinstance(data, dict):
+                pre_allowed(path, data.get(key), r"amethystora(?:\(([^)]*)\))?")
+    data = load(f"{HOME}/.copilot/config.json")
+    if isinstance(data, dict):
+        trusted(f"{HOME}/.copilot/config.json", "trusts", data.get("trustedFolders") or data.get("trusted_folders"))
+
+
+for section in (claude_code, codex, gemini_cli, antigravity_cli, opencode, cursor_cli, copilot_cli):
+    try:
+        section()
+    except Exception as error:  # a file of a shape the code did not expect, or nested too deeply: said, and the rest read
+        emit(LAST, "could not be read to the end", type(error).__name__, tactic="Defense Evasion")
 PY
 }
 

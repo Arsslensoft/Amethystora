@@ -1509,7 +1509,8 @@ usb ACTION="":
             # One rule, which allows every device: GNOME blocks what is new only while the screen is locked
             echo 'allow id *:* label "amethystora-usb-locked"' | sudo tee /etc/usbguard/rules.conf >/dev/null
             sudo chmod 0600 /etc/usbguard/rules.conf
-            sudo sed -i -E 's|^#?IPCAllowedGroups=.*|IPCAllowedGroups=wheel|' /etc/usbguard/usbguard-daemon.conf
+            # Root alone talks to USBGuard: every listing and allowing here goes through sudo, and a group in this line could add rules without a password
+            sudo sed -i -E 's|^#?IPCAllowedGroups=.*|IPCAllowedGroups=|' /etc/usbguard/usbguard-daemon.conf
             sudo /usr/libexec/amethystora-security-config note usb-protection locked
             sudo systemctl unmask usbguard-dbus.service
             sudo systemctl enable usbguard.service usbguard-dbus.service
@@ -1529,8 +1530,8 @@ usb ACTION="":
             # Built from what is connected right now, so the keyboard running this command is allowed
             usbguard generate-policy | sudo tee /etc/usbguard/rules.conf >/dev/null
             sudo chmod 0600 /etc/usbguard/rules.conf
-            # Without this only root could list or allow a device, and the prompt below would not work
-            sudo sed -i -E 's|^#?IPCAllowedGroups=.*|IPCAllowedGroups=wheel|' /etc/usbguard/usbguard-daemon.conf
+            # Root alone talks to USBGuard: the prompt below lists and allows through sudo, and a group in this line could add rules without a password
+            sudo sed -i -E 's|^#?IPCAllowedGroups=.*|IPCAllowedGroups=|' /etc/usbguard/usbguard-daemon.conf
             sudo /usr/libexec/amethystora-security-config note usb-protection on
             sudo systemctl enable usbguard.service
             # Restarted rather than started: a rule a session added while the screen-lock mode was on goes

@@ -178,4 +178,72 @@ as_clamupdate update >/dev/null
 [[ -e "${T}/kept/file" ]] || fail "what a link leads to was taken away"
 [[ ! -e "${T}/root/yara/credits.tsv.new" ]] || fail "a stopped run's credits stayed"
 
+# A file with an include directive, and an Elastic rule named like another set's, are left out and said; the sets in
+# ClamAV's folder load together
+rm -rf "${T}/e" "${T}/s"
+mkdir -p "${T}/e/protections-artifacts-main/yara/rules" "${T}/s/signature-base-master/yara"
+ELASTIC="${T}/e/protections-artifacts-main/yara/rules"
+cat >"${ELASTIC}/Linux_Trojan_Test.yar" <<'EOF'
+rule Linux_Trojan_Test_1 {
+    strings:
+        $a = "amethystora-yara-test-elastic"
+    condition:
+        $a
+}
+EOF
+cat >"${ELASTIC}/Linux_Trojan_Include.yar" <<'EOF'
+rule Linux_Trojan_Include_1 {
+    strings:
+        $a = "amethystora-yara-test-include"
+    condition:
+        $a
+}
+include "/etc/hostname"
+EOF
+cat >"${ELASTIC}/Linux_Trojan_Clash.yar" <<'EOF'
+rule SigBase_Good_Rule {
+    strings:
+        $a = "amethystora-yara-test-clash"
+    condition:
+        $a
+}
+EOF
+tar -C "${T}/e" -czf "${AMETHYSTORA_YARA_ARCHIVE}.elastic" .
+cat >"${T}/s/signature-base-master/yara/apt_test.yar" <<'EOF'
+rule Good_Rule {
+    meta:
+        author = "Florian Roth"
+    strings:
+        $a = "amethystora-yara-test-sigbase"
+    condition:
+        $a
+}
+include "/etc/hostname"
+rule After_Include {
+    strings:
+        $a = "after-include-marker"
+    condition:
+        $a
+}
+EOF
+tar -C "${T}/s" -czf "${AMETHYSTORA_YARA_ARCHIVE}.signature-base" .
+printf 'YARA_ELASTIC=on\nYARA_SIGNATURE_BASE=on\n' >"${AMETHYSTORA_SECURITY_CONF}"
+chown -R clamupdate "${T}"
+as_clamupdate update >/dev/null 2>"${T}/said" || fail "the update with includes failed"
+[[ "$(names "${DB}/amethystora-yara-elastic.yar")" == "Linux_Trojan_Test_1 " ]] || fail "elastic with an include: $(names "${DB}/amethystora-yara-elastic.yar")"
+[[ "$(names "${DB}/amethystora-yara-signature-base.yar")" == "SigBase_After_Include SigBase_Good_Rule " ]] ||
+    fail "signature-base with an include: $(names "${DB}/amethystora-yara-signature-base.yar")"
+grep -q '^[[:space:]]*include' "${DB}"/*.yar && fail "an include reached ClamAV's folder"
+grep -q 'left out Linux_Trojan_Include.yar' "${T}/said" || fail "a file left out for its include was not said: $(cat "${T}/said")"
+grep -q 'left out Linux_Trojan_Clash.yar' "${T}/said" || fail "a file left out for its names was not said: $(cat "${T}/said")"
+clamscan --quiet --no-summary -d "${DB}/amethystora-yara-elastic.yar" -d "${DB}/amethystora-yara-signature-base.yar" "${T}/root/yara/empty" ||
+    fail "the sets do not load together"
+# A set that loads alone but not beside the others stays out
+rm -f "${DB}/amethystora-yara-signature-base.yar" "${AMETHYSTORA_YARA_ARCHIVE}.elastic"
+printf 'rule SigBase_Good_Rule {\n    strings:\n        $a = "amethystora-yara-test-twice"\n    condition:\n        $a\n}\n' >"${DB}/amethystora-yara-elastic.yar"
+chown -R clamupdate "${T}"
+as_clamupdate update >/dev/null 2>"${T}/said" || fail "the update with a name used twice failed"
+[[ ! -e "${DB}/amethystora-yara-signature-base.yar" ]] || fail "a set that does not load beside another was put in ClamAV's folder"
+grep -q 'beside the other sets' "${T}/said" || fail "a set that does not load beside another was not said: $(cat "${T}/said")"
+
 echo "test-yara: what ClamAV loads, and only that, with its authors named"

@@ -9438,6 +9438,11 @@ msgid "  A host it may reach is a way for anything it knows to leave this comput
 msgstr ""
 
 #: usr/libexec/amethystora-plugins
+#, sh-format
+msgid "  It may send up to ${amount} an hour to it (1 MiB is usual)."
+msgstr ""
+
+#: usr/libexec/amethystora-plugins
 msgid "  A window can read whatever you copied last while it has the focus, and can look like any other window, a password prompt included; what it reads can reach any other plugin that shares a folder with it."
 msgstr ""
 
@@ -9662,7 +9667,7 @@ msgstr ""
 msgid "No plugin that is on takes files."
 msgstr ""
 
-#: usr/libexec/amethystora-plugins
+#: usr/libexec/amethystora-plugins usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/plugins/tile.js
 msgid "Plugin"
 msgstr ""
 

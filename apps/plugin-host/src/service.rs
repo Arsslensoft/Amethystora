@@ -37,8 +37,8 @@ const MEMORY: u32 = 2;
 const UPDATES: usize = 30;
 
 enum Msg {
-    /// A run ended: the plugin, what it printed or why not, and the action it was run for (a person's click), if any
-    Ran(String, Result<Value, String>, Option<String>),
+    /// A run ended: the plugin, what it printed or why not, and the action it was run for with whether a person clicked, if any
+    Ran(String, Result<Value, String>, Option<(String, bool)>),
     Over(String, String),
     /// A plugin asked the shell to open an address or copy a text, after a click: (id, kind, text)
     Asked(String, String, String),
@@ -56,8 +56,8 @@ struct State {
     failures: RefCell<HashMap<String, (String, u32)>>,
     /// When each plugin's results arrived in the last minute
     recent: RefCell<HashMap<String, std::collections::VecDeque<std::time::Instant>>>,
-    /// A click that found the plugin's run still going: the latest, for each plugin
-    queued: RefCell<HashMap<String, String>>,
+    /// An action that found the plugin's run still going, and whether it was a click: the latest, for each plugin
+    queued: RefCell<HashMap<String, (String, bool)>>,
     /// The plugins started, each with its interval's timer: a plugin turned off and on again before its timer ticked would
     /// otherwise have two, and every second run would fail as one too soon
     scheduled: RefCell<HashMap<String, Option<glib::SourceId>>>,
@@ -223,7 +223,7 @@ impl State {
         let (runner, id, tx) = (self.runner.clone(), id.to_string(), self.tx.lock().unwrap().clone());
         std::thread::spawn(move || {
             let result = runner.run_as(&id, action.as_deref(), click);
-            let _ = tx.unbounded_send(Msg::Ran(id, result, action));
+            let _ = tx.unbounded_send(Msg::Ran(id, result, action.map(|a| (a, click))));
         });
     }
 
@@ -319,8 +319,9 @@ impl State {
                     }
                     return;
                 }
-                if let Some(a) = self.queued.borrow_mut().remove(&id) {
-                    self.run(&id, Some(a));
+                // It goes as it came: a Run call that waited is still no click
+                if let Some((a, click)) = self.queued.borrow_mut().remove(&id) {
+                    self.run_as(&id, Some(a), click);
                 }
                 // A run that was refused for coming too soon changed nothing: it is neither an error nor a result
                 if result.as_ref().is_err_and(|why| classify(why) == "gap") {

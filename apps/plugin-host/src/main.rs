@@ -73,7 +73,7 @@ fn read_manifest(env: &Env, id: &str, grant: &Grant) -> Option<Manifest> {
 
 fn summary(env: &Env, id: &str, grant: &Grant) -> Value {
     let manifest = read_manifest(env, id, grant);
-    let verified = env.store.verify(&env.store.folder_of(id, grant), &grant.digest);
+    let verified = env.store.verify_grant(id, grant);
     json!({
         "id": id,
         "name": manifest.as_ref().map(|m| m.name.as_str()).unwrap_or(id),
@@ -251,7 +251,7 @@ fn cmd_verify(env: &Env, only: Option<&String>) -> ExitCode {
     };
     let mut bad = false;
     for (id, grant) in grants.plugins.iter().filter(|(id, _)| only.is_none_or(|o| o == *id)) {
-        match env.store.verify(&env.store.folder_of(id, grant), &grant.digest) {
+        match env.store.verify_grant(id, grant) {
             Ok(()) => println!("ok\t{id}"),
             Err(e) => {
                 bad = true;

@@ -141,8 +141,11 @@ impl Ctx {
             Some("rollback") => self.rollback(uid, id_arg(rest.first(), true)?),
             _ => return Err("usage: amethystora-plugin-root prepare|inspect|commit|commit-updates|commit-shipped|grant|revoke|block|unblock|remove|rollback".into()),
         };
-        // The account's folder is its own to read and nobody else's, also after a verb that failed, and for folders made before this
-        self.store.seal_account(uid);
+        // Every account's folder is its own to read and nobody else's, also after a verb that failed, and for folders made before this; what could
+        // not be closed is said
+        if let Err(why) = self.store.seal_all() {
+            eprintln!("amethystora-plugin-root: {why}");
+        }
         done?;
         writeln!(out, "ok").map_err(|e| e.to_string())
     }
@@ -243,8 +246,11 @@ impl Ctx {
                 return Err(format!("{id} asks for {more}, which it was not given: update it on its own, so that you read what it asks"));
             }
             let keep: Vec<String> = grant.perms.iter().filter(|p| asked.contains(*p)).cloned().collect();
-            // A higher byte limit is more asked for too: it is the one bound on what a granted host is sent
-            if let Some((host, _)) = manifest.limits.iter().find(|(h, n)| keep.contains(&format!("network={h}")) && *n > grant.limits.get(h).copied().unwrap_or(crate::manifest::DEFAULT_LIMIT)) {
+            // A higher byte limit is more asked for too: it is the one bound on what a granted host is sent, and a host whose entry lost its own
+            // limit has the default one
+            let new_limit = |h: &str| manifest.limits.iter().find(|(l, _)| l == h).map_or(crate::manifest::DEFAULT_LIMIT, |(_, n)| *n);
+            let old_limit = |h: &str| grant.limits.get(h).copied().unwrap_or(crate::manifest::DEFAULT_LIMIT);
+            if let Some(host) = keep.iter().filter_map(|p| p.strip_prefix("network=")).find(|h| new_limit(h) > old_limit(h)) {
                 return Err(format!("{id} now sends more to {host} than it was allowed: update it on its own, so that you read what it asks"));
             }
             plan.push((id.to_string(), digest.to_string(), keep));
@@ -313,6 +319,9 @@ impl Ctx {
         let digest = tree::digest(&entries);
         let mut grants = self.store.grants(uid)?;
         let old = grants.plugins.remove(id).unwrap_or_default();
+        // One added already keeps what it was given, less what its manifest no longer names: an image update gives it nothing more, and a revoke
+        // of the person's stays. Added afresh (removed, then added) it has the manifest's whole set
+        let perms: Vec<String> = if old.shipped { old.perms.iter().filter(|p| perms.contains(*p)).cloned().collect() } else { perms };
         grants.plugins.insert(id.into(), Grant { digest: digest.clone(), perms: perms.clone(), shipped: true, blocked: old.blocked, blocked_hosts: old.blocked_hosts, ..Grant::default() });
         self.store.write_grants(uid, &grants)?;
         self.store.append_history(uid, json!({"action": "commit-shipped", "id": id, "digest": digest, "perms": perms}))
@@ -519,6 +528,28 @@ mod tests {
     }
 
     #[test]
+    fn an_update_that_drops_a_lower_limit_asks_for_more() {
+        let (ctx, dir) = setup("lower");
+        let net = |limit: Option<u64>, version: &str| {
+            let l = limit.map(|n| format!(r#","limit":{n}"#)).unwrap_or_default();
+            manifest_with(&format!(r#"{{"network":[{{"host":"api.example.com","why":"Reads"{l}}}]}}"#)).replace("1.0.0", version)
+        };
+        let first = call(&ctx, "prepare", &archive(&net(Some(1000), "1.0.0"))).unwrap();
+        call(&ctx, &format!("commit dev.example.t {} network=api.example.com", field(&first, "digest")), b"").unwrap();
+        // No limit of its own is the default, which is more than 1000 bytes an hour; a lower one is not
+        for (limit, version, passes) in [(Some(500u64), "1.1.0", true), (None, "1.2.0", false)] {
+            let out = call(&ctx, "prepare", &archive(&net(limit, version))).unwrap();
+            let digest = field(&out, "digest");
+            assert_eq!(call(&ctx, &format!("commit-updates dev.example.t={digest}"), b"").is_ok(), passes, "{limit:?}");
+            if !passes {
+                assert!(call(&ctx, &format!("commit-dev dev.example.t={digest}"), b"").is_err(), "dev is the same check");
+            }
+        }
+        assert_eq!(ctx.store.grants(1000).unwrap().plugins["dev.example.t"].limits["api.example.com"], 500);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn commit_dev_goes_to_the_plugin_being_made_and_no_other() {
         let (ctx, dir) = setup("dev");
         let needs = r#"{"notify":{"why":"Says"}}"#;
@@ -642,6 +673,7 @@ mod tests {
         let (ctx, dir) = setup("shipped");
         let make = |id: &str, needs: &str| {
             let folder = ctx.store.shipped.join(id);
+            let _ = std::fs::remove_dir_all(&folder);
             std::fs::create_dir_all(&folder).unwrap();
             let manifest = manifest_with(needs).replace("dev.example.t", id);
             tree::write_tree(&folder, &[Entry { path: "manifest.json".into(), dir: false, exec: false, data: manifest.into_bytes() }]).unwrap();
@@ -653,6 +685,26 @@ mod tests {
         assert!(grants.plugins["amethystora.clock"].shipped && grants.plugins["amethystora.clock"].perms == ["state=clock"]);
         assert!(call(&ctx, "commit-shipped amethystora.leaky", b"").is_err());
         assert!(call(&ctx, "commit-shipped amethystora.missing", b"").is_err());
+        // An image update changes its files and its manifest: it still loads, and it has nothing it was not given, nor what the person took back
+        let granted = ctx.store.grants(1000).unwrap().plugins.remove("amethystora.clock").unwrap();
+        assert!(ctx.store.verify_grant("amethystora.clock", &granted).is_ok());
+        make("amethystora.clock", r#"{"state":{"names":["clock","disk"],"why":"The time"},"notify":{"why":"Says"}}"#);
+        assert!(ctx.store.verify_grant("amethystora.clock", &granted).is_ok(), "an image update does not stop it");
+        call(&ctx, "commit-shipped amethystora.clock", b"").unwrap();
+        let grants = ctx.store.grants(1000).unwrap();
+        assert_eq!(grants.plugins["amethystora.clock"].perms, ["state=clock"], "the new permissions are not given with the update");
+        assert_ne!(grants.plugins["amethystora.clock"].digest, granted.digest);
+        call(&ctx, "revoke amethystora.clock", b"").unwrap();
+        call(&ctx, "commit-shipped amethystora.clock", b"").unwrap();
+        assert!(ctx.store.grants(1000).unwrap().plugins["amethystora.clock"].perms.is_empty(), "a revoke is not undone");
+        // Added afresh it has the manifest's whole set
+        call(&ctx, "remove amethystora.clock", b"").unwrap();
+        call(&ctx, "commit-shipped amethystora.clock", b"").unwrap();
+        assert_eq!(ctx.store.grants(1000).unwrap().plugins["amethystora.clock"].perms, ["notify", "state=clock", "state=disk"]);
+        // What a plugin of the image never has stops it
+        let mut bad = granted;
+        bad.perms.push("network=a.example.com".into());
+        assert!(ctx.store.verify_grant("amethystora.clock", &bad).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

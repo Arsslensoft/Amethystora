@@ -1,6 +1,7 @@
 [Unit]
 Description=Installed apps and the system's files, checked against their updates
 Documentation=file:///usr/share/amethystora/manual/security.md
+OnFailure=amethystora-scan-alert@%n.service
 
 [Service]
 Type=oneshot

@@ -162,6 +162,57 @@ cp "${T}/reader.ok" "${T}/reader"
 timeout 120 "${WATCH}" >/dev/null || fail "a run with the reader back failed"
 [[ ! -e "${R}/var/lib/amethystora/security/accounts/4500/app-permissions.cut" ]] || fail "a good run did not start the count again"
 
+# A reader that ends with an error of its own is not one that found nothing either: the second in a row is said
+printf '#!/usr/bin/bash\nexit 1\n' >"${T}/reader"
+for run in 1 2 3; do
+    before="$(wc -l <"${HISTORY}")"
+    timeout 120 "${WATCH}" >/dev/null || fail "a run with a failing reader failed"
+    cut="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "app-permissions" and (.text | test("did not finish")))')"
+    case "${run}" in
+        2) jq -se 'length == 1 and .[0].account == "alice"' <<<"${cut}" >/dev/null ||
+               fail "a reader that failed twice was not said: ${cut}" ;;
+        *) [[ -z "${cut}" ]] || fail "a reader that failed (run ${run}) was said: ${cut}" ;;
+    esac
+done
+cp "${T}/reader.ok" "${T}/reader"
+
+# A program of the account that keeps the reader's output open keeps nothing waiting, and cannot write into it: the
+# output is a file of root's, which only the reader holds and which is read after the reader has ended
+cat >"${T}/reader" <<EOF
+#!/usr/bin/bash
+sleep 12 &
+( if printf '%s\n' '{"id":"forged","level":"critical","text":"forged"}' >"/proc/\$\$/fd/1" 2>/dev/null; then
+      touch "${T}/forge/wrote"; else touch "${T}/forge/refused"; fi )
+cat "${T}/read"
+EOF
+chmod 0755 "${T}/reader"
+rm -rf "${T}/forge"; mkdir -m 1777 "${T}/forge"
+start="${SECONDS}"
+timeout 120 "${WATCH}" >/dev/null || fail "a run with a reader whose output is held open failed"
+(( SECONDS - start < 10 )) || fail "a program holding the reader's output open kept the watcher waiting"
+[[ -e "${T}/forge/refused" && ! -e "${T}/forge/wrote" ]] || fail "a program of the account wrote into the reader's output"
+grep -q '"text":"forged"' "${HISTORY}" && fail "a line written into the reader's output was kept"
+[[ ! -e "${R}/var/lib/amethystora/security/accounts/4500/app-permissions.out" ]] || fail "the reader's output file was left behind"
+cp "${T}/reader.ok" "${T}/reader"
+
+# The hooks: a line of quiet with nothing it is within is heard, so that an id put in the seen list before the hook it
+# names is planted is not unheard. Its first run only records.
+echo "DEV_HOOKS=on" >>"${AMETHYSTORA_SECURITY_CONF}"
+cat >"${T}/reader" <<EOF
+#!/usr/bin/bash
+[[ "\$1" == dev-hooks ]] || exit 0
+cat "${T}/read-hooks"
+EOF
+: >"${T}/read-hooks"
+chmod 0644 "${T}/read-hooks"
+timeout 120 "${WATCH}" >/dev/null || fail "the hooks' first run failed"
+echo '{"id":"pth:/x/y.pth:abc","level":"quiet","text":"forged ahead of the hook"}' >"${T}/read-hooks"
+timeout 120 "${WATCH}" >/dev/null || fail "the hooks' second run failed"
+jq -se 'any(.[]; .key == "dev-hooks" and .level == "normal" and .text == "forged ahead of the hook")' "${HISTORY}" >/dev/null ||
+    fail "a line of quiet for a hook was recorded unheard: $(grep dev-hooks "${HISTORY}")"
+sed -i '/^DEV_HOOKS=on$/d' "${AMETHYSTORA_SECURITY_CONF}"
+cp "${T}/reader.ok" "${T}/reader"
+
 # --- What the app integrity check found ------------------------------------------------------------------------
 
 # Its findings, in the readers' form, are said when new: one about the system's apps to the administrators, one

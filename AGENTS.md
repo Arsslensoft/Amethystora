@@ -783,8 +783,8 @@ set, since one rule ClamAV cannot load can stop its whole database) and `NETWORK
 `/usr/libexec/amethystora-security-reader` (`APP_PERMISSIONS`, `DEV_HOOKS`, `AGENT_CONFIG`), run with
 `setpriv` and `timeout` for the accounts with a session in the last day, root keeping what it saw, and said to
 that account alone (`amethystora-notify-users --user`). The account's own programs can stop or kill that run, so it gets no
-standard input and one that is timed out or killed twice running is a finding of its own (the integrity check's account mode
-the same, `NAME:check-cut`); `notify-users` hands its caller only the key of an offered button, on one line, since the answer comes
+standard input, its output is a file of root's (never a pipe the account can open again through `/proc`), and one that fails, is timed out
+or killed twice running is a finding of its own (the integrity check's account mode the same, `NAME:check-cut`); `notify-users` hands its caller only the key of an offered button, on one line, since the answer comes
 through a pipe the account can write to. A forged `allow` is made harmless where it is written: the watcher keeps `\ * ? [` in an
 `allow=` entry escaped (`glob_safe`), and the helper reads such a pair as a plain character. `OSPREY`, `TRIAGE` and `REPUTATION` send something
 away and are in no profile. What turns each agent's checks off is `/usr/share/amethystora/agent-cli-flags`,
@@ -1903,7 +1903,8 @@ crate (no GTK; only the host's `service.rs` links GLib) with two programs: `amet
   prints what was frozen as tab-separated lines for a person to read, `commit ID DIGEST PERM...` moves the frozen tree into the store and
   rewrites `grants.json` atomically (a block and the old digest, kept as `previous`, survive an update), `grant` widens an installed
   plugin, `commit-shipped` grants exactly a manifest of `/usr/share/amethystora/plugins` (never `network`, `files`, `window` or
-  `change`), and `revoke`, `block`, `remove`, `unblock`, `rollback` change grants only (a rollback never gives more than the older
+  `change`; for one added already it keeps what it was given, less what the manifest no longer names, and a shipped plugin is held to its folder
+  and not to a digest, so an image update does not stop it), and `revoke`, `block`, `remove`, `unblock`, `rollback` change grants only (a rollback never gives more than the older
   version's manifest asked). `50-amethystora-plugins.rules` lets the active local session through for `prepare`, `inspect`, `revoke`,
   `block`, `remove` and `commit-shipped`, and names **nothing that gives more** (`commit`, `grant`, `unblock`, `rollback`): those are
   `auth_admin`, no `_keep`, no `yes`. Never `NOPASSWD`, never a `--yes` on `grant` or `add` (both ask in a terminal, a permission at

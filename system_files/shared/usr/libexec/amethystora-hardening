@@ -180,6 +180,11 @@ is_on() {
         listed "${ON}" "kernel-args ${argument}"
     elif [[ -n "${LEVELS[${name}]+set}" && "${argument}" == strict ]]; then
         listed "${ON}" "${name} strict"
+    elif [[ "${name}" == flathub-verified ]]; then
+        # Kept in the Flathub remote as well as in hardening-on: it is on only while the remote says so too
+        grep -qE "^${name}\$" "${ON}" 2>/dev/null &&
+            awk '/^\[/ { flathub = ($0 == "[remote \"flathub\"]") } flathub && $0 == "xa.subset=verified" { found = 1 }
+                END { exit !found }' "${ROOT}/var/lib/flatpak/repo/config" 2>/dev/null
     elif stricter "${name}"; then
         grep -qE "^${name}( strict)?\$" "${ON}" 2>/dev/null
     else

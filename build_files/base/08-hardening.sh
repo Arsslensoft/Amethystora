@@ -211,7 +211,8 @@ done
 # (GDM, SSH and every other network login) it is refused for every service but gdm-password. The lines go first in
 # the auth stack, before pam_unix could take the empty password, and again first in the account stack, for a service
 # that starts a guest's process with no auth step (systemd's user manager is not one: its own pam_unix account line
-# ends its stack first). Each is marked {include if} as the duress password's is, so that with the feature off
+# ends its stack first). In system-auth the same refusal stands first in the password stack too, so that the guest
+# cannot give itself a password with passwd. Each is marked {include if} as the duress password's is, so that with the feature off
 # authselect writes the same bytes as before.
 GUEST_SYSTEM='requisite                                            pam_succeed_if.so quiet user != amethystora-guest'
 GUEST_SKIP='[success=1 default=ignore]                           pam_succeed_if.so quiet user != amethystora-guest'
@@ -220,7 +221,9 @@ for profile in local sssd winbind; do
     for file in system-auth password-auth; do
         vendor="/usr/share/authselect/vendor/${profile}/${file}"
         [[ -f "${vendor}" && ! -L "${vendor}" ]]
-        for stack in auth account; do
+        # system-auth also refuses the account in its password stack, which passwd, chpasswd and newusers use and
+        # which asks for neither of the other two: otherwise the guest could give itself a password
+        for stack in auth account $([[ "${file}" == system-auth ]] && echo password); do
             [[ "$(grep -cE "^${stack}[[:space:]]" "${vendor}")" -ge 1 ]]
             if [[ "${file}" == system-auth ]]; then
                 lines="${stack}        ${GUEST_SYSTEM} {include if \"with-guest-login\"}"
@@ -231,7 +234,7 @@ for profile in local sssd winbind; do
             awk -v stack="${stack}" -v lines="${lines}" '!done && $1 == stack { print lines; done = 1 } { print }' "${vendor}" >"${vendor}.new"
             mv "${vendor}.new" "${vendor}"
         done
-        [[ "$(grep -c 'with-guest-login' "${vendor}")" -eq "$([[ "${file}" == system-auth ]] && echo 2 || echo 4)" ]]
+        [[ "$(grep -c 'with-guest-login' "${vendor}")" -eq "$([[ "${file}" == system-auth ]] && echo 3 || echo 4)" ]]
     done
 done
 

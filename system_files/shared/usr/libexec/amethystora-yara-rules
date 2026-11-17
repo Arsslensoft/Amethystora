@@ -7,7 +7,8 @@
 The archive is read in memory, never unpacked by the names it gives. SOURCE is one of:
 
     elastic         Elastic's protections-artifacts: its Linux files, each kept whole and unchanged, as the
-                    Elastic License 2.0 they are under asks
+                    Elastic License 2.0 they are under asks (a file with an include, or with a rule that is not a
+                    Linux_ one, is left out and said)
     signature-base  Florian Roth's signature-base: rules under the Detection Rule License 1.1 only (those whose
                     own licence says otherwise are left out), less the files that need LOKI's variables
     forge           YARA Forge's core set: rules from repositories under a licence that asks nothing beyond
@@ -36,7 +37,7 @@ HEADER = re.compile(r"(?m)^[ \t]*((?:private|global)[ \t]+)*rule[ \t]+([A-Za-z_]
 UNSUPPORTED = re.compile(
     r"\b(pe|math|hash|dotnet|elf|cuckoo|magic|console|time|string|androguard|vt|macho|lnk)\."
     r"|\b(xor|base64|base64wide|u?int(8|16|32)be|iequals|icontains|startswith|endswith|istartswith|iendswith|defined)\b"
-    r"|^\s*global\s+rule\b",
+    r"|^\s*global\s+rule\b|^\s*include\b",
     re.M)
 # The first that a repository's licence text matches. The Detection Rule License is written from MIT's text,
 # so it comes before MIT.
@@ -117,6 +118,18 @@ def unsupported(rule):
     return UNSUPPORTED.search(re.sub(r'"(?:[^"\\]|\\.)*"', '""', rule)) is not None
 
 
+def stray_include(text, found):
+    """Whether a file has an include directive between its rules, where unsupported() does not look: comments and
+    quoted strings are not text"""
+    rest, at = [], 0
+    for start, _, rule in found:
+        rest.append(text[at:start])
+        at = max(at, start + len(rule))
+    rest.append(text[at:])
+    outside = re.sub(r'"(?:[^"\\]|\\.)*"|//[^\n]*|/\*.*?\*/', " ", "".join(rest), flags=re.S)
+    return re.search(r"\binclude\b", outside) is not None
+
+
 def meta(rule, key):
     found = re.search(r'(?m)^\s*' + key + r'\s*=\s*"((?:[^"\\]|\\.)*)"', rule)
     return found.group(1) if found else ""
@@ -148,7 +161,17 @@ def split(source, archive, out):
         for name, text in members(archive):
             if re.search(r"/yara/rules/Linux_[^/]+\.yar$", name):
                 found = list(rules(text))
+                names = [n for _, n, _ in found]
                 if found and not any(unsupported(rule) for _, _, rule in found):
+                    # Whole files only. clamd loads the sets together and a rule name used twice ends the load of
+                    # the later file, so a file is left out that includes another, or has a name that is not
+                    # Elastic's own Linux_ one (SigBase_ and Forge_ are the other sets') or one used before
+                    if stray_include(text, found) or not all(n.startswith("Linux_") for n in names) \
+                            or len(set(names)) < len(names) or kept.intersection(names):
+                        print(f"amethystora-yara-rules: left out {os.path.basename(name)}: it has an include, or rule names that are not "
+                              "Linux_ ones, or used twice", file=sys.stderr)
+                        continue
+                    kept.update(names)
                     pieces.append(text)
                     credits += [(n, "Elastic", clean(meta(r, "author")) or "Elastic Security", LICENCE[source])
                                 for _, n, r in found]

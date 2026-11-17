@@ -33,7 +33,7 @@ export function lines(value, max = 6, each = 80) {
 // Icons that say something only the system says: a recording, a camera or microphone in use, a call, the battery, an update, security, a
 // password, the network, and Amethystora's own apps. A plugin never draws them (the host refuses them too)
 const SYSTEM_ICONS = ['amethystora', 'org.amethystora.', 'media-record', 'camera-', 'microphone-', 'call-', 'battery-', 'security-', 'dialog-password',
-    'system-', 'software-update', 'network-', 'audio-input', 'screen-shared', 'screen-recording'];
+    'system-', 'software-update', 'network-', 'audio-input', 'screen-shared', 'screen-recording', 'audio-volume', 'airplane-mode', 'bluetooth', 'power-profile', 'night-light', 'channel-secure', 'channel-insecure'];
 
 export function icon(value) {
     return typeof value === 'string' && ICON.test(value) && !value.endsWith('.') && !SYSTEM_ICONS.some(p => value.startsWith(p)) ? value : '';
