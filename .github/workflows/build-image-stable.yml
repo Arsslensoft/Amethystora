@@ -23,7 +23,7 @@ jobs:
   # request gets less
   build-image-stable:
     name: Build Stable Images
-    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main') }}
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main') }}
     uses: ./.github/workflows/reusable-build.yml
     permissions:
       contents: read
@@ -44,7 +44,7 @@ jobs:
 
   build-image-stable-unpublished:
     name: Build Stable Images
-    if: ${{ !(github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main')) }}
+    if: ${{ !(github.event_name != 'pull_request' && (github.ref == 'refs/heads/main')) }}
     uses: ./.github/workflows/reusable-build.yml
     permissions:
       contents: read

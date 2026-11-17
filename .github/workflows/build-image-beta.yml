@@ -29,7 +29,7 @@ jobs:
   # request gets less
   build-image-beta:
     name: Build Beta Images
-    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' || github.ref == 'refs/heads/beta') }}
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta') }}
     uses: ./.github/workflows/reusable-build.yml
     permissions:
       contents: read
@@ -48,7 +48,7 @@ jobs:
 
   build-image-beta-unpublished:
     name: Build Beta Images
-    if: ${{ !(github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event.merge_group.base_ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')) }}
+    if: ${{ !(github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')) }}
     uses: ./.github/workflows/reusable-build.yml
     permissions:
       contents: read

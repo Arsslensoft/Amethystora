@@ -210,7 +210,7 @@ The repository uses mandatory pre-commit validation:
 - `reusable-build.yml` builds both base and dx variants for all flavors (main, nvidia-open, nvidia-lts)
 - Fedora version is dynamically detected based on stream tag
 - Images are signed with cosign and pushed to GHCR, and every tag pushed is checked against `cosign.pub` afterwards
-- Only main publishes: one `PUBLISH` condition in `reusable-build.yml` (main's schedule and dispatches, the merge queue in front of main, and the `beta` branch's own stream) decides every push, signature, attestation and SBOM, and which builds get the real module and Secure Boot keys. Everything else builds with throwaway keys and publishes nothing. No build step gets `GITHUB_TOKEN`, and keys reach the build as files (`AKMODS_PRIVKEY_FILE`, `SECUREBOOT_KEY_FILE`), never on a command line. The keys and the R2 token are secrets of the `release` environment alone, which admits `main`, `beta` and `gh-readonly-queue/main/*`: the image job names it under the same condition as `PUBLISH`, and the ISO's `publish` job always, so a branch that edits either workflow still gets no key. A new job that needs one names the environment too; never add a key as a repository secret
+- Only main publishes: one `PUBLISH` condition in `reusable-build.yml` (main's schedule and dispatches, and the `beta` branch's own stream; the merge queue builds and publishes nothing) decides every push, signature, attestation and SBOM, and which builds get the real module and Secure Boot keys. Everything else builds with throwaway keys and publishes nothing. No build step gets `GITHUB_TOKEN`, and keys reach the build as files (`AKMODS_PRIVKEY_FILE`, `SECUREBOOT_KEY_FILE`), never on a command line. The keys and the R2 token are secrets of the `release` environment alone, which admits `main` and `beta` alone: never `gh-readonly-queue/main/*`, which anyone who can push may create (tested 2026-11-17) and which a ruleset cannot protect without stopping the merge queue itself: the image job names it under the same condition as `PUBLISH`, and the ISO's `publish` job always, so a branch that edits either workflow still gets no key. A new job that needs one names the environment too; never add a key as a repository secret
 - cosign is installed from its pinned installer before the build, into `/usr/local/bin` for sudo, and `just verify-container` fails without it; just comes from a pinned release with its checksum (`.github/actions/install-just`)
 - Every workflow sets `permissions: {}` or read-only access at the top and grants write access on the job that needs it, which OpenSSF Scorecard checks (`build-images.yml` is the exception: each job it runs needs the same write access). `reusable-build.yml` has no top-level
   `permissions`, since a called workflow may only lower its caller's token: each `build-image-*.yml` has two jobs, one for a run
@@ -2646,10 +2646,10 @@ duplicate push.
 
 Publishing happens only from main (`PUBLISH` in `reusable-build.yml`, see
 Workflow Architecture), so PR builds and dispatches from other branches validate
-the image but never push. `Latest Images` publishes only on `merge_group` and
-`workflow_dispatch`; there is no cron. Only `Stable Images` is scheduled
-(Tuesdays 01:00 UTC). Merging directly to `main` and bypassing the merge queue
-therefore publishes nothing.
+the image but never push. `Latest Images` publishes only on `workflow_dispatch`
+from `main` (the `queue-latest` skill's, after a green lab run); there is no cron,
+and neither a push to `main` nor the merge queue publishes: the queue's run builds
+and tests with throwaway keys. Only `Stable Images` is scheduled (Tuesdays 01:00 UTC).
 
 The `main` ruleset asks of everyone but the repository's administrators, who bypass it: a pull request,
 an approval from a code owner, the `Checks` workflow's three jobs, and the merge queue, which squashes.
