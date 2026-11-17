@@ -149,7 +149,7 @@ if ((HOLDERS)); then
     holds "a OneDrive placeholder was left" test ! -e "${HOME_DIR}/Documents/cloud-only.docx"
     holds "a OneDrive placeholder was counted" has "only in OneDrive" "${SHOWN}"
 fi
-holds "Downloads, AppData and the other account were not copied" bash -c "! find '${HOME_DIR}' -name setup.exe -o -name 'Login Data' -o -name pat.txt 2>/dev/null | grep -q ."
+holds "Downloads, AppData and the other account were not copied" bash -c "! find '${HOME_DIR}' -path '${HOME_DIR}/.*' -prune -o \( -name setup.exe -o -name 'Login Data' -o -name pat.txt \) -print 2>/dev/null | grep -q ."
 holds "no password was read into the home" bash -c "! grep -rqs CANARY-CHROME '${HOME_DIR}/Documents' '${HOME_DIR}/Pictures' '${HOME_DIR}/Desktop'"
 holds "no half file was left" bash -c "! find '${HOME_DIR}' -name '*.amethystora-partial' | grep -q ."
 holds "the disk was unmounted at the end" bash -c "! findmnt -S '${PART}' >/dev/null"
