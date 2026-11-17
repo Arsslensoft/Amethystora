@@ -1028,6 +1028,10 @@ class Installation:
     def check_exports(self, deploys):
         root = self.base + "/exports"
         allowed = tuple(dep.path + "/export/" for dep in deploys)
+        # An app installed while this run read the others (a first boot's preinstall, Bazaar) has its deploy and its
+        # exports now, not in the list read at the start: the active deploys are read again before a link is stray, and
+        # a later run checks the new app's files. A link into anything but an active deploy is still stray
+        current = None
         stack = [root]
         while stack:
             folder = stack.pop()
@@ -1041,7 +1045,12 @@ class Installation:
                     stack.append(entry.path)
                     continue
                 if entry.is_symlink():
-                    if os.path.realpath(entry.path).startswith(allowed):
+                    target = os.path.realpath(entry.path)
+                    if target.startswith(allowed):
+                        continue
+                    if current is None:
+                        current = tuple(dep.path + "/export/" for dep in deploys_of(self.base))
+                    if target.startswith(current):
                         continue
                 elif entry.is_file(follow_symlinks=False) and TRIGGERED.fullmatch(rel):
                     continue

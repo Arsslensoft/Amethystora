@@ -214,6 +214,20 @@ printf '[Desktop Entry]\nExec=sh -c evil\n' >"${FP}/exports/share/applications/e
 ln -s /tmp/evil "${FP}/exports/bin/evil"
 found "a stray export" "^stray:-:share/applications/evil.desktop"
 grep -q "^stray:-:bin/evil" <<<"${FOUND}" || fail "a link out of the deploys was not found: ${FOUND}"
+# An app installed while a run read the others (a first boot's preinstall): its links lead into a deploy the list read at
+# the start lacks, and are not stray; the link out of every deploy still is
+out="$(python3 -I - "${INTEGRITY}" "${FP}" <<'EOF'
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("integrity", sys.argv[1])
+spec = importlib.util.spec_from_loader("integrity", loader)
+m = importlib.util.module_from_spec(spec)
+loader.exec_module(m)
+m.Installation(None, sys.argv[2], "-", set()).check_exports([])
+print("\n".join(f["id"] for f in m.FINDINGS))
+EOF
+)"
+grep -q "org.example.App" <<<"${out}" && fail "an app installed during the run was called stray: ${out}"
+grep -qx "stray:-:bin/evil" <<<"${out}" || fail "with the deploys read again, a link out of them was not found: ${out}"
 rm "${FP}/exports/share/applications/evil.desktop" "${FP}/exports/bin/evil"
 clean "the stray exports taken away"
 
