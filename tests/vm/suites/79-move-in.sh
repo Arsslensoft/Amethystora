@@ -157,7 +157,7 @@ holds "what was copied is the account's own" test "$(stat -c %U "${HOME_DIR}/Doc
 
 # --- 3. Again, and in steps ------------------------------------------------------------------------------------------------------------------
 echo "edited here" >"${HOME_DIR}/Documents/letters/a.txt"
-AGAIN="$(user_bus "${HELPER}" copy "${PART}" "${TEST_USER}" --json 2>/tmp/vmlab-79-again.err </dev/null)"
+AGAIN="$(user_bus "${HELPER}" copy "${PART}" "${TEST_USER}" --folders documents,pictures --json 2>/tmp/vmlab-79-again.err </dev/null)"
 [[ -n "${AGAIN}" ]] || sed 's/^/# /' /tmp/vmlab-79-again.err
 same "a second run copies nothing" "$(jq -r '.copied' <<<"${AGAIN}" 2>/dev/null)" 0
 holds "what was edited here is not copied again" test "$(cat "${HOME_DIR}/Documents/letters/a.txt")" = "edited here"

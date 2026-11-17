@@ -433,7 +433,8 @@ async function usb(vm) {
     }
     if (device.chardev) {
       const id = `vmlab-chardev-${++chardevs}`;
-      await qmp(vm, 'chardev-add', { id, backend: { type: 'null', data: {} } });
+      // A ring buffer: QEMU attaches a usb-serial only once its other end is open, which a null one never is
+      await qmp(vm, 'chardev-add', { id, backend: { type: 'ringbuf', data: { size: 65536 } } });
       args.chardev = id;
     }
     await qmp(vm, 'device_add', args);
