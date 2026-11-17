@@ -100,5 +100,6 @@ journalctl -b -u clamd@scan.service --no-pager -o cat | grep -qiE 'SIGSYS|Bad sy
     ok "clamd's journal names no refusal"
 journalctl -b -k --no-pager 2>/dev/null | grep -E 'audit: type=1326' | grep -q 'comm="clamd"' &&
     not_ok "the kernel logged a system call clamd's filter refused" || ok "the kernel logged no refused system call of clamd"
-check "systemd-analyze security scores clamd below 5" sh -c 'systemd-analyze security --threshold=5 --no-pager clamd@scan.service'
+# The threshold is on a scale of 100, where the report prints tenths: 50 is the 5.0 it shows
+check "systemd-analyze security scores clamd below 5" sh -c 'systemd-analyze security --threshold=50 --no-pager clamd@scan.service'
 finish
