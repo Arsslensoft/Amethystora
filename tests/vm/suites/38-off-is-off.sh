@@ -158,7 +158,9 @@ check_back() {
 case "${SUITE_PHASE}" in
     1)
         # What earlier suites left the watcher noticing and nobody has read would be said at every login below: it is
-        # shown here and marked read, as `ame security events` does
+        # shown here and marked read, as `ame security events` does. The watcher reads once first, so that what happened
+        # before this suite and was not read yet (a suite's SELinux denials) is not said after it was marked read
+        timeout 600 systemctl start amethystora-security-watch.service >/dev/null 2>&1 || true
         if [[ -s /var/log/amethystora-security-events.new ]]; then
             sed 's/^/# unread before this suite: /' /var/log/amethystora-security-events.new | tail -n 10
             /usr/libexec/amethystora-security-watch --seen
