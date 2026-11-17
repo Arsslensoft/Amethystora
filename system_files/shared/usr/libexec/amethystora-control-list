@@ -400,6 +400,7 @@ read_in_background backgrounds amethystora-theme bg list
 read_in_background raid /usr/libexec/amethystora-raid status --json
 # Move in from Windows: whether the partition table shows something that may be Windows (it mounts nothing and asks for no password)
 read_in_background move-in /usr/libexec/amethystora-move-in find --offer
+read_in_background lab-devices /usr/libexec/amethystora-lab-devices status
 read_in_background start-times /usr/libexec/amethystora-start-times status --fields
 # Devices kept from waking the computer: only a machine that kept one has the rules file, and only that one asks the helper
 [[ -s /etc/udev/rules.d/90-amethystora-wake.rules ]] && read_in_background wake-devices /usr/libexec/amethystora-sleep-report list --names
@@ -2969,30 +2970,19 @@ item apps webapps webapps "${ gettext "Web apps"; }" \
     "${ gettext "Sites in a window of their own, with a launcher in the app grid."; }" "" web-apps
 
 # Kits: the apps for a line of work, a row each. Add is `ame apps kit add` in a terminal, which shows what it installs and asks
-# first; Show says why each app is in it. The kits' words are theirs (amethystora-kit lists them in English), translated here from
-# the same catalogs (check-translations.js reads them from the kits' about files).
-if [[ "${ ended kits; }" == 0 ]] && jq -e 'type == "array" and length > 0' <<<"${ said kits; }" >/dev/null 2>&1; then
-    declare -A KIT_WORDS=()
-    while IFS= read -r word; do
-        KIT_WORDS["${word}"]="${ gettext "${word}"; }"
-    done < <(jq -r '.[] | .name, .description' <<<"${ said kits; }")
-    kit_pairs=""
-    for word in "${!KIT_WORDS[@]}"; do
-        json "${word}"
-        kit_key="${REPLY}"
-        json "${KIT_WORDS["${word}"]}"
-        kit_pairs+="${kit_pairs:+, }${kit_key}: ${REPLY}"
-    done
-    EXTRA="$(jq -c --argjson t "{${kit_pairs}}" --arg inside "${ gettext "In it:"; }" --arg here "${ gettext "Installed here:"; }" \
+# first; Show says why each app is in it. The kits' words are theirs: amethystora-kit gives each kit's name and description in
+# the session's language too (title, summary), in the background, from the catalogs check-translations.js fills from the about files.
+if [[ "${ ended kits; }" == 0 ]]; then
+    EXTRA="$(jq -c --arg inside "${ gettext "In it:"; }" --arg here "${ gettext "Installed here:"; }" \
         --arg add "${ gettext "Add…"; }" --arg show "${ gettext "Show…"; }" '
-        {rows: [.[] | {
+        if type == "array" and length > 0 then {rows: [.[] | {
             id: .id,
-            title: ($t[.name] // .name),
-            text: (($t[.description] // .description) + " " + $inside + " " + ([.apps[].name] | join(", ")) + "."
+            title: (.title // .name),
+            text: ((.summary // .description) + " " + $inside + " " + ([.apps[].name] | join(", ")) + "."
                 + (if any(.apps[]; .installed) then " " + $here + " " + ([.apps[] | select(.installed) | .name] | join(", ")) + "." else "" end)),
             state: "plain",
             actions: [{id: "show", title: $show, terminal: true, command: ["ame", "apps", "kit", "show", .id]},
-                      {id: "add", title: $add, terminal: true, command: ["ame", "apps", "kit", "add", .id]}]}]}' <<<"${ said kits; }" 2>/dev/null)" || EXTRA=""
+                      {id: "add", title: $add, terminal: true, command: ["ame", "apps", "kit", "add", .id]}]}]} else empty end' <<<"${ said kits; }" 2>/dev/null)" || EXTRA=""
 fi
 if [[ -n "${EXTRA}" ]]; then
     GROUP="${ gettext "Kits"; }"
@@ -3781,7 +3771,7 @@ GROUP=""
 # Seat access to debug probes, USB serial adapters and logic analysers: its rules file in /etc is the switch, which the helper
 # copies only after saying what it gives (a terminal)
 # on only for the image's own file: a file of that name that is not is drift, which the helper calls changed
-if [[ "${ /usr/libexec/amethystora-lab-devices status; }" == on ]]; then LAB_DEVICES=on; else LAB_DEVICES=off; fi
+if [[ "${ said lab-devices; }" == on ]]; then LAB_DEVICES=on; else LAB_DEVICES=off; fi
 switch_choices true ame system lab-devices
 USAGE="ame system lab-devices on|off"
 item system lab-devices switch "${ gettext "Lab devices"; }" \

@@ -117,7 +117,15 @@ list() {
     local kits id total here
     kits="$(kits_json)"
     if [[ "${1:-}" == --json ]]; then
-        printf '%s\n' "${kits}"
+        # Each kit's name and description in the session's language as well (title, summary), for Control's list, which
+        # reads this in the background
+        local word
+        local -a words=() said=()
+        mapfile -t words < <(jq -r '.[] | .name, .description' <<<"${kits}")
+        for word in "${words[@]}"; do said+=("$(say "${word}")"); done
+        jq -c --args '($ARGS.positional | length / 2) as $n | $ARGS.positional as $p
+            | (reduce range(0; $n) as $i ({}; .[$p[$i]] = $p[$n + $i])) as $t
+            | map(. + {title: ($t[.name] // .name), summary: ($t[.description] // .description)})' "${words[@]}" "${said[@]}" <<<"${kits}"
         return
     fi
     [[ $# -eq 0 ]] || { echo "${USAGE}" >&2; exit 64; }
