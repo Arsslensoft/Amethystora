@@ -11,7 +11,11 @@ HOME_DIR="/var/home/${TEST_USER}"
 HISTORY=/var/log/amethystora-security-events.jsonl
 config=/usr/libexec/amethystora-security-config
 
+# Run without the suites before it, nobody has signed the account in: 10-account.sh does, as 32-focus.sh has it do.
 # After the restart, the session comes back by itself (GDM signs the account in)
+if [[ "${SUITE_PHASE}" == 1 ]] && ! has_session; then
+    bash "$(dirname "$0")/10-account.sh" >/dev/null
+fi
 if ! wait_for 300 has_session; then
     skip "no session for ${TEST_USER} (10-account.sh)"
     finish
