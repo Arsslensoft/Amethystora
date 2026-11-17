@@ -432,10 +432,16 @@ if command -v pamtester >/dev/null; then
     # ...and in the account stage, for a service that starts a process with no auth step
     if pamtester sshd amethystora-guest acct_mgmt </dev/null >/dev/null 2>&1; then not_ok "G25 sshd's account stage let the guest in"; else ok "G25 sshd's account stage refuses the guest"; fi
 else
+    # system-auth refuses it in the auth, account and password stacks (passwd: no password of its own), password-auth in two
     for service in login sshd sudo; do
         if [[ "$(grep -c 'user != amethystora-guest' /etc/authselect/system-auth /etc/authselect/password-auth | paste -sd ' ')" == \
-            "/etc/authselect/system-auth:2 /etc/authselect/password-auth:2" ]]; then ok "G25 ${service}: the guest's refusal is in its PAM stack"; else not_ok "G25 ${service}: no refusal in PAM"; fi
+            "/etc/authselect/system-auth:3 /etc/authselect/password-auth:2" ]]; then ok "G25 ${service}: the guest's refusal is in its PAM stack"; else not_ok "G25 ${service}: no refusal in PAM"; fi
     done
+    if grep -qE '^password[[:space:]]+requisite[[:space:]]+pam_succeed_if\.so quiet user != amethystora-guest' /etc/authselect/system-auth; then
+        ok "G25 the guest cannot give itself a password"
+    else
+        not_ok "G25 passwd's stack lets the guest set a password"
+    fi
 fi
 grep -qx "DenyUsers amethystora-guest" /etc/ssh/sshd_config.d/60-amethystora-guest.conf && ok "G25 sshd denies the guest by name" || not_ok "G25 sshd does not deny the guest"
 # A session of the guest's own (systemd's user manager, as a login starts it): the home is a tmpfs, and a file written
