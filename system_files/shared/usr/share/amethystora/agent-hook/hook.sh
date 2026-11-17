@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# The shells follow the folder for the AI agent (ame agent hook, plans/PLAN-agent-accounts.md and PLAN-agent-sandbox.md):
+# The shells follow the folder for the AI agent (ame agent hook, plans/done/PLAN-agent-accounts.md and PLAN-agent-sandbox.md):
 # each time the folder changes, claude's and codex's own variables point at the folder's profile, the prompt says the
 # profile and whether the folder is sandboxed, and each agent's command typed here goes through amethystora-agent-tools
 # agent-run when the folder has a profile or a sandbox rule. A convenience, not a lock: `command claude` goes round it.

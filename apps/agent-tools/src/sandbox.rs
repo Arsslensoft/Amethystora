@@ -1,5 +1,5 @@
-//! An agent that can change its project and nothing else (plans/PLAN-agent-sandbox.md), and a profile's folders bound over
-//! the home's for the agents with no variable of their own (plans/PLAN-agent-accounts.md, way 2): one recipe, built here and
+//! An agent that can change its project and nothing else (plans/done/PLAN-agent-sandbox.md), and a profile's folders bound over
+//! the home's for the agents with no variable of their own (plans/done/PLAN-agent-accounts.md, way 2): one recipe, built here and
 //! nowhere else, printed by `ame agent sandbox show` and run by `amethystora-agent` exactly as printed.
 //!
 //! A sandbox starts from the whole machine and takes away: bubblewrap, with everything read-only, the project, the agent's

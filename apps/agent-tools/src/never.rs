@@ -51,8 +51,8 @@ const PATHS: &[&str] = &[
     // The backup to another computer and the recovery key (R7-35, R7-55): the keys, the pairing and the way back from nothing are the person's alone
     "amethystora-backup-secret", "amethystora-backup-recovery", "amethystora-backup-pair", "amethystora-backup-store", "amethystora-backup-other",
     "amethystora-start-from-backup", "backup-other/", "backup-store/",
-    // Which account of an agent a project goes through, and the sandbox that holds it (plans/PLAN-agent-accounts.md,
-    // plans/PLAN-agent-sandbox.md): the person's two maps, the profiles' folders and the shells' hook, in any spelling
+    // Which account of an agent a project goes through, and the sandbox that holds it (plans/done/PLAN-agent-accounts.md,
+    // plans/done/PLAN-agent-sandbox.md): the person's two maps, the profiles' folders and the shells' hook, in any spelling
     "agent-profiles.json", "agent-sandbox.json", "amethystora/agent-profiles", "amethystora/agent-hook",
 ];
 
@@ -316,7 +316,7 @@ fn ame_refusal(args: &[String]) -> Option<String> {
             Some("a routine runs by itself later: the agent writes one and checks it, and the user keeps it, runs it and takes it away".into())
         }
         // Which account pays for and sees a project is the person's choice: the agent may list the profiles, ask which one a
-        // folder gets and see what runs (plans/PLAN-agent-accounts.md)
+        // folder gets and see what runs (plans/done/PLAN-agent-accounts.md)
         ["agent", "profile", verb, ..] if !matches!(*verb, "list" | "which" | "running") => {
             Some("which of the agent's accounts a project goes through is the user's choice: the agent may only list them".into())
         }

@@ -1,5 +1,5 @@
 # The hosts an AI agent's sandbox may reach while its folder holds the network to a list (ame agent sandbox network FOLDER
-# list; plans/PLAN-agent-sandbox.md, "The network"): HTTPS only (port 443), by name, through the sandbox's proxy
+# list; plans/done/PLAN-agent-sandbox.md, "The network"): HTTPS only (port 443), by name, through the sandbox's proxy
 # (amethystora-agent-tools, sandbox.rs). One line each: AGENT HOST, AGENT - for every agent and for `ame agent sandbox run`.
 # A HOST is a name or *.name (its subdomains); never an address. A folder adds its own with ame agent sandbox allow FOLDER
 # network=HOST. The agents' own hosts are from their makers' documentation as remembered on 2026-11-16 (unverified with a

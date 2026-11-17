@@ -664,7 +664,7 @@ fn ask_again(question: &str) -> bool {
     std::io::stdin().read_line(&mut line).is_ok_and(|count| count > 0) && line.trim().is_empty()
 }
 
-// --- One protected file, several commands at once (plans/PLAN-agent-accounts.md, "A protected login, shared") -------------------
+// --- One protected file, several commands at once (plans/done/PLAN-agent-accounts.md, "A protected login, shared") -------------------
 //
 // `run --shared NAME -- COMMAND`, which amethystora-agent uses for an agent's login: the first command on a protected file makes
 // its private place as `run` does, and its keeper stays for as long as any command uses it. A later command finds the lock held,

@@ -209,7 +209,7 @@ pub fn checks_off(start: u32, config: &[String]) -> Option<String> {
     config.first().map(|finding| format!("an agent's own settings turn its checks off: {finding}"))
 }
 
-/// The reader's findings that concern an agent on PROFILE: the home's, and that profile's own (plans/PLAN-agent-accounts.md). A
+/// The reader's findings that concern an agent on PROFILE: the home's, and that profile's own (plans/done/PLAN-agent-accounts.md). A
 /// finding in another profile's folder (its text starts with the folder, as the reader says paths) is another account's
 pub fn for_profile(findings: Vec<String>, profile: Option<&str>) -> Vec<String> {
     const PROFILES: &str = "~/.local/share/amethystora/agent-profiles/";

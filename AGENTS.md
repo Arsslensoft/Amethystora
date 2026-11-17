@@ -442,7 +442,7 @@ agent cleaned and marked as data. Off costs nothing: no daemon, timer or service
   the maintainer's exception of 2026-10-18 to Security keeping every security setting, since they govern
   the agent, not a security feature.
 
-**Several accounts of one agent, and an agent held to its project** (`plans/PLAN-agent-accounts.md`, `plans/PLAN-agent-sandbox.md`;
+**Several accounts of one agent, and an agent held to its project** (`plans/done/PLAN-agent-accounts.md`, `plans/done/PLAN-agent-sandbox.md`;
 `ame agent profile`, `ame agent sandbox`, `ame agent hook`; manual `agent-profiles.md`, `agent-sandbox.md`). Where each agent keeps
 its folders, login, settings, program and a project's settings is one table, `/usr/share/amethystora/agent-paths` (its header says
 each kind of line), which the launcher, `apps/agent-tools` (`agents.rs`, `sandbox.rs`, `agentcli.rs`), the watcher's credential rules

@@ -117,7 +117,7 @@ dev_hooks() {
 # before opening it with an agent, as the manual says. Python reads them, isolated (-I), so that nothing of
 # the account's own Python, its .pth files included, runs inside it; and it parses, never runs, what it reads.
 #
-# Each profile of the agents (plans/PLAN-agent-accounts.md) is read as the home is: its folder has the home's layout, and a
+# Each profile of the agents (plans/done/PLAN-agent-accounts.md) is read as the home is: its folder has the home's layout, and a
 # finding names it by its path. A profile is never a place this does not look.
 agent_config() {
     local root

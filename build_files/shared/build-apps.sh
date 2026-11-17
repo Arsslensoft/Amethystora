@@ -94,7 +94,7 @@ cargo build --release --locked -p amethystora-move
 cargo build --release --locked -p amethystora-plugin-host
 gcc -Wall -O2 -o /tmp/seccomp-gen /tmp/apps/plugin-host/seccomp/gen.c -lseccomp
 /tmp/seccomp-gen /out/seccomp.bpf
-# An AI agent's sandbox (plans/PLAN-agent-sandbox.md): the same program, allowing the agent's own namespaces
+# An AI agent's sandbox (plans/done/PLAN-agent-sandbox.md): the same program, allowing the agent's own namespaces
 /tmp/seccomp-gen --agent /out/agent-sandbox.bpf
 # The Vault (plans/done/PLAN-vault.md): the service, its command line and the child that does its libcrypto work,
 # the PKCS#11 module pdfsig loads, and the network service that sync reaches a server through (no key, no state)

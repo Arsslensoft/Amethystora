@@ -1,6 +1,6 @@
 # Where each AI agent that amethystora-agent offers keeps its things, for profiles (several accounts of one agent) and
-# the sandbox (an agent that can change its project and nothing else): plans/PLAN-agent-accounts.md and
-# plans/PLAN-agent-sandbox.md. Read by amethystora-agent-tools (agents.rs, sandbox.rs), amethystora-agent (the logins),
+# the sandbox (an agent that can change its project and nothing else): plans/done/PLAN-agent-accounts.md and
+# plans/done/PLAN-agent-sandbox.md. Read by amethystora-agent-tools (agents.rs, sandbox.rs), amethystora-agent (the logins),
 # the security watcher's credential rules (amethystora-audit-home-rules) and 20-tests.sh, which holds every agent to the
 # launcher's AGENTS. One line each, words split by blanks: KIND AGENT PATH [MORE]. AGENT is - for a line of every agent.
 # A PATH is relative to the home (or to a profile's folder, which has the home's layout), never with ..

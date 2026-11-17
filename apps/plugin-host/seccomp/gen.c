@@ -1,5 +1,5 @@
 /* The seccomp filters of a plugin's sandbox (plans/done/PLAN-plugins.md, "The sandbox") and of an AI agent's
- * (plans/PLAN-agent-sandbox.md), written as the BPF program bubblewrap's --seccomp takes. build-apps.sh compiles this with
+ * (plans/done/PLAN-agent-sandbox.md), written as the BPF program bubblewrap's --seccomp takes. build-apps.sh compiles this with
  * libseccomp, runs it once for each, and 13-apps.sh installs the results as /usr/share/amethystora/plugins/seccomp.bpf and
  * /usr/share/amethystora/agent-sandbox.bpf. Everything is allowed but what the sandbox's programs never need and an escape
  * would: a system call listed here fails with EPERM, so a program that tries gets an error and goes on.

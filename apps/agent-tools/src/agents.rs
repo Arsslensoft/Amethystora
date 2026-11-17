@@ -1,4 +1,4 @@
-//! Where each AI agent keeps its things, and the account's profiles of them (plans/PLAN-agent-accounts.md): several
+//! Where each AI agent keeps its things, and the account's profiles of them (plans/done/PLAN-agent-accounts.md): several
 //! accounts of one agent side by side, each in a folder of its own with the home's layout, picked when a launch starts and
 //! belonging to that launch alone. Nothing here says which profile is "the current one": a running agent's profile is in its
 //! environment or its own mount namespace, and the next launch works its own out again.

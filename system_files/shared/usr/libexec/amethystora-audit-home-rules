@@ -288,7 +288,7 @@ wanted decoy && DECOY=true
 # Where secrets are kept in a home, each a glob: SSH's keys, the package registries', git's, GitHub's, the
 # clouds', the browsers' passwords and cookies (their Flatpaks' too), and the AI agents' tokens. One list with an agent's
 # sandbox, which hides each of them (/usr/share/amethystora/credential-files); and each agent's login inside every agent
-# profile, whose folder has the home's layout (plans/PLAN-agent-accounts.md): a profile is never a place this does not look.
+# profile, whose folder has the home's layout (plans/done/PLAN-agent-accounts.md): a profile is never a place this does not look.
 mapfile -t CREDENTIAL_FILES < <(grep -v -e '^#' -e '^[[:space:]]*$' /usr/share/amethystora/credential-files)
 mapfile -t -O "${#CREDENTIAL_FILES[@]}" CREDENTIAL_FILES < <(awk '$1 == "login" { print ".local/share/amethystora/agent-profiles/*/" $3 }' \
     /usr/share/amethystora/agent-paths)

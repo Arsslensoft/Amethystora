@@ -510,7 +510,7 @@ read_exec() {
 # one in the Nx attack, and recorded when one did, which is most likely its user. One line for each agent,
 # flag and starter in a run, however often. Allowed by what started it, or by the agent itself.
 #
-# An agent in an AI agent's sandbox (plans/PLAN-agent-sandbox.md) with its checks off is held to its project: that is what
+# An agent in an AI agent's sandbox (plans/done/PLAN-agent-sandbox.md) with its checks off is held to its project: that is what
 # many developers want a sandbox for, so it is recorded, not said, and the finding says it was sandboxed. While an
 # administrator has every agent started in a project sandboxed (SANDBOX=always in /etc/amethystora/agent.conf), an agent
 # that runs in a project outside one is said: the launcher and the shells' hook hold to the setting, but an agent is a file

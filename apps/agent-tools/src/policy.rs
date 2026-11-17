@@ -9,7 +9,7 @@
 //!   ALLOW=act|know|off          the most any account may turn on
 //!   ALLOW_FOR=account:level     that account's own ceiling instead, one line each
 //!   ROOT=session|minutes|each|terminal
-//!   SANDBOX=always|asked        always: every agent started in a project is sandboxed (plans/PLAN-agent-sandbox.md)
+//!   SANDBOX=always|asked        always: every agent started in a project is sandboxed (plans/done/PLAN-agent-sandbox.md)
 //!
 //! The file is read here, by the tool server, the launcher (`amethystora-agent policy`, which runs this) and
 //! the root helper, which runs as root and trusts nothing its caller says. A value it cannot read counts as

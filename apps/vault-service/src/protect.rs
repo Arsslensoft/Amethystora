@@ -1582,7 +1582,7 @@ mod tests {
             eprintln!("AMETHYSTORA_ROOT is not set: the watcher's list was not compared");
             return;
         };
-        // The watcher's list, one with an agent's sandbox's (plans/PLAN-agent-sandbox.md), less the browsers' cookies and passwords
+        // The watcher's list, one with an agent's sandbox's (plans/done/PLAN-agent-sandbox.md), less the browsers' cookies and passwords
         let list = std::fs::read_to_string(Path::new(&root).join("usr/share/amethystora/credential-files")).unwrap();
         let theirs: Vec<&str> = list
             .lines()

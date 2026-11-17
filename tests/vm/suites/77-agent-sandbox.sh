@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# Several accounts of one agent (plans/PLAN-agent-accounts.md) and an agent held to its project (plans/PLAN-agent-sandbox.md),
+# Several accounts of one agent (plans/done/PLAN-agent-accounts.md) and an agent held to its project (plans/done/PLAN-agent-sandbox.md),
 # as the test account, with a stand-in agent that tries each thing and prints what happened. One phase:
 #   - the sandbox: the project, a cache and its own folder writable; the home, .git's hooks and settings and its own settings
 #     not; ~/.ssh empty; no bus, no runtime folder, no other process; sudo refused; TIOCSTI refused; a nested namespace

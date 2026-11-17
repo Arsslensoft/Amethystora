@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# Profiles and the sandbox of the AI agents (plans/PLAN-agent-accounts.md, plans/PLAN-agent-sandbox.md), against a stand-in
+# Profiles and the sandbox of the AI agents (plans/done/PLAN-agent-accounts.md, plans/done/PLAN-agent-sandbox.md), against a stand-in
 # home, from 20-tests.sh. Nothing here runs bubblewrap, which the image's build may not give namespaces: the recipe is held to
 # what it says (`sandbox show --json`, the same function `agent-run` runs), and tests/vm/suites/77-agent-sandbox.sh runs it.
 set -euo pipefail

@@ -93,7 +93,7 @@ ASK_PICTURE_BYTES=5242880
 CHANGE_TOOLS=(change software run undo plugin)
 
 # Where each agent keeps its folders and its login is one table, which the watcher's credential rules and the sandbox read
-# too (plans/PLAN-agent-accounts.md): a login the account protected in the vault (ame vault protect) is given to the agent for
+# too (plans/done/PLAN-agent-accounts.md): a login the account protected in the vault (ame vault protect) is given to the agent for
 # its session alone, through ame vault run. Copilot CLI keeps its login in the keyring, so it has none there.
 PATHS=/usr/share/amethystora/agent-paths
 # Folders and files of each agent's that the skills and the tools' entry are put in, for a profile's copy of them
@@ -237,7 +237,7 @@ launch() {
     fi
     # The machine's assistant (a diagnosis, a finding, a question about the screen) works from the home, as it always
     # has. An agent opened in a terminal works where it was opened, which picks its profile and its sandbox
-    # (plans/PLAN-agent-accounts.md, plans/PLAN-agent-sandbox.md)
+    # (plans/done/PLAN-agent-accounts.md, plans/done/PLAN-agent-sandbox.md)
     [[ -z ${DIAGNOSING:-}${FROM_HOME:-} ]] || cd "${HOME}"
     if [[ " ${AGENTS[*]} " == *" ${name} "* ]]; then
         [[ -z ${AMETHYSTORA_AGENT_CHOOSE:-} ]] || choose_profile "${name}"

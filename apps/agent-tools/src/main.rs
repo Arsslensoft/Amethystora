@@ -184,7 +184,7 @@ fn main() -> ExitCode {
             let args = rest.first().map(|id| json!({"id": id, "wait": 0})).unwrap_or(json!({}));
             say(Server::default().call("history", &args))
         }
-        // Profiles and the sandbox (plans/PLAN-agent-accounts.md, plans/PLAN-agent-sandbox.md): a launch, what it would get, and
+        // Profiles and the sandbox (plans/done/PLAN-agent-accounts.md, plans/done/PLAN-agent-sandbox.md): a launch, what it would get, and
         // the account's two maps
         "agent-run" => ExitCode::from(amethystora_agent_tools::sandbox::agent_run(rest).clamp(0, 255) as u8),
         "net-shim" => ExitCode::from(amethystora_agent_tools::sandbox::net_shim(rest).clamp(0, 255) as u8),
