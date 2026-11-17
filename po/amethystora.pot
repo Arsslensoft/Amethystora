@@ -5678,11 +5678,6 @@ msgid "Sites in a window of their own, with a launcher in the app grid."
 msgstr ""
 
 #: usr/libexec/amethystora-control-list
-#, sh-format
-msgid "${word}"
-msgstr ""
-
-#: usr/libexec/amethystora-control-list
 msgid "In it:"
 msgstr ""
 
