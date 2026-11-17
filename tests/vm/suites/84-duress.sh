@@ -196,6 +196,10 @@ mkdir -p /run/systemd/system/fprintd.service.d
 printf '[Service]\nEnvironment=FP_VIRTUAL_DEVICE_STORAGE=%s\nExecStart=\nExecStart=/usr/libexec/fprintd --no-timeout\n' "${READER}" \
     >/run/systemd/system/fprintd.service.d/vmlab.conf
 systemctl daemon-reload
+# The reader starts empty: a print another suite's reader left on disk for the account names nothing on this one, and
+# fprintd refuses to enroll over a print it cannot delete from the reader
+systemctl stop fprintd.service 2>/dev/null
+rm -rf "/var/lib/fprint/${TEST_USER}"
 systemctl restart fprintd.service
 # enroll FINGER ID: as the account would, scanning until fprintd says it is done
 enroll() {

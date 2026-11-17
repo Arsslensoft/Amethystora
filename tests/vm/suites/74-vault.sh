@@ -416,6 +416,8 @@ fingerprint_off() {
     rm -f /run/systemd/system/fprintd.service.d/vmlab-vault.conf "${WORK}/vmlab-fprintd-reader.cil"
     systemctl daemon-reload
     systemctl stop fprintd.service 2>/dev/null
+    # What the delete left on disk when the reader no longer held the print: the next reader (suite 84's) starts empty
+    rm -rf "/var/lib/fprint/${TEST_USER}"
     if semodule -l 2>/dev/null | grep -qx vmlab-fprintd-reader; then semodule -r vmlab-fprintd-reader; fi
     rm -f "${READER}"
 }
