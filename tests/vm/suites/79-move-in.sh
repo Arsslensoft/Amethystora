@@ -52,7 +52,7 @@ if [[ ! -b "${DISK}" ]]; then
 fi
 
 # The list the Control window reads, as the window runs it
-entry() { as_tester systemd-run --user --pipe --wait --quiet --collect -- /usr/libexec/amethystora-control-list --json 2>/dev/null </dev/null |
+entry() { user_bus /usr/libexec/amethystora-control-list --json 2>/dev/null </dev/null |
     jq -c '.items[] | select(.id == "move-in")'; }
 umount "${DISK}"* 2>/dev/null
 wipefs -a "${DISK}" >/dev/null 2>&1
@@ -157,7 +157,8 @@ holds "what was copied is the account's own" test "$(stat -c %U "${HOME_DIR}/Doc
 
 # --- 3. Again, and in steps ------------------------------------------------------------------------------------------------------------------
 echo "edited here" >"${HOME_DIR}/Documents/letters/a.txt"
-AGAIN="$(in_terminal 300 -- "${AS_TESTER[@]}" "amethystora-move-in copy '${PART}' '${TEST_USER}' --json" 2>&1 | grep '^{' | tail -n 1)"
+AGAIN="$(user_bus "${HELPER}" copy "${PART}" "${TEST_USER}" --json 2>/tmp/vmlab-79-again.err </dev/null)"
+[[ -n "${AGAIN}" ]] || sed 's/^/# /' /tmp/vmlab-79-again.err
 same "a second run copies nothing" "$(jq -r '.copied' <<<"${AGAIN}" 2>/dev/null)" 0
 holds "what was edited here is not copied again" test "$(cat "${HOME_DIR}/Documents/letters/a.txt")" = "edited here"
 holds "no second copy beside the first" test "$(find "${HOME_DIR}/Documents" -name 'report*' | wc -l)" = 2

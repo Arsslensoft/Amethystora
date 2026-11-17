@@ -76,7 +76,9 @@ const USB_DEVICES = {
   keyboard: { driver: 'usb-kbd', port: '3' },
   stick2: { driver: 'usb-storage', serial: 'VMLAB-STICK-2', port: '4' },
   // An FTDI serial adapter (0403:6001, ttyUSB0 in the guest), its other end nowhere (78-lab-devices.sh)
-  serial: { driver: 'usb-serial', chardev: true, port: '5' },
+  // It is a full-speed device, which the controller takes on its first four ports only (5 to 8 are USB 3), so it has the
+  // second stick's port: no suite plugs both
+  serial: { driver: 'usb-serial', chardev: true, port: '4' },
 };
 // The lab's disk passphrase, and the PIN a suite enrols the TPM with, both handed to systemd-cryptsetup as
 // credentials so that nobody has to type them (next_boot can have one typed instead). The PIN goes under both of

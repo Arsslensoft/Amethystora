@@ -15,7 +15,7 @@ IMAGES=/usr/share/amethystora/gpu-compute/images.json
 wait_for 300 has_session || { not_ok "the test account has a session"; finish; }
 
 # --- The images it would run -----------------------------------------------------------------------------------------------
-if jq -e '[.[] | .image] | all(test("^[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$")) and ([.[] | .size_mb] | all(. < 3000))' "${IMAGES}" >/dev/null; then
+if jq -e '([.[] | .image] | all(test("^[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$"))) and ([.[] | .size_mb] | all(. < 3000))' "${IMAGES}" >/dev/null; then
     ok "the images are pinned by digest, each under 3 GB"
 else
     not_ok "the images are pinned by digest, each under 3 GB" "$(cat "${IMAGES}")"
@@ -35,7 +35,7 @@ done | sort -u | tr '\n' ' ')"
 BEFORE="$(user_bus podman images -q 2>/dev/null | sort | md5sum)"
 OUT="$(in_session ame dev gpu 2>&1)"
 STATUS=$?
-JSON="$(in_session ame dev gpu --json 2>&1)"
+JSON="$(in_session ame dev gpu --json 2>/dev/null)"
 if jq -e '(.ok | type) == "boolean" and (.cards | type) == "array" and (.vendors | type) == "array"' <<<"${JSON}" >/dev/null; then
     ok "the answer for a program is JSON: ${CARDS:-no cards}"
 else

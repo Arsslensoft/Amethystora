@@ -57,7 +57,7 @@ else
 fi
 
 # --- Control's Kits group ----------------------------------------------------------------------------------------
-list="$(in_session "amethystora-control-list --json" 2>/dev/null)"
+list="$(user_bus /usr/libexec/amethystora-control-list --json 2>/dev/null)"
 problems="$(
     jq -e '[.items[] | select(.id == "kits" and .kind == "rows" and .page == "apps" and .group != null and .manual == "kits")] | length == 1' \
         <<<"${list}" >/dev/null 2>&1 || echo "no Kits card on the Apps page"

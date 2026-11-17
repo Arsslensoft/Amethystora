@@ -83,9 +83,9 @@ if [[ "${SUITE_PHASE}" == 2 ]]; then
     same "the key is lock" "$("${CONFIG}" PULL_KEY)" lock
     check "the rule is written" test -f "${RULES}"
     same "it is the vendor and the product in hexadecimal, not the serial number" \
-        "$(sed -n 2p "${RULES}" | grep -oE 'ENV\{PRODUCT\}=="[0-9a-f]+/[0-9a-f]+/\*"')" \
+        "$(grep -v '^#' "${RULES}" | grep -oE 'ENV\{PRODUCT\}=="[0-9a-f]+/[0-9a-f]+/\*"')" \
         "ENV{PRODUCT}==\"$(printf '%x/%x' "0x$(cut -d: -f1 <<<"${ID}")" "0x$(cut -d: -f2 <<<"${ID}")")/*\""
-    ! grep -q VMLAB-STICK "${RULES}" && ok "the serial number is not in the rule" || not_ok "the serial number reached the rule"
+    ! grep -v '^#' "${RULES}" | grep -q VMLAB-STICK && ok "the serial number is not in the rule" || not_ok "the serial number reached the rule"
     check "udev takes the rule" udevadm verify "${RULES}"
     check "the watcher accepts it as written" bash -c "eval \"\$(sed -n '/^pull_key_rule_as_written() {\$/,/^}\$/p' /usr/libexec/amethystora-security-watch)\"; pull_key_rule_as_written ${RULES}"
     same "the report says it is on" "$(record pull-key | jq -r .state)" on
