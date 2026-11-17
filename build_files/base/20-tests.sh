@@ -5406,7 +5406,7 @@ if grep -qE '^(PrivateTmp|PrivateNetwork|ProtectKernelTunables|RestrictRealtime|
     echo "${DL_SANDBOX} takes away what the manager needs (the suspend hook's /tmp, netlink, evdi's /sys, its priority, /proc/cpuinfo)"
     exit 1
 fi
-systemctl cat displaylink.service | grep -qx "StartLimitBurst=10"
+grep -qx "StartLimitBurst=10" <<<"$(systemctl cat displaylink.service)"
 grep -qE '^CapabilityBoundingSet=~(.* )?CAP_SYS_MODULE( |$)' "${DL_SANDBOX}"
 grep -q "^d /var/log/displaylink " /usr/lib/tmpfiles.d/displaylink.conf
 # DisplayLinkManager is proprietary. Its licence lets it be redistributed unmodified, and only with
