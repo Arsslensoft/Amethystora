@@ -71,7 +71,14 @@ enabled="$(user_bus gsettings get org.gnome.shell enabled-extensions)"
 if [[ ${enabled} != *vmlab-eval@lab* ]]; then
     user_bus gsettings set org.gnome.shell enabled-extensions "${enabled%]*}, 'vmlab-eval@lab']"
     loginctl unlock-sessions
+    # GNOME Shell keeps this marker for its first minute and turns every extension off when a shell starts while it
+    # is there: a restart that soon after the boot of the suite before would leave Amethystora UI off
+    rm -f "/run/user/$(id -u "${TEST_USER}")/gnome-shell-disable-extensions"
     systemctl restart gdm
+fi
+if wait_for 240 has_session && [[ "$(user_bus gsettings get org.gnome.shell disable-user-extensions 2>/dev/null)" == true ]]; then
+    echo "# a suite before this one left every extension off (GNOME Shell crashed): turned back on"
+    user_bus gsettings set org.gnome.shell disable-user-extensions false
 fi
 ready() { [[ "$(ev "typeof ${MODULE}?.get('captions')")" == object ]]; }
 if ! wait_for 240 has_session || ! wait_for 120 ready; then
