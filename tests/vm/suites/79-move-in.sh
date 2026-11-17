@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# Move in from Windows (amethystora-move-in, plans/everybody/PLAN-move-in.md), on the machine as a person would use it. The lab's first spare disk,
+# Move in from Windows (amethystora-move-in, plans/done/PLAN-move-in.md), on the machine as a person would use it. The lab's first spare disk,
 # SPARE-1 (8 GiB), is made into a Windows disk: a GPT partition of Microsoft's basic data type with an NTFS file system on it, holding Windows/System32,
 # two accounts, folders and a OneDrive folder, and (where ntfs-3g is in the image) left not cleanly unmounted, as a disk Windows hibernated is.
 #

@@ -256,7 +256,7 @@ from an unchecked download. Its daemon runs from the image's own user unit,
 `amethystora-opentabletdriver.service`, which nothing enables for every account.
 
 **Will it run?** (`ame apps will-it-run NAME`, `/usr/libexec/amethystora-will-it-run [--json] NAME | --stdin | --id ID`, the search's `game:`, the Windows programs
-map's `game` field; `plans/everybody/PLAN-will-it-run.md`). The answer comes from a trimmed copy of Are We Anti-Cheat Yet?'s `games.json` at one pinned commit
+map's `game` field; `plans/done/PLAN-will-it-run.md`). The answer comes from a trimmed copy of Are We Anti-Cheat Yet?'s `games.json` at one pinned commit
 (`usr/share/amethystora/anticheat-list.json`, made by `build_files/shared/trim-anticheat-list.mjs`; MIT, Copyright 2021 Starz0r and Curve, which the file holds and
 which ships in `usr/share/licenses/areweanticheatyet` with the commit and SHA-256 sums in `SOURCE`, named in `NOTICE`; the repository's licence names no other for
 the data). Only id, name, state, anti-cheats and the day of the last change are kept. Nothing is looked up on the network, so there is no `amethystora-sends` row;
@@ -2161,7 +2161,7 @@ and the like share the PE type and are said not to be programs.
 
 ### Moving in from Windows
 
-`ame system move-in` (`/usr/libexec/amethystora-move-in`, Python, run as the user; `plans/everybody/PLAN-move-in.md`, manual page `move-in.md`) copies a Windows account's
+`ame system move-in` (`/usr/libexec/amethystora-move-in`, Python, run as the user; `plans/done/PLAN-move-in.md`, manual page `move-in.md`) copies a Windows account's
 Documents, Pictures, Music, Videos and Desktop into the same folders here, from the Windows partition of this computer (dual boot) or a disk plugged in. `find [--offer]`, `look PART`
 and `copy PART ACCOUNT [--folders ID,ID] [--yes]` are its steps, each with `--json`; with no argument it walks a person through in a terminal. `amethystora-bring-over` is its sibling for another computer's plugged-in disk (any OS, files without the `(from Windows)` beside rule). **The disk is only read**: `candidates()` (lsblk) is the only list of what may be
 opened (NTFS or BitLocker, not this system's own mount, not a pool, not a recovery or System Reserved partition), the one mount is `udisksctl mount -o ro,noexec,nosuid,nodev` (whichever

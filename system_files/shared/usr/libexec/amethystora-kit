@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# `ame apps kit`: the apps for a line of work, picked once and installed in one go (plans/everybody/PLAN-kits.md).
+# `ame apps kit`: the apps for a line of work, picked once and installed in one go (plans/done/PLAN-kits.md).
 #
 #   amethystora-kit list [--json]       the kits, and how much of each is here
 #   amethystora-kit show KIT [--json]   what a kit holds, each app with the reason it is there

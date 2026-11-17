@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# Kits (ame apps kit, plans/everybody/PLAN-kits.md) on a machine as a person has it: the seven kits the image names, what
+# Kits (ame apps kit, plans/done/PLAN-kits.md) on a machine as a person has it: the seven kits the image names, what
 # `ame apps kit list` and `show` say, Control's Kits group (a row for each kit, whose Show and Add are `ame apps kit` in a
 # terminal), and one small kit of the suite's own (a single app from Flathub, which the first Flatpak suite proved reachable)
 # added through the setup file's own question, found complete the second time, and taken away app by app, the app's data

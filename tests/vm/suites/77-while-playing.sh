@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 # vmlab-vm: while-playing
-# While you play (plans/everybody/PLAN-while-you-play.md), in the test account's session, asked of GNOME Shell itself through
+# While you play (plans/done/PLAN-while-you-play.md), in the test account's session, asked of GNOME Shell itself through
 # Eval, which a lab-only extension of the test account opens (never in the image). GameMode's daemon is stood in for on the
 # session bus (gamemodestandin.py: its name, ClientCount, GameRegistered and GameUnregistered), and UPower on the system bus
 # (upower-standin.py: on the battery until SIGUSR1 plugs it in), since the lab has no battery:
