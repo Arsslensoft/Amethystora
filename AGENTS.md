@@ -309,6 +309,11 @@ with Universal Blue's key, which `ame security secure-boot` enrolls; `20-tests.s
   state is the finding's id (`displaylink:needs-enrollment`, `enrollment-pending`, `lockdown`,
   `sealed-no-secure-boot`, `service`, `refused`), said again only when the state changes, and it offers enrolling
   only with Secure Boot on, since without it lockdown refuses every key but the kernel's (`test-driver-status.sh`).
+- **DisplayLinkManager is sandboxed** (`displaylink.service.d/20-amethystora-sandbox.conf`, the maintainer's choice of
+  2026-11-17 over a switch): any USB device can claim vendor `17e9`, and the closed manager parses it as root. The
+  sandbox was drawn from what the package and the program name and tried without a dock: keep `/tmp` shared (the
+  suspend hook's FIFOs), the host's network namespace (libusb's netlink), `/sys` writable (evdi) and real-time
+  scheduling, which `20-tests.sh` holds. Its `modprobe` condition runs outside it (`+`). Not tried with a real dock.
 - **FireWire** is a switch of its own (`ame security firewire`), its modules in
   `usr/lib/modprobe.d/61-amethystora-firewire.conf`, apart from the blocked modules.
 - **Lockdown** stays as the gaps plan left it (the maintainer's choice of 2026-10-07, over this plan's of

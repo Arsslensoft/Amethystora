@@ -5393,7 +5393,21 @@ if systemctl is-enabled -q displaylink.service; then
 fi
 # Skipped, not restarted every five seconds, where evdi cannot load (Secure Boot without the key enrolled)
 grep -qx "ExecStartPre=" /usr/lib/systemd/system/displaylink.service.d/10-amethystora.conf
-grep -qx "ExecCondition=/usr/sbin/modprobe evdi" /usr/lib/systemd/system/displaylink.service.d/10-amethystora.conf
+grep -qxF "ExecCondition=+/usr/sbin/modprobe evdi" /usr/lib/systemd/system/displaylink.service.d/10-amethystora.conf
+# Any USB device can claim DisplayLink's vendor id and have the closed manager parse it as root: it runs sandboxed,
+# with /tmp shared (the suspend hook's FIFOs) and the host's network namespace (libusb's netlink), never crashing in
+# a loop for good, and without the module and kernel settings it could otherwise reach
+DL_SANDBOX=/usr/lib/systemd/system/displaylink.service.d/20-amethystora-sandbox.conf
+for line in NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes ProtectKernelModules=yes \
+    "ReadOnlyPaths=/proc/sys /proc/sysrq-trigger -/sys/kernel/uevent_helper" SystemCallFilter=@system-service IPAddressDeny=any; do
+    grep -qxF "${line}" "${DL_SANDBOX}" || { echo "${DL_SANDBOX} lacks ${line}"; exit 1; }
+done
+if grep -qE '^(PrivateTmp|PrivateNetwork|ProtectKernelTunables|RestrictRealtime|ProcSubset)=' "${DL_SANDBOX}"; then
+    echo "${DL_SANDBOX} takes away what the manager needs (the suspend hook's /tmp, netlink, evdi's /sys, its priority, /proc/cpuinfo)"
+    exit 1
+fi
+systemctl cat displaylink.service | grep -qx "StartLimitBurst=10"
+grep -qE '^CapabilityBoundingSet=~(.* )?CAP_SYS_MODULE( |$)' "${DL_SANDBOX}"
 grep -q "^d /var/log/displaylink " /usr/lib/tmpfiles.d/displaylink.conf
 # DisplayLinkManager is proprietary. Its licence lets it be redistributed unmodified, and only with
 # the licence itself beside it

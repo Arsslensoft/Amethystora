@@ -50,6 +50,11 @@ which starts when the dock is plugged in.
   failed.
 - **With Secure Boot off,** the key cannot help: `ame system drivers` says what stands in the way on this
   machine, and what to run.
+- **With the driver loaded,** the dock's program runs in a sandbox, since any USB device can claim to be a
+  DisplayLink dock. It was drawn without a dock to try it on: if the screens stay dark, `sudo ln -s /dev/null
+  /etc/systemd/system/displaylink.service.d/20-amethystora-sandbox.conf`, `sudo systemctl daemon-reload` and
+  plug the dock in again. If that helps, report it with `journalctl -u displaylink.service`, and remove the link
+  afterwards.
 
 ## Switching keyboard layouts
 
