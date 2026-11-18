@@ -273,6 +273,10 @@ for domain in local_login_t sshd_session_t; do
 done
 sesearch -T -s sshd_session_t -t user_home_dir_t -c file "${POLICY}" >/tmp/transitions
 grep -qx "type_transition sshd_session_t user_home_dir_t:file auth_home_t;" /tmp/transitions
+# libsystemd's check of the socket clamd@scan.socket hands clamd asks pidfs's attributes (amethystora-clamd.cil)
+semodule -i /usr/share/selinux/packages/amethystora-clamd.cil
+POLICY="$(echo /etc/selinux/targeted/policy/policy.*)"
+[[ -n "$(sesearch -A -s antivirus_t -t pidfs_t -c filesystem -p getattr "${POLICY}")" ]]
 rm /tmp/transitions
 # ...which are the domains the two programs run in
 [[ "$(matchpathcon -n /usr/bin/login)" == *:login_exec_t:* ]]

@@ -4,7 +4,7 @@
 # Security app's clamdscan --fdpass, the quarantine's rescan, a package file's standard input, and the reload.
 # The signatures are one the suite writes itself for the test string, beside whatever freshclam has fetched, and
 # are taken away at the end. A scan that finds nothing with the sandbox on is the failure this suite is for.
-# vmlab-paths: @sf/usr/lib/systemd/system/clamd@* @sf/usr/libexec/amethystora-clamav-scan @sf/usr/libexec/amethystora-quarantine
+# vmlab-paths: @sf/usr/lib/systemd/system/clamd@* @sf/usr/share/selinux/packages/amethystora-clamd.cil @sf/usr/libexec/amethystora-clamav-scan @sf/usr/libexec/amethystora-quarantine
 source "$(dirname "$0")/lib.sh"
 
 HOME_DIR="/var/home/${TEST_USER}"
@@ -40,12 +40,19 @@ chmod 0600 "${FILES[0]}"
 printf 'nothing here\n' >"${HOME_DIR}/Downloads/vmlab-clean"
 chown "${TEST_USER}:" "${HOME_DIR}/Downloads/vmlab-clean"
 systemctl stop clamd@scan.service
+denials() { grep -s 'type=AVC.*scontext=system_u:system_r:antivirus_t' /var/log/audit/audit.log; }
+denials_before="$(denials | wc -l)"
 
 # Started by its socket, the first call waits for the signatures to load
 found() { grep -q ": ${SIGNATURE} FOUND$" <<<"$1"; }
 out="$(timeout 300 clamdscan --fdpass --no-summary "${FILES[1]}" 2>&1)"
 found "${out}" && ok "clamd, started by its socket under its sandbox, finds the test file" ||
     not_ok "clamd under its sandbox did not find the test file" "${out}" "$(journalctl -b -u clamd@scan.service --no-pager -o cat | tail -n 12)"
+# libsystemd's check of the socket it was handed asked pidfs's attributes, which the policy refused (amethystora-clamd.cil)
+journalctl -b -u clamd@scan.service --no-pager -o cat | grep -q "LOCAL: Received AF_UNIX SOCK_STREAM socket from systemd" &&
+    ok "clamd took the socket systemd handed it" || not_ok "clamd did not take its socket from systemd"
+new="$(denials | tail -n +"$((denials_before + 1))")"
+[[ -z "${new}" ]] && ok "clamd started and scanned without an SELinux denial" || not_ok "SELinux refused clamd something" "${new}"
 
 # The sandbox is the one the drop-in says, on the process that scanned
 pid="$(systemctl show -P MainPID clamd@scan.service)"
