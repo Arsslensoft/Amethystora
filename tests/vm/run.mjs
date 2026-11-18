@@ -387,10 +387,18 @@ async function reboot(machine) {
   for (let tries = 0; await sessionExpected(vm) && !(await session(vm, 240)); tries++) {
     if (tries === 2) throw new Error('the test account got no session after three boots');
     say(`${lane(m)}no session after this boot: powering the VM off and on again`);
-    // What PID 1 and plymouthd wait on, which the power cycle loses: the evidence for the stall
-    fs.writeFileSync(`${RUN}/stalled-boot-${m.lane ? `${vm}-` : ''}${tries + 1}.txt`, await guest(vm, 'cat /proc/1/stack; ' +
+    // What PID 1 and plymouthd wait on, which the power cycle loses: the evidence for the stall. The journal is
+    // written to disk first (journald keeps it in memory for minutes), so that the next boot's `journalctl -b -1`
+    // still has the whole boot; and what GDM, logind and AccountsService said, which is where a session goes missing
+    fs.writeFileSync(`${RUN}/stalled-boot-${m.lane ? `${vm}-` : ''}${tries + 1}.txt`, await guest(vm, 'journalctl --sync; ' +
+      'cat /proc/1/stack; ' +
       'for p in $(pidof plymouthd); do echo "plymouthd $p $(grep ^State /proc/$p/status)"; cat /proc/$p/stack; done; ' +
-      'journalctl -b -o short-monotonic --no-pager _PID=1 | grep -v " audit" | tail -n 15', 60));
+      'journalctl -b -o short-monotonic --no-pager _PID=1 | grep -v " audit" | tail -n 15; echo "== sessions"; ' +
+      'loginctl list-sessions --no-legend; loginctl show-user tester 2>&1 | grep -E "^(State|Sessions|Display)="; ' +
+      'echo "== GDM, logind, AccountsService"; journalctl -b -o short-monotonic --no-pager -u gdm -u systemd-logind ' +
+      '-u accounts-daemon | grep -v " audit" | tail -n 40; echo "== the sessions and shells"; journalctl -b -o short-monotonic ' +
+      '--no-pager _COMM=gdm-session-wor _COMM=gnome-shell _COMM=gnome-session-s | tail -n 40; ' +
+      'echo "== failed and still starting"; systemctl list-units --no-legend --state=failed --state=activating', 60));
     await call('vm_stop', { name: vm, force: true });
     await start(machine, request ? { ...request, type_passphrase: false } : {});
     await call('vm_wait', { name: vm, timeout_s: 900 });
