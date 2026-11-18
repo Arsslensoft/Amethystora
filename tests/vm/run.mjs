@@ -314,9 +314,30 @@ async function typePassphrase(vm) {
   prompts.set(vm, asked());
 }
 
+// Until flatpak-preinstall has ended, an hour at most, said in the log when it had not. A start taken with the first
+// boot's Flatpaks half in installs the rest while GNOME starts, and the account's shell then registers so slowly that
+// GDM puts its greeter in front: the boot after suite 30's first phase came up with no session in 4 runs of 2026-11.
+// The Flatpaks are asked about in short calls: the guest's helper answers one caller at a time
+async function flatpaksIn(m, retries = false) {
+  // Installing; one waiting to try again (no network: a suite's own doing) installs nothing meanwhile, and only the
+  // ready state waits for it, so as not to be kept with apps missing
+  const running = retries ? /^(running|start|start-pre|start-post|auto-restart|auto-restart-queued)$/ : /^(running|start|start-pre|start-post)$/;
+  const now = await guest(m.vm, 'systemctl show -P SubState flatpak-preinstall.service', 20);
+  if (now && !running.test(now)) return;
+  const began = Date.now();
+  for (const until = Date.now() + 3600000; Date.now() < until; await sleep(15000)) {
+    // Its sub-state: it stays active (exited) once done. No answer is no answer, not the end
+    const state = await guest(m.vm, 'systemctl show -P SubState flatpak-preinstall.service', 20);
+    if (state && !running.test(state)) break;
+  }
+  say(`${lane(m)}flatpak-preinstall ${await guest(m.vm, 'systemctl show -P ActiveState,SubState flatpak-preinstall.service | paste -sd/', 20)} after ${minutes(began)}; ` +
+    `${await guest(m.vm, 'flatpak list --app --columns=application | wc -l', 30)} apps`);
+}
+
 async function reboot(machine) {
   const m = machineOf(machine);
   const { vm } = m;
+  await flatpaksIn(m);
   // A power cycle, when the phase asked for one
   let request = null;
   try {
@@ -658,14 +679,7 @@ function printPlan(p) {
 // Flatpaks are asked about in short calls: the guest's helper answers one caller at a time.
 async function readyState(m) {
   say(`${lane(m)}waiting for the first boot's Flatpaks (flatpak-preinstall) before keeping the ready state`);
-  const began = Date.now();
-  for (const until = Date.now() + 3600000; Date.now() < until; await sleep(15000)) {
-    // Its sub-state: it stays active (exited) once done. No answer is no answer, not the end
-    const state = await guest(m.vm, 'systemctl show -P SubState flatpak-preinstall.service', 20);
-    if (state && !/^(running|start|start-pre|start-post|auto-restart|auto-restart-queued)$/.test(state)) break;
-  }
-  say(`${lane(m)}flatpak-preinstall ${await guest(m.vm, 'systemctl show -P ActiveState,SubState flatpak-preinstall.service | paste -sd/', 20)} after ${minutes(began)}; ` +
-    `${await guest(m.vm, 'flatpak list --app --columns=application | wc -l', 30)} apps`);
+  await flatpaksIn(m, true);
   await agent(m.vm, { op: 'exec', command: '(sleep 1; systemctl poweroff) >/dev/null 2>&1 &' }, 30).catch(() => {});
   const off = new RegExp(`^${m.vm}: stopped`, 'm');
   for (const until = Date.now() + 300000; !off.test((await call('vm_list')).content[0].text); await sleep(2000)) {
