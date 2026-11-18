@@ -267,9 +267,14 @@ grep -qE '^5432 +127.0.0.1 +container amethystora-dev-postgres, the service post
 grep -qE '^3000 +127.0.0.1 +node +~/code/shop$' <<<"${TEXT}" || fail "ports names the project folder: ${TEXT}"
 grep -qE '^22 +every address +another account, or the system$' <<<"${TEXT}" || fail "ports says another account: ${TEXT}"
 grep -q $'\033' <<<"${TEXT}" && fail "a container's name reached the terminal with a control character"
-# podman not answering is no reason to say nothing
+# podman not answering is no reason to say nothing. Not the image's own podman further down PATH either: run as the build's
+# root, it made its database in /var/lib/containers/storage, which the rechunker moves into the read-only store the live
+# ISO pulls into, and podman refused that pull. The stand-in's tools beside the stand-ins, and nothing else on PATH
 rm -f "${ROOT}/bin/podman"
-"${HELPER}" ports --json | jq -e 'length == 5' >/dev/null || fail "ports with no podman"
+for tool in basename cat; do
+    ln -sf "$(command -v "${tool}")" "${ROOT}/bin/${tool}"
+done
+PATH="${ROOT}/bin" "${HELPER}" ports --json | jq -e 'length == 5' >/dev/null || fail "ports with no podman"
 ln -s stand-in "${ROOT}/bin/podman"
 
 # --- the rest ------------------------------------------------------------------------------------------------------------

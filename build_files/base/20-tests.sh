@@ -5921,5 +5921,10 @@ if [[ -e /var/lib ]]; then
         { echo "/var/lib is $(stat -c '%a %U %G' /var/lib); the rechunker would give /usr/lib that mode"; exit 1; }
 fi
 [[ "$(stat -c '%a %U %G' /usr/lib)" == "755 root root" ]]
+# ...and no podman state of the build's: the same copy puts it into /usr/lib/containers/storage, the read-only image store,
+# where the live ISO's pull then meets a database that names another store and stops (a test that ran the real podman)
+for db in /var/lib/containers/storage/db.sql /var/lib/containers/storage/libpod/bolt_state.db; do
+    [[ ! -e "${db}" ]] || { echo "${db}: something in this build ran podman as root"; exit 1; }
+done
 
 echo "::endgroup::"
