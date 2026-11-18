@@ -1229,10 +1229,11 @@ fn unsigned_pdf() -> Vec<u8> {
 
 /// The module the image ships, with the socket behind it: built by `cargo build -p amethystora-vault-pkcs11`. Not the one built with
 /// `test-backend` (the module's own tests rebuild the same file), which asks a folder for its keys and would list none.
+/// The cdylib is in the profile's folder (target/release), above the test program: one up from deps/ in cargo's old layout,
+/// four up from build/CRATE/HASH/out/ in the build-dir layout of cargo 1.100
 fn module() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let deps = exe.parent()?;
-    [deps.to_path_buf(), deps.parent()?.to_path_buf()].into_iter().map(|folder| folder.join("libamethystora_vault_pkcs11.so")).find(|path| std::fs::read(path).is_ok_and(|bytes| !bytes.windows(TEST_BACKEND.len()).any(|window| window == TEST_BACKEND)))
+    exe.ancestors().skip(1).take(5).map(|folder| folder.join("libamethystora_vault_pkcs11.so")).find(|path| std::fs::read(path).is_ok_and(|bytes| !bytes.windows(TEST_BACKEND.len()).any(|window| window == TEST_BACKEND)))
 }
 
 const TEST_BACKEND: &[u8] = b"AMETHYSTORA_VAULT_PKCS11_TEST";

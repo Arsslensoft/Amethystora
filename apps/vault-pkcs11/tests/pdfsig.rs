@@ -21,10 +21,10 @@ fn attempt(command: &mut Command) -> (bool, String) {
 }
 
 fn module() -> PathBuf {
-    // deps/pdfsig-HASH -> the target folder that has the cdylib
+    // The profile's folder (target/release) has the cdylib: one up from deps/pdfsig-HASH in cargo's old layout, four up from
+    // build/CRATE/HASH/out/pdfsig-HASH in the build-dir layout of cargo 1.100
     let exe = std::env::current_exe().unwrap();
-    let deps = exe.parent().unwrap();
-    for folder in [deps.to_path_buf(), deps.parent().unwrap().to_path_buf()] {
+    for folder in exe.ancestors().skip(1).take(5) {
         let path = folder.join("libamethystora_vault_pkcs11.so");
         if path.exists() {
             return path;
