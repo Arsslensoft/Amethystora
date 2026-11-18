@@ -156,13 +156,18 @@ mentions "Fix: sudo systemctl start nvidia-cdi-refresh.service" "no CDI descript
 lacks podman "no CDI description"
 # Without nvidia-ctk it looks for the file the refresh service writes, in /run/cdi (where /var/run/cdi leads) or /etc/cdi
 rm -f "${R}/bin/nvidia-ctk"
+# ...and none further down PATH: the NVIDIA images ship /usr/bin/nvidia-ctk, which lists nothing in a build. The stand-in's tools
+# beside the stand-ins, and nothing else on PATH
+for tool in basename cat touch; do
+    ln -sf "$(command -v "${tool}")" "${R}/bin/${tool}"
+done
 reset
 nvidia_machine
-go
+PATH="${R}/bin" go
 mentions "CDI description podman needs" "no nvidia-ctk and no file"
 mkdir -p "${R}/root/run/cdi"
 echo 'cdiVersion: 0.5.0' >"${R}/root/run/cdi/nvidia.yaml"
-go
+PATH="${R}/bin" go
 lacks "podman run" "the file only, no image yet"
 mentions "The CDI description for podman is there" "the file in /run/cdi"
 ln -s stand-in "${R}/bin/nvidia-ctk"
