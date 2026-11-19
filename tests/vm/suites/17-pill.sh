@@ -102,6 +102,12 @@ if ! wait_for 240 has_session || ! wait_for 120 pill_ready; then
     not_ok "the pill module did not start in the session"
     finish
 fi
+# While the first start's Flatpaks install, the pill rightly says so (pill/apps.js, 16b), and every step before 16b
+# expects it idle: the install ends first, and its Ready after it
+preinstall_done() { [[ "$(systemctl show -P SubState flatpak-preinstall.service)" != running ]]; }
+wait_for 1800 preinstall_done || not_ok "flatpak-preinstall.service still runs after 30 min" "$(systemctl status flatpak-preinstall.service --no-pager 2>&1 | tail -n 5)"
+no_apps_shown() { [[ "$(st .apps.view)" == null ]]; }
+wait_for 30 no_apps_shown || not_ok "the pill still says the apps install" "$(st .apps)"
 sleep 8
 ev "Main.overview.hide(); 'hidden'" >/dev/null
 # The account's own units write their logs here
@@ -250,7 +256,8 @@ left1="$(st .timer.left)"
 sleep 3
 left2="$(st .timer.left)"
 if ((left1 - left2 >= 2 && left1 - left2 <= 4)); then ok "5 it counts down"; else not_ok "5 it counts down" "${left1} then ${left2}"; fi
-keys "click:$(where "${PILL_ACTOR}")"
+# On the pill's own plate: the middle of the date menu can be the music's bubble beside it, whose card has a Pause too
+keys "click:$(where "${P}.clock.actor._plate")"
 for button in "+1 min" Pause Cancel; do
     check "5 the timer's card has ${button}" user_bus python3 "${HERE}/atspi.py" gnome-shell has "${button}"
 done
