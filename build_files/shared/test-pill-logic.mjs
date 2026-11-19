@@ -10,6 +10,7 @@ const {readTimer} = await import(`${UI}/search/timer.js`);
 const {HOLD_LONGEST, LONGEST, QUIET, agedOut, fractionOf, givesWay, listenToMoving, partialName, reportMoving} = await import(`${UI}/pill/movinglist.js`);
 const {albumColour, barsOf, contrast, plateTint} = await import(`${UI}/pill/tint.js`);
 const {CAP_SECONDS, lines, makeQueue, plan, underCap} = await import(`${UI}/power/playingdata.js`);
+const {appsOf, settled, viewOf} = await import(`${UI}/pill/appslist.js`);
 
 const say = globalThis.print ?? console.log;
 const failures = [];
@@ -55,7 +56,7 @@ same('a mark is passed over for what happens', list('timer', 'focus', 'media').s
 same('the others stay what they were', list('timer', 'media', 'update', 'focus', 'quiet').others.map(a => a.id), ['media', 'update', 'quiet']);
 for (const [first, then] of [['call', 'recording'], ['recording', 'present'], ['present', 'meeting'], ['meeting', 'link'],
     ['link', 'code'], ['code', 'battery'], ['waiting', 'drop'], ['drop', 'hello'], ['hello', 'stick'], ['stick', 'reading'], ['timer', 'timer2'],
-    ['media', 'moving'], ['moving', 'update'], ['through', 'playing'], ['playing', 'chargeby'], ['focus', null]]) {
+    ['news', 'apps'], ['apps', 'media'], ['media', 'moving'], ['moving', 'update'], ['through', 'playing'], ['playing', 'chargeby'], ['focus', null]]) {
     // What the sturdy group adds (a flat battery's 'flat', right after a call and a recording) is not in these pairs
     const order = ORDER.filter(id => id !== 'flat');
     const at = order.indexOf(first);
@@ -251,6 +252,36 @@ same('no battery says nothing', givesWay(0, 0), false);
     if (!(bars[0] > 0.5 && bars[1] < 0.2 && bars[3] < 0.2))
         failures.push(`each bar is its own quarter: ${bars}`);
 }
+
+// --- The apps the computer comes with, while they install (pill/apps.js) -------------------------------------------
+same('a list names its apps, not its runtimes', appsOf(`# comment
+[Flatpak Preinstall org.gnome.Calculator]
+Branch=stable
+IsRuntime=false
+
+[Flatpak Preinstall org.gtk.Gtk3theme.adw-gtk3]
+Branch=3.22
+IsRuntime=true
+
+[Flatpak Preinstall  not an id]
+[Flatpak Preinstall org.gnome.Maps]
+Branch = stable
+[Flatpak Preinstall org.example.Gone]
+Install=false
+`), ['org.gnome.Calculator', 'org.gnome.Maps']);
+same('a list with Windows line ends reads the same', appsOf('[Flatpak Preinstall org.gnome.Weather]\r\nIsRuntime=false\r\n'), ['org.gnome.Weather']);
+same('running: installing', viewOf({sub: 'running', done: 3, total: 38, said: false}), 'installing');
+same('starting: installing', viewOf({sub: 'start', done: 0, total: 38, said: false}), 'installing');
+same('waiting to try again: waiting', viewOf({sub: 'auto-restart', done: 3, total: 38, said: true}), 'waiting');
+same('not started yet: nothing said', viewOf({sub: 'dead', done: 0, total: 38, said: false}), null);
+same('done, and nothing missing: nothing said at a login', viewOf({sub: 'exited', done: 38, total: 38, said: false}), null);
+same('...and ready once the install was seen', viewOf({sub: 'exited', done: 38, total: 38, said: true}), 'ready');
+same('no list: nothing', viewOf({sub: 'running', done: 0, total: 0, said: false}), null);
+same('one the person uninstalled stays out: the unit done settles it', settled({sub: 'exited', fileState: 'enabled', done: 37, total: 38}), true);
+same('not started yet, enabled: followed', settled({sub: 'dead', fileState: 'enabled', done: 0, total: 38}), false);
+same('disabled (the live ISO): settled', settled({sub: 'dead', fileState: 'disabled', done: 0, total: 38}), true);
+same('masked: settled', settled({sub: 'dead', fileState: 'masked', done: 0, total: 38}), true);
+same('waiting to try again: followed', settled({sub: 'auto-restart', fileState: 'enabled', done: 3, total: 38}), false);
 
 // --- R7-23: a code in a text is found by the phone link's program (apps/connect/src/codes.rs, cargo test), never by the shell ----
 // Here only that this module's own sums no longer hold a rule that reads a text: the shell is told the digits alone

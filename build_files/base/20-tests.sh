@@ -864,7 +864,7 @@ done
 # The live bars are off until a GPU shows they cost under 1% of a core (R7-PILL-41); only the maintainer turns them on
 [[ "$(GSETTINGS_BACKEND=memory gsettings get "${PILL}" music-bars)" == false ]]
 env LD_LIBRARY_PATH=/apps-stage/usr/lib64 NODE_ICU_DATA="$(echo /apps-stage/usr/share/node-*/icudata)" /apps-stage/usr/bin/node /ctx/build_files/shared/test-pill-logic.mjs
-PILL_R7=(spring ring banners moving movinglist subscribe hello drop tint levels code)
+PILL_R7=(spring ring banners moving movinglist subscribe hello drop tint levels code apps appslist)
 for file in "${PILL_R7[@]}"; do
     test -s "${UI_EXTENSION}/modules/pill/${file}.js"
     if grep -nE "[a-z]_sync\(|file_get_contents|file_test|query_exists|communicate_utf8\(|\.spawn_sync|wait_check\(" "${UI_EXTENSION}/modules/pill/${file}.js"; then

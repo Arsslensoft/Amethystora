@@ -29,7 +29,8 @@ for viruses too ([Security](viruses.md#scanning-for-viruses)).
 ## 3. Install your apps
 
 The apps Amethystora comes with (Calculator, Text Editor, Extension Manager and the rest) install by
-themselves the first time the machine is online, and appear in the app grid as each one finishes.
+themselves the first time the machine is online, and appear in the app grid as each one finishes. The
+[pill](pill.md#what-the-pill-shows) at the top says how many are in, and when they are ready.
 `ame apps flatpaks` installs them at once. Uninstall any you do not want; they stay uninstalled.
 
 Then open **Bazaar**, the software centre, and install what you use from Flathub. The browser is Firefox;

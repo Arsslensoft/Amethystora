@@ -176,13 +176,16 @@ function keeperLook() {
 }
 
 export class Moving {
-    // awake: whether stay-awake is on now; capture: says whether the screen is recorded or shared
-    constructor(activities, {capture, connect, flatpaks, awake}) {
+    // awake: whether stay-awake is on now; capture: says whether the screen is recorded or shared; covered: whether the
+    // Flatpak pulls are the first install's, as pill/apps.js says, so that they are left out of what this says (and still
+    // kept awake for)
+    constructor(activities, {capture, connect, flatpaks, awake, covered}) {
         this._activities = activities;
         this._capture = capture;
         this._connect = connect;
         this._flatpaks = flatpaks;
         this._awake = awake;
+        this._covered = covered;
         this.id = 'moving';
         this.plate = '';
     }
@@ -547,7 +550,7 @@ export class Moving {
     }
 
     get _fraction() {
-        return this._items ? fractionOf(this._items.values()) : null;
+        return this._items ? fractionOf(this.items) : null;
     }
 
     get _percent() {
@@ -557,22 +560,23 @@ export class Moving {
 
     // A name only while nobody else is watching the screen
     get text() {
-        const count = this._items?.size ?? 0;
+        const items = this.items;
+        const count = items.length;
         const percent = this._percent;
         let words;
         if (count === 1 && !this._capture?.active)
-            words = this.shownName([...this._items.values()][0]);
+            words = this.shownName(items[0]);
         else
             words = ngettext('%d moving', '%d moving', count).format(count);
         return percent ? `${words} · ${percent}` : words;
     }
 
     get short() {
-        return this._percent || `${this._items?.size ?? 0}`;
+        return this._percent || `${this.items.length}`;
     }
 
     get accessible() {
-        const count = this._items?.size ?? 0;
+        const count = this.items.length;
         return ngettext('%d thing moving', '%d things moving', count).format(count);
     }
 
@@ -612,7 +616,8 @@ export class Moving {
         if (!this._items)
             return;
         this._shownAt = mono();
-        if (this._items.size === 0) {
+        // Nothing moving, or only what the first install's activity says
+        if (this.items.length === 0) {
             this._end();
             return;
         }
@@ -644,8 +649,16 @@ export class Moving {
         return card;
     }
 
+    // What it says: everything moving, less the Flatpak pulls while the first install's activity covers them
     get items() {
-        return [...this._items?.values() ?? []];
+        const all = [...this._items?.values() ?? []];
+        return this._covered?.() ? all.filter(item => item.kind !== 'flatpak') : all;
+    }
+
+    // The first install's activity came or went: what this says changes with it
+    refresh() {
+        if (this._items)
+            this._show();
     }
 
     // What the card says of one, in words

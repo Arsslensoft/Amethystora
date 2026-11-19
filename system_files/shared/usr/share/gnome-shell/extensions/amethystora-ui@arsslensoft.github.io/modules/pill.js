@@ -30,6 +30,7 @@ import {Hello} from './pill/hello.js';
 import {Hold} from './pill/hold.js';
 import {Media} from './pill/media.js';
 import {Meetings} from './pill/meeting.js';
+import {FirstApps} from './pill/apps.js';
 import {Moving, releaseKeeper} from './pill/moving.js';
 import {Osd} from './pill/osd.js';
 import {Phone} from './pill/phone.js';
@@ -221,6 +222,7 @@ export class Pill {
             connect: this._ext.modules?.get('connect') ?? null,
             flatpaks: () => this._ext.modules?.get('dock')?.flatpakUpdating ?? [],
             awake: () => this._settings?.get_boolean('stay-awake') ?? false,
+            covered: () => this._apps?.covers ?? false,
         }));
         // What held on through a lock has nobody to go to when moving is off, and the pill's own part gives it back by itself
         if (!this._moving)
@@ -476,6 +478,11 @@ export class Pill {
             ['_timer', () => this._newTimer(0)],
             ['_recording', () => new Recording(this._activities, notice, this._capture, reduce)],
             ['_update', () => new Update(this._activities)],
+            // The apps the computer comes with, while they install: what moving says of the Flatpak pulls goes with it
+            ['_apps', () => new FirstApps(this._activities, {
+                awake: () => this._moving?.awake ?? false,
+                changed: () => this._moving?.refresh(),
+            })],
             ['_news', () => new News(this._activities, this._settings)],
             ['_resume', () => new ResumeCard(this._activities, () => this._ext.modules?.get('workspaces')?.resume ?? null)],
             ['_putaway', () => new PutAwayCards(this._activities, () => this._ext.modules?.get('workspaces')?.putAway ?? null,
@@ -739,6 +746,7 @@ export class Pill {
             timer: {running: this._timer?.running ?? false, paused: this._timer?.paused ?? false, left: Math.round(this._timer?.left ?? 0)},
             timer2: {running: this._timer2?.running ?? false, left: Math.round(this._timer2?.left ?? 0)},
             moving: this._moving?.state() ?? null,
+            apps: this._apps?.state() ?? null,
             paused: this._media?.paused === true,
             meeting: this._meetings?.state() ?? null,
             relayouts: this._clock?.relayouts ?? 0,

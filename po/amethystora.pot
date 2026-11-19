@@ -19778,6 +19778,58 @@ msgstr ""
 msgid "Received in all"
 msgstr ""
 
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Installing your apps · %d of %d"
+msgid_plural "Installing your apps · %d of %d"
+msgstr[0] ""
+msgstr[1] ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Your apps try again soon"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Your apps wait for the internet"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Your apps are ready"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Show the apps"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Installing your apps"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "The apps Amethystora comes with are on their way from Flathub: %d of %d is in. Each shows in the app grid as it arrives, and you can use the computer meanwhile."
+msgid_plural "The apps Amethystora comes with are on their way from Flathub: %d of %d are in. Each shows in the app grid as it arrives, and you can use the computer meanwhile."
+msgstr[0] ""
+msgstr[1] ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Waiting for the internet"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "The last try did not finish. It starts again by itself, less often each time: there is nothing to do."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "The apps Amethystora comes with install from Flathub as soon as the computer is online. Connect to a network in the top bar's menu."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Everything Amethystora comes with is installed."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "The screen can go dark. The computer stays awake until they are in, then sleeps as usual."
+msgstr ""
+
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/battery.js usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/battery.js
 msgid "%s left"
 msgstr ""

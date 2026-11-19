@@ -10,6 +10,7 @@
 #   - sharing (Mutter's screen cast), the microphone, the camera and the location in the dots;
 #   - a link and a call from a stand-in phone, through the phone link's listeners;
 #   - an update staged as suite 89 stages one, never by hand;
+#   - the apps the computer comes with, while they install, through stand-ins for the unit, a list and a deploy;
 #   - the battery's view, live off and on, and ten disables and enables that leave nothing behind.
 # The lab draws without a GPU, where GNOME turns animations off by itself: the motion steps force them on
 # (global.force_animations) and put the switch back.
@@ -110,8 +111,10 @@ FORCED="$(ev "global.force_animations")"
 # Whatever happens, the suites after this one find GNOME's animations and reduced motion as they were, and nothing
 # staged by step 16 is left for the next start
 STAGED_HERE=""
+APPS_HERE=""
 cleanup() {
     ev "global.force_animations = ${FORCED:-false}; 'restored'" >/dev/null 2>&1
+    [[ -z "${APPS_HERE}" ]] || apps_cleanup
     gs reset org.gnome.desktop.a11y.interface reduced-motion
     if [[ -n "${STAGED_HERE}" ]]; then
         rpm-ostree cleanup --pending >/dev/null 2>&1
@@ -507,6 +510,66 @@ rw ostree refs --repo="${REPO}" --delete vmlab/pill >/dev/null 2>&1
 rm -rf "${TREE}"
 systemctl start uupd.timer 2>/dev/null
 STAGED_HERE=""
+
+# --- 16b: the apps the computer comes with, while they install ------------------------------------------------------
+# Without the network: one more app on a list, a stand-in for the preinstall unit (sleeping, then failing), and a stand-in
+# deploy, so that the activity goes through installing, waiting and ready as on a new computer
+LIST=/etc/flatpak/preinstall.d/zz-vmlab.preinstall
+DROPIN=/run/systemd/system/flatpak-preinstall.service.d/vmlab.conf
+FAKE=/var/lib/flatpak/app/org.vmlab.NotThere
+apps_cleanup() {
+    rm -rf "${FAKE}" "${LIST}" "${DROPIN}"
+    systemctl daemon-reload
+    # The real unit again, as the other suites find it: done, nothing to do
+    systemctl restart flatpak-preinstall.service 2>/dev/null
+    preinstall_done() { [[ "$(systemctl show -P SubState flatpak-preinstall.service)" != running ]]; }
+    wait_for 300 preinstall_done
+}
+APPS_HERE=1
+stand_in() {
+    install -d "${DROPIN%/*}"
+    printf '[Service]\nExecStart=\nExecStart=%s\nRestartSec=60\n' "$1" >"${DROPIN}"
+    systemctl daemon-reload
+    systemctl restart flatpak-preinstall.service 2>/dev/null
+}
+install -d "${LIST%/*}"
+printf '[Flatpak Preinstall org.vmlab.NotThere]\nBranch=stable\nIsRuntime=false\n' >"${LIST}"
+stand_in '/usr/bin/sleep 600'
+# The part reads the lists as it starts
+gs set "${PILL}" live false
+sleep 1
+gs set "${PILL}" live true
+wait_for 30 pill_ready
+view_is() { [[ "$(st .apps.view)" == "\"$1\"" ]]; }
+if wait_for 15 view_is installing; then
+    ok "16b the pill says the apps are installing"
+    total="$(st .apps.total)"
+    same "16b ...all but the one on the stand-in list are in" "$(st .apps.done)" "$((total - 1))"
+    same "16b ...in its words" "$(st .text)" "\"Installing your apps · $((total - 1)) of ${total}\""
+    if [[ "$(st .moving)" != null ]]; then
+        ev "${P}._moving.reportForTest('flatpak', 'org.vmlab.NotThere', {}); 'ok'" >/dev/null
+        sleep 2
+        same "16b moving keeps the Flatpak pull, and says nothing of it" "$(st .moving.count) $(st .moving.kinds)" "1 []"
+        ev "${P}._moving.reportForTest('flatpak', 'org.vmlab.NotThere', null); 'ok'" >/dev/null
+    fi
+else
+    not_ok "16b the pill says the apps are installing" "found: $(st .apps)" "unit: $(systemctl show -P SubState flatpak-preinstall.service)"
+fi
+stand_in /usr/bin/false
+check "16b a try that fails: the apps wait" wait_for 20 view_is waiting
+waiting_words="$(st .text)"
+[[ "${waiting_words}" == '"Your apps try again soon"' || "${waiting_words}" == '"Your apps wait for the internet"' ]] &&
+    ok "16b ...in its words" || not_ok "16b ...in its words" "found: ${waiting_words}"
+install -d "${FAKE}/x86_64/stable/active"
+ln -s x86_64/stable "${FAKE}/current"
+touch /var/lib/flatpak/.changed
+check "16b the last one in: ready" wait_for 10 view_is ready
+same "16b ...in its words" "$(st .text)" '"Your apps are ready"'
+same "16b ...and nothing is followed any more" "$(st .apps.following)" false
+no_apps() { [[ "$(st .apps.view)" == null ]] && ! activity_is apps; }
+check "16b it goes after ten seconds" wait_for 20 no_apps
+apps_cleanup
+APPS_HERE=""
 
 # --- 17-19: the battery, live off, ten disables and enables ------------------------------------------------------------
 keys "move:$(where "Main.panel.statusArea.quickSettings._system")"

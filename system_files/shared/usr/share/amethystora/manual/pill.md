@@ -28,6 +28,9 @@ The first of these that is happening shows in the pill, and the second [beside i
 - **An update ready**: **Ready · quick restart** when it can finish without restarting the computer, else **Ready ·
   restart**. **Restart now** opens [System Updates](updates.md#updating-now), which asks before it restarts anything;
   **Tonight** puts it out of sight until 8 in the evening.
+- **Your apps, on a new computer**: the apps Amethystora comes with install from Flathub the first time it is online.
+  The pill says how many are in (**Installing your apps · 12 of 38**), that they **wait for the internet** while there
+  is none, and **Your apps are ready** once they are. You can use the computer meanwhile.
 - **Updated**, once, the first time you log in after an update: what it brought, and
   [What's new](updates.md#whats-new) in the Manual.
 - **A meeting about to start**: see [Meetings in the pill](#meetings-in-the-pill).
