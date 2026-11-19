@@ -121,8 +121,16 @@ same "9 no sky is left in the shell's top group" \
 # and no tip may show
 shows_welcome() { atspi gnome-shell has "Take Tour"; }
 welcome_gone() { ! atspi gnome-shell has "Take Tour"; }
+greeting_gone() { [[ "$(ev "${UI}.get('hello').state")" != showing ]]; }
 if wait_for 60 shows_welcome; then
     sleep 2
+    # Seen through the greeting's dim, the dialog stood behind the words and was taken for the thing to close
+    if ! greeting_gone; then
+        same "11 GNOME's welcome dialog is unseen under the greeting" "$(ev 'Main.layoutManager.modalDialogGroup.opacity')" 0
+        keys esc
+        wait_for 5 greeting_gone
+        same "11 it comes back as the greeting ends" "$(ev 'Main.layoutManager.modalDialogGroup.opacity')" 255
+    fi
     keys esc
     wait_for 10 welcome_gone || keys esc
     wait_for 20 welcome_gone || not_ok "GNOME's welcome dialog did not close with Escape"

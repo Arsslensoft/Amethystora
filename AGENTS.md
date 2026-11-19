@@ -1687,7 +1687,8 @@ The modules, and what each replaced:
 - `hello` (`greet`, on; `plans/ui-ideas/r7/spec-first.md`), after `firstlook`: a new account's first login says hello in each language Amethystora
   speaks, then goes on. A layer of the shell in `uiGroup`, never a window, so that it changes nothing the first look relies on: it holds the
   keyboard with `pushModal` as a modal dialog does (`SYSTEM_MODAL`), which firstlook's `_free()` already waits for, over GNOME's welcome dialog, and any key,
-  click or touch gives it back at once. Who is greeted is the hook's own rule (a home under a day old, no `first-look.json`) with its plain mark `hello.json`.
+  click or touch gives it back at once. The dialogs already open under it (`modalDialogGroup`) are unseen until it ends: through the dim, GNOME's
+  welcome stood behind the words and was taken for the thing to close. Who is greeted is the hook's own rule (a home under a day old, no `first-look.json`) with its plain mark `hello.json`.
   The words are pen strokes written in `branding/hello.mjs` (`node branding/hello.mjs`), each a picture of three measures, when the pen gets here, ink and
   glow, read by one small shader whose one uniform a frame sets; add a language there and in the module's `WORDS`, and `test-hello.mjs` holds them to `po/`.
   Reduced motion stands the words still together (loaded small, at 405x189: five pictures stay under the 2 MB a module may hold; each effect lets go of its picture

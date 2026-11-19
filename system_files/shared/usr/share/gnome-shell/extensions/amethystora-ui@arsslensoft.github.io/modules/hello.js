@@ -5,7 +5,8 @@
 // It is the shell's own layer rather than a window, so that it changes nothing the first look relies on: no window opens,
 // no focus moves, and no token is asked for. Pick a look (modules/firstlook.js) waits for it as it waits for any modal
 // dialog: while this holds the keyboard the desktop is not free, and giving it back moves the key focus, which is
-// what firstlook listens for. GNOME's welcome dialog, opened when the session has started, is simply under it until then.
+// what firstlook listens for. GNOME's welcome dialog, opened when the session has started, is under it until then, and
+// unseen: through the dim it stood right behind the words, where a person took it for the thing to close.
 //
 // Who is greeted is decided once a session, as user-setup.hooks.d/25-first-look.sh decides who gets Pick a look: a home
 // folder less than a day old with no first-look.json. The mark hello.json is written as the greeting opens, and holds
@@ -335,6 +336,10 @@ export class Hello {
     _build(monitor, still) {
         // Every key and click goes on, whichever it is; the button is there to be seen, and for a screen reader
         this._grab = Main.pushModal(this._overlay, {actionMode: Shell.ActionMode.SYSTEM_MODAL});
+        // The dialogs already open under it (GNOME's welcome of a first login) wait unseen, and come back as it ends
+        this._under = Main.layoutManager.modalDialogGroup;
+        this._underOpacity = this._under.opacity;
+        this._under.opacity = 0;
         this._overlay.connect('captured-event', (actor, event) => {
             const type = event.type();
             if (type === Clutter.EventType.KEY_PRESS || type === Clutter.EventType.BUTTON_PRESS ||
@@ -483,6 +488,10 @@ export class Hello {
         if (this._grab) {
             Main.popModal(this._grab);
             this._grab = null;
+        }
+        if (this._under) {
+            this._under.opacity = this._underOpacity;
+            this._under = null;
         }
         const overlay = this._overlay;
         this._overlay = null;
