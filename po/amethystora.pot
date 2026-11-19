@@ -21002,7 +21002,7 @@ msgid "of %s, rings at %s"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
-msgid "Ready · quick restart"
+msgid "Ready · soft reboot"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
@@ -21014,11 +21014,15 @@ msgid "A new version is ready"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
-msgid "A quick restart: the system's programs restart, the computer does not. Save your work first."
+msgid "A soft reboot finishes it: your apps close and the login screen is back in a few seconds, on the new version. The computer itself does not restart. Save your work first."
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
 msgid "The computer restarts to finish it. Save your work first."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
+msgid "Soft reboot"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js

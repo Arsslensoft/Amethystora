@@ -25,9 +25,11 @@ The first of these that is happening shows in the pill, and the second [beside i
 - **A link from your phone**, shown and never opened by itself: **Open in browser**, **Copy**, or **Not now**, which
   leaves it in the notification list. A name in another alphabet is shown in its plain form (`xn--…`), so a
   look-alike cannot pass for the site it imitates.
-- **An update ready**: **Ready · quick restart** when it can finish without restarting the computer, else **Ready ·
-  restart**. **Restart now** opens [System Updates](updates.md#updating-now), which asks before it restarts anything;
-  **Tonight** puts it out of sight until 8 in the evening.
+- **An update ready**: **Ready · soft reboot** when it can finish without restarting the computer
+  ([restarting in seconds](restarting.md#restarting-in-seconds)), else **Ready · restart**. **Soft reboot** closes your
+  apps and brings the login screen back in a few seconds, on the new version; **Restart now** opens GNOME's restart
+  dialog, which it does for a soft reboot too while an app asks not to end the session. **Tonight** puts it out of
+  sight until 8 in the evening.
 - **Your apps, on a new computer**: the apps Amethystora comes with install from Flathub the first time it is online.
   The pill says how many are in (**Installing your apps · 12 of 38**), that they **wait for the internet** while there
   is none, and **Your apps are ready** once they are. You can use the computer meanwhile.

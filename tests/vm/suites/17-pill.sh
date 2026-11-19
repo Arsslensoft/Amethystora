@@ -497,16 +497,32 @@ elif rm -rf "${TREE}" && mkdir -p "${TREE}/usr/share" && echo vmlab >"${TREE}/us
     update() { activity_is update; }
     check "16 the pill says an update is ready within 10 s" wait_for 10 update
     # The pill says Ready · restart until the soft reboot's helper, asked through pkexec, answers
-    quick_word() { [[ "$(st .text)" == '"Ready · quick restart"' ]]; }
-    if wait_for 20 quick_word; then ok "16 ...a quick one"; else
-        not_ok "16 ...a quick one" "found: $(st .text)" "the helper: $(/usr/libexec/amethystora-soft-reboot status 2>&1)"
+    quick_word() { [[ "$(st .text)" == '"Ready · soft reboot"' ]]; }
+    if wait_for 20 quick_word; then ok "16 ...a soft reboot"; else
+        not_ok "16 ...a soft reboot" "found: $(st .text)" "the helper: $(/usr/libexec/amethystora-soft-reboot status 2>&1)"
     fi
+    # Soft reboot runs the helper's restart from the pill. An app asking not to end the session makes the helper turn it
+    # down (exit 3, before it mounts anything; suite 89 holds that), so the pill opens GNOME's restart dialog instead,
+    # which is cancelled here: nothing restarts
+    user_bus systemd-run --user --unit=vmlab-pill-inhibit --collect --quiet -- \
+        gnome-session-inhibit --inhibit logout --reason "vmlab: a document not saved" sleep 600
+    inhibits() { [[ "$(in_session 'gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsInhibited 1')" == "(true,)" ]]; }
+    wait_for 30 inhibits || not_ok "16 gnome-session does not say anything inhibits logging out"
     keys "click:$(where "${PILL_ACTOR}")"
-    shell_click "Restart now"
-    updates_open() { [[ "$(ev "global.get_window_actors().some(a => a.meta_window.get_wm_class() === 'org.amethystora.Updates')")" == true ]]; }
-    check "16 Restart now opens System Updates" wait_for 15 updates_open
+    if user_bus python3 "${HERE}/atspi.py" gnome-shell has "A soft reboot finishes it" >/dev/null 2>&1; then
+        ok "16 the card says it is a soft reboot"
+    else
+        not_ok "16 the card says it is a soft reboot" "$(user_bus python3 "${HERE}/atspi.py" gnome-shell text 2>&1 | head -n 20)"
+    fi
+    shell_click "Soft reboot"
+    dialog() { [[ "$(ev "Main.layoutManager.modalDialogGroup.get_children().some(c => c.visible)")" == true ]]; }
+    check "16 Soft reboot, with an app holding the session, opens GNOME's restart dialog" wait_for 30 dialog
+    shell_click Cancel
+    no_dialog() { ! dialog; }
+    check "16 ...which is cancelled" wait_for 10 no_dialog
+    user_systemctl stop vmlab-pill-inhibit.service 2>/dev/null
     check "16 ...and restarts nothing" test -f /run/ostree/staged-deployment
-    ev "global.get_window_actors().filter(a => a.meta_window.get_wm_class() === 'org.amethystora.Updates').forEach(a => a.meta_window.delete(global.get_current_time())); 'closed'" >/dev/null
+    check "16 ...nor leaves the update mounted for one" bash -c '! mountpoint -q /run/nextroot'
     rpm-ostree cleanup --pending >/dev/null 2>&1
     no_update() { ! activity_is update; }
     check "16 the activity goes with the staged update" wait_for 10 no_update

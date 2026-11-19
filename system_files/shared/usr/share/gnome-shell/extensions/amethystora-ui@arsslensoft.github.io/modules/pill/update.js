@@ -1,13 +1,13 @@
 // Update ready: a new version of the system is staged and waits for a restart. ostree says so with a file in
 // /run/ostree, which is watched (never polled); whether the restart can be a quick one is asked of the image's own
-// helper, once for each staged version. Restart now asks before it restarts anything: GNOME's restart dialog for a
-// full restart, System Updates for a quick one;
+// helper, once for each staged version. The card is the question: Soft reboot runs the helper's restart, which ends the
+// session and brings the login screen back on the new version, and Restart now opens GNOME's restart dialog (as does a
+// soft reboot the helper turns down, for an app that asks not to end the session or an update that no longer can);
 // Tonight puts it out of sight until eight in the evening.
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import {gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -187,7 +187,7 @@ export class Update {
     }
 
     get text() {
-        return this._quick ? _('Ready · quick restart') : _('Ready · restart');
+        return this._quick ? _('Ready · soft reboot') : _('Ready · restart');
     }
 
     get accessible() {
@@ -213,13 +213,12 @@ export class Update {
         return this._content;
     }
 
-    // A quick restart is asked about in System Updates. A full one is GNOME's own restart dialog, as System Updates
-    // shows it, after the open apps are kept: opening a window that was already open changed nothing on the screen
+    // A soft reboot is the helper's own restart, which keeps the open apps itself; when it turns the soft reboot down
+    // (1: the update needs the computer to start again after all, 3: an app asks not to end the session, which only
+    // GNOME's dialog lets it say), the restart is a full one
     async restart() {
-        if (this._quick) {
-            Shell.AppSystem.get_default().lookup_app('amethystora-update.desktop')?.activate();
+        if (this._quick && await this._softReboot())
             return;
-        }
         try {
             await callAsync('org.gnome.Shell', '/org/amethystora/UI/Resume', 'org.amethystora.UI.Resume', 'Save', 5000);
         } catch (e) {
@@ -230,6 +229,23 @@ export class Update {
         } catch (e) {
             console.warn(`Amethystora UI: GNOME's restart dialog did not open: ${e.message}`);
         }
+    }
+
+    // True when the soft reboot is under way, or was refused (4: logind said no), which a full restart would be too
+    async _softReboot() {
+        let status;
+        try {
+            const process = Gio.Subprocess.new([SOFT_REBOOT, 'restart'],
+                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_PIPE);
+            const [, err] = await process.communicate_utf8_async(null, null);
+            status = process.get_exit_status();
+            if (status !== 0)
+                console.warn(`Amethystora UI: no soft reboot (${status}): ${err?.trim()}`);
+        } catch (e) {
+            console.warn(`Amethystora UI: the soft reboot's helper did not start: ${e.message}`);
+            return false;
+        }
+        return status === 0 || status === 4;
     }
 
     // Out of sight until 20:00 today; from 20:00 on there is no such button
@@ -250,12 +266,12 @@ export class Update {
         const text = new St.Label({
             style_class: 'amethystora-pill-card-text',
             text: this._quick
-                ? _('A quick restart: the system\'s programs restart, the computer does not. Save your work first.')
+                ? _('A soft reboot finishes it: your apps close and the login screen is back in a few seconds, on the new version. The computer itself does not restart. Save your work first.')
                 : _('The computer restarts to finish it. Save your work first.'),
         });
         text.clutter_text.line_wrap = true;
         body.add_child(text);
-        const buttons = [cardButton(_('Restart now'), () => {
+        const buttons = [cardButton(this._quick ? _('Soft reboot') : _('Restart now'), () => {
             api.close();
             this.restart();
         }, {primary: true})];
