@@ -1373,6 +1373,8 @@ replaces, adds, opens and forgets them. Its plan, done and tested in the VM lab 
   `amethystora-raid root-luks`, never the first LUKS device on the machine, which may be a pool's. On
   an image that is not sealed it enrols the TPM only with a PIN: there the boot menu and initramfs are
   plain files, and a shell from the boot menu or a look-alike LUKS volume changes neither PCR 7 nor 14.
+  On a sealed image it binds PCR 12 as well (see Sealed images), and the PIN stays: no PCR measures the disk
+  the signed system starts from, so a look-alike disk with its own `/etc` would start it.
   systemd 262 hardens the PIN with Argon2id and takes up to half of the memory for one disk, and the initramfs
   opens the system's disks at once: on several disks the recipe shares that half out (`--tpm2-argon2id-memory`),
   or the unlock is killed for want of memory and the start ends in emergency mode (suite 55 holds the sum).
@@ -2365,9 +2367,14 @@ ostree images stay the default.
   too): quay.io stops serving a digest of `fedora:44` as soon as Fedora moves the tag, which it does
   daily, and that broke sealing in October 2026. `20-tests-sealed.sh` checks the signatures, the
   digest and the command line. The UKI's kernel arguments are the image's `kargs.d`,
-  there is no other way to add one, and they never include a debug shell: `rd.shell=0
+  there is no other way to add one to it, and they never include a debug shell: `rd.shell=0
   rd.emergency=halt` stop a boot that fails in the initramfs, where dracut's emergency mode would,
-  with root locked, go on into an unchecked `/sysroot` with the disk unlocked.
+  with root locked, go on into an unchecked `/sysroot` with the disk unlocked. At boot, systemd-stub
+  (262) still appends to that command line, under Secure Boot too: the firmware's SMBIOS string
+  `io.systemd.stub.kernel-cmdline-extra=` and the `.cmdline` of add-ons signed by any key shim trusts
+  (Fedora's, and every certificate in MokList, the module keys included), each measured into PCR 12, and
+  PCR 7 does not change. So the sealed disk unlock binds PCR 12, and `amethystora-sealed` refuses an image
+  named there.
   **Two builds**: `Containerfile.sealed` prepares, rechunks into `sealed_build` and ends with the tools
   image; `Containerfile.sealed-uki` reads the tree back with `FROM oci:` and builds, signs and tests the
   UKI. buildah does not wait for a `FROM oci:`, and in one build that stage started before chunkah had
@@ -2393,14 +2400,17 @@ ostree images stay the default.
   through pkexec and `50-amethystora-deployments.rules`), and branch on the marker for anything that
   changes kernel arguments: they cannot change there. `amethystora-signed-updates.service` does not run
   on it. The manual's `streams.md#sealed-images` describes it for users.
-- **`amethystora-sealed` is what makes the seal hold; keep it.** bootc's initramfs does not by itself
-  insist on fs-verity for the image the signed command line names; the details stay out of the
-  repository until bootc has a fix.
-  The module's `amethystora-sealed-verity.service` runs after `bootc-root-setup.service` and halts
-  unless every composefs mount has `verity=require` (never the emergency target: its locked root
-  account lets the boot continue). An install made by a kernel without fs-verity is refused the same
-  way. Drop it only once bootc enforces this itself, and not before every machine's repository has
-  fs-verity on `meta.json`, or they stop starting.
+- **`amethystora-sealed` is the seal's second check; keep it.** Up to 1.17.4, bootc's initramfs took
+  fs-verity from the disk's own `composefs/meta.json` and mounted an image put under
+  `composefs/images/refs/` unmeasured (GHSA-g77m-w5pv-gphg), and a failed root setup could still reach
+  switch-root (GHSA-9889-q45r-84v7, reported by the maintainer); 1.17.5 fixes both, in an initramfs built
+  with it. The module's `amethystora-sealed-verity.service`, which `initrd-root-fs.target` requires, runs
+  after `bootc-root-setup.service` and halts unless every composefs mount has `verity=require`, the root's
+  image is one the command line names and is stored as `composefs/images/<digest>`, and the command line
+  names one image of each format, as the UKI's own does (what is appended at boot: see the UKI above).
+  Never the emergency target: its locked root account lets the boot continue. An install made by a kernel
+  without fs-verity is refused the same way.
+  `20-tests-sealed.sh` runs the check on the UKI's own command line.
 - **`systemd.import_credentials=no`** is in the sealed `kargs.d`: credentials from SMBIOS, a hypervisor
   or a TPM-encrypted file on the ESP could add a drop-in to any unit, the guard's included (shown in
   the VM with SMBIOS), and systemd's own units take root's password, SSH keys, udev rules and files

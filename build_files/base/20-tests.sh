@@ -5377,7 +5377,10 @@ grep -q "tss2" <<<"${INITRAMFS_FILES}" ||
 # It is the one TPM unlocker, and it replaces any key the TPM held before, so that one bound to no PCRs
 # (as upstream's luks-tpm2-autounlock enrolled) cannot open the disk without the checks
 test ! -e /usr/bin/luks-tpm2-autounlock
-grep -q -- "--wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7+14" /usr/share/amethystora/just/security.just
+grep -q -- '--wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs="${PCRS}"' /usr/share/amethystora/just/security.just
+grep -qx '    PCRS=7+14' /usr/share/amethystora/just/security.just
+# ...and, on a sealed machine, to PCR 12, where systemd-stub measures what is added to the UKI's command line
+grep -qx '        PCRS=7+12+14' /usr/share/amethystora/just/security.just
 
 # DisplayLink: evdi built for the image kernel, and no module signing key left behind by the build
 KERNEL_VERSION="$(rpm -q kernel-core --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}')"

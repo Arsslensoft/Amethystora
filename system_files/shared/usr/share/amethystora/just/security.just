@@ -1948,7 +1948,7 @@ disk-unlock ACTION="":
     echo
     echo "$(gettext "What this does: the TPM hands over the key only while Secure Boot is on and the enrolled signing keys are the ones enrolled now (PCR 7 and 14). Turning Secure Boot off, or adding a key to sign something of your own with, stops the disk opening.")"
     if [[ -e /usr/share/amethystora/sealed ]]; then
-        echo "$(gettext "This machine is sealed: its initramfs is inside the UKI that the enrolled key signs, so it cannot be rewritten without the machine refusing to start it. But neither PCR measures the disk the system starts from, nor /etc on it: someone with a disk of their own made to look like this one starts this same signed system on it, with their own settings, and without a PIN the TPM would hand that system the key. So it is set up only with a PIN here too.")"
+        echo "$(gettext "This machine is sealed: its initramfs is inside the UKI that the enrolled key signs, so it cannot be rewritten without the machine refusing to start it. The key is also bound to PCR 12, which changes when anything is added to the UKI's own kernel command line: the firmware's strings and add-ons signed by a key the boot loader trusts can add to it, and the system would start with what they add. But no PCR measures the disk the system starts from, nor /etc on it: someone with a disk of their own made to look like this one starts this same signed system on it, with their own settings, and without a PIN the TPM would hand that system the key. So it is set up only with a PIN here too. That stops someone who takes the machine, not someone who gives it back with such a disk: their settings can ask for the PIN and keep it once you type it.")"
     else
         echo "$(gettext "What it does not do: it does not measure the boot menu or the initramfs, which are plain files on this image and change with every kernel update. Someone who takes the machine could start it into a shell from the boot menu, or with a disk of their own made to look like this one, and neither changes PCR 7 or 14: without a PIN, the TPM would hand them the key. So here it is set up only with a PIN. That does not stop someone who rewrites the initramfs and gives the machine back: theirs can ask for the PIN itself and keep it once you type it.")"
     fi
@@ -1986,10 +1986,19 @@ disk-unlock ACTION="":
     if [[ ${#DEVICES[@]} -gt 1 ]]; then
         FLAGS+=("--tpm2-argon2id-memory=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) * 1024 / 2 / ${#DEVICES[@]}))")
     fi
+    # A sealed machine's key is bound to PCR 12 as well. systemd-stub measures there what it adds to the
+    # UKI's own command line (from the firmware's SMBIOS strings, whatever Secure Boot says, and from add-ons
+    # signed by any key shim trusts), and nothing else: bootc's boot entries pass the UKI no options. So it
+    # is the same at every start of an unchanged command line, through updates, and different otherwise,
+    # while PCR 7 is not. An ostree image starts through GRUB, which measures nothing there.
+    PCRS=7+14
+    if [[ -e /usr/share/amethystora/sealed ]]; then
+        PCRS=7+12+14
+    fi
     # Any key the TPM held before goes once this one is in (never the new one): one enrolled with other
     # PCRs, or none, as an older unlocker did, would otherwise open the disk without these checks
     for DEVICE in "${DEVICES[@]}"; do
-        sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7+14 "${FLAGS[@]}" "${DEVICE}"
+        sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs="${PCRS}" "${FLAGS[@]}" "${DEVICE}"
     done
     # The initramfs is built without this machine's own settings in it, so the instruction to ask the
     # TPM has to come from the kernel command line. Without it the enrolled key is never used. A sealed

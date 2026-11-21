@@ -1,26 +1,68 @@
 #!/usr/bin/bash
 # Run in the sealed initramfs after bootc has mounted the composefs root (amethystora-sealed-verity.service).
-# bootc mounts the image the signed command line names, but it requires fs-verity on the system's files
-# only when the repository on the disk says it has it: with composefs/meta.json and the image copied
-# without fs-verity, which anyone who can write to the disk can do, the root is mounted unverified and
-# every file of the system can be changed. So the system starts only if each composefs mount has
-# fs-verity required.
+# The system starts only if the root bootc mounted is the image the signed command line names, verified:
+#
+# - every composefs mount has fs-verity required. bootc up to 1.17.4 left it off when the disk's own
+#   composefs/meta.json had none, which anyone who can write to the disk can arrange (GHSA-g77m-w5pv-gphg);
+# - the image was opened as composefs/images/<digest>. bootc up to 1.17.4 also took an image put under
+#   composefs/images/refs/<digest>, without measuring it against the digest, and mounted it with fs-verity
+#   required all the same (the same advisory);
+# - its digest is one the command line names, and the command line names one image of each format, as
+#   the UKI's own does: systemd-stub can append to it at boot, from the firmware's strings or a signed
+#   add-on.
+#
+# bootc 1.17.5 checks the first two itself. This stays as a second check, and for images built before the
+# distribution has it. With arguments (the command line, mountinfo and the physical root's path), it
+# checks those instead, for 20-tests-sealed.sh.
 
-found=0
+cmdline="${1:-/proc/cmdline}"
+mountinfo="${2:-/proc/self/mountinfo}"
+physical="${3:-/sysroot/sysroot}"
+testing="${1:+yes}"
+
+refuse() {
+    local message="Amethystora was not started: its system files on this disk cannot be verified ($1), so they may have been changed. Start the computer from an Amethystora installer to copy your files off, then install again."
+    if [[ -n "${testing}" ]]; then
+        echo "${message}" >&2
+    else
+        command -v plymouth >/dev/null && plymouth quit
+        echo "${message}" >/dev/kmsg
+        echo "${message}" >/dev/console
+    fi
+    exit 1
+}
+
+# The images the command line names: composefs.digest=<format>:<digest> and the bare composefs=<digest>,
+# with the kernel's quotes taken off, as bootc reads them. None may make fs-verity optional ("?").
+digests=() formats=0 bare=0
+read -ra args <"${cmdline}"
+for arg in "${args[@]}"; do
+    arg="${arg//\"/}"
+    case "${arg}" in
+        composefs.digest=*) value="${arg#composefs.digest=}" formats=$((formats + 1)) ;;
+        composefs=*) value="${arg#composefs=}" bare=$((bare + 1)) ;;
+        *) continue ;;
+    esac
+    [[ "${value}" != *\?* ]] || refuse "fs-verity made optional on the command line"
+    digests+=("${value##*:}")
+done
+((formats <= 1 && bare <= 1 && ${#digests[@]} >= 1)) || refuse "the command line names ${#digests[@]} images"
+
+root="" bad=""
 while read -r _ _ _ _ mountpoint _ rest; do
     [[ "${rest}" == *" - overlay composefs:"* ]] || continue
-    found=1
     if [[ ",${rest##* }," != *",verity=require,"* ]]; then
         bad="${mountpoint}"
     fi
-done </proc/self/mountinfo
+    if [[ "${mountpoint}" == /sysroot ]]; then
+        source="${rest#* - overlay }"
+        root="${source%% *}"
+        root="${root#composefs:}"
+    fi
+done <"${mountinfo}"
 
-if [[ "${found}" -eq 1 && -z "${bad:-}" ]]; then
-    exit 0
-fi
-
-command -v plymouth >/dev/null && plymouth quit
-message="Amethystora was not started: its system files on this disk cannot be verified (${bad:-no composefs mount}), so they may have been changed. Start the computer from an Amethystora installer to copy your files off, then install again."
-echo "${message}" >/dev/kmsg
-echo "${message}" >/dev/console
-exit 1
+[[ -z "${bad}" ]] || refuse "${bad} without fs-verity"
+[[ -n "${root}" ]] || refuse "no composefs mount"
+[[ " ${digests[*]} " == *" ${root} "* ]] || refuse "an image the command line does not name"
+[[ "${root}" =~ ^[0-9a-f]+$ && -e "${physical}/composefs/images/${root}" ]] || refuse "an image not stored under its digest"
+exit 0

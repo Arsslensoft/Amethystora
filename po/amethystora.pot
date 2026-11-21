@@ -16333,7 +16333,7 @@ msgid "What this does: the TPM hands over the key only while Secure Boot is on a
 msgstr ""
 
 #: usr/share/amethystora/just/security.just
-msgid "This machine is sealed: its initramfs is inside the UKI that the enrolled key signs, so it cannot be rewritten without the machine refusing to start it. But neither PCR measures the disk the system starts from, nor /etc on it: someone with a disk of their own made to look like this one starts this same signed system on it, with their own settings, and without a PIN the TPM would hand that system the key. So it is set up only with a PIN here too."
+msgid "This machine is sealed: its initramfs is inside the UKI that the enrolled key signs, so it cannot be rewritten without the machine refusing to start it. The key is also bound to PCR 12, which changes when anything is added to the UKI's own kernel command line: the firmware's strings and add-ons signed by a key the boot loader trusts can add to it, and the system would start with what they add. But no PCR measures the disk the system starts from, nor /etc on it: someone with a disk of their own made to look like this one starts this same signed system on it, with their own settings, and without a PIN the TPM would hand that system the key. So it is set up only with a PIN here too. That stops someone who takes the machine, not someone who gives it back with such a disk: their settings can ask for the PIN and keep it once you type it."
 msgstr ""
 
 #: usr/share/amethystora/just/security.just
