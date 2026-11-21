@@ -10,7 +10,8 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## Pull requests
 
-A pull request merges once the maintainer has approved it and these checks pass:
+A pull request merges once the maintainer has approved it, every review thread is resolved, and these checks
+pass:
 
 - **Lint**: `pre-commit` and ShellCheck on the files you changed, the `just` recipes' format, and the
   translations and manual checks the image build runs. `pre-commit run --all-files` and `just check` run
@@ -19,9 +20,28 @@ A pull request merges once the maintainer has approved it and these checks pass:
   when the pull request is squashed. A `feat` title is shown to users in What's new, so write it in plain
   words.
 - **Dependencies**: nothing the change adds has a known serious vulnerability.
+- **DCO**: every commit is signed off (below).
+- **Licences**: the Rust crates built into the apps are under a licence `apps/deny.toml` allows, from crates.io.
+  `cargo deny --manifest-path apps/Cargo.toml check licenses bans sources` runs it on your machine.
+- **Security**: the change adds no workflow risk that `zizmor` finds and `main` does not have, no secret in its
+  commits (`gitleaks`; a made-up one in a test is fine, elsewhere mark its line with `gitleaks:allow`), and no crate
+  with a known advisory.
+- **Lab**: the image is built from your change, installed on a virtual machine with Secure Boot and a TPM,
+  signed in, and the smoke suites run in it (`tests/vm/README.md`, On GitHub), about an hour and a half. With the
+  label `lab`, every suite runs, from the next push. A change to Markdown alone runs none.
 
-The images are built for every pull request too, which takes about an hour. CodeRabbit and CodeQL comment
-on the change; their comments are advice for you and the maintainer, not a condition for merging.
+CodeRabbit reviews every push. It requests changes while one of its findings that matters, or one of its
+checks (the licences and credits, a test with every change of behaviour, the security defaults), is open, and
+approves once they are settled: answer or fix each of its comments and resolve the thread. CodeQL scans the code
+and the workflows. The six images are built for every pull request too, which takes about an hour.
+
+### Signing off (DCO)
+
+Each commit carries a `Signed-off-by:` line with your name and the address you commit with, by which you
+certify the [Developer Certificate of Origin](https://developercertificate.org): that you wrote the change, or
+otherwise have the right to submit it under the project's licence. `git commit -s` adds it; for commits made
+already, `git rebase --signoff origin/main` and push again. Only a person can certify it: a coding agent never
+signs off for you, so sign off its commits yourself once you have read them.
 
 ## Translating
 

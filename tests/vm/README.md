@@ -77,8 +77,10 @@ a suite that needs another's leftovers says so and does the work itself.
 ### On GitHub
 
 The Lab workflow (`.github/workflows/lab.yml`) runs the same lanes on GitHub's runners, each lane on a runner of its
-own, as bootc runs its integration tests. It is started by hand (Actions, Lab, Run workflow: the image, the stream,
-the suites and how many lanes, ten by default), or on a pull request by the label `lab`:
+own, as bootc runs its integration tests. Every pull request runs the prep suites and `shards.json`'s `smoke` ones on
+one lane, and a pull request with the label `lab` every suite, from its next push; a change to Markdown alone runs
+none, and a merge group none (its pull requests ran it). By hand (Actions, Lab, Run workflow) it takes the image, the
+stream, the suites and how many lanes, ten by default:
 
 ```bash
 gh workflow run Lab --ref main -f suites=11,50 -f lanes=2

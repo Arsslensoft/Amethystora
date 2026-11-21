@@ -4,8 +4,9 @@ name: Lab
 # installed onto the lab's disks and signed in (the ready state), and the suites are spread over lanes that each run on a
 # runner of their own, one VM at a time, from what the build job handed them (tests/vm/README.md, On GitHub). Every job
 # runs `bash tests/vm/run.sh` as a machine with the lab does, so a failure here is tried again there the same way. It
-# holds no secret, builds with throwaway keys and publishes nothing. A pull request runs it once it has the label `lab`;
-# the job named Lab says whether every suite passed.
+# holds no secret, builds with throwaway keys and publishes nothing. Every pull request runs the smoke suites
+# (shards.json), and one with the label `lab` every suite, from its next push; a change to Markdown alone runs none, nor
+# does a merge group, whose pull requests ran it. The job named Lab says whether every suite passed.
 
 on:
   workflow_dispatch:
@@ -34,36 +35,32 @@ on:
         description: How many runners the suites are spread over (1 to 12)
         type: number
         default: 10
+  # Not `labeled`: a run for another label would end in a skipped Lab, which a required check takes for a pass
   pull_request:
-    types: [labeled, synchronize, reopened]
+  merge_group:
 
 permissions: {}
 
 concurrency:
-  # A new push to a pull request stops its last run. A run started by hand stops none, and nor does a label other than
-  # lab, whose run does nothing
-  group: >-
-    ${{ github.workflow }}-${{ github.event_name == 'pull_request' &&
-    (github.event.action != 'labeled' || github.event.label.name == 'lab') &&
-    format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  # A new push to a pull request stops its last run; a run started by hand stops none
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: true
 
 env:
   IMAGE: ${{ inputs.image || 'amethystora' }}
   STREAM: ${{ inputs.stream || 'latest' }}
-  SUITES: ${{ inputs.suites }}
 
 jobs:
-  # The lanes, by the suites' minutes in tests/vm/shards.json, as `run.sh plan --parallel N` prints them
+  # What runs, and the lanes, by the suites' minutes in tests/vm/shards.json, as `run.sh plan --parallel N` prints them
   plan:
     name: Plan
-    if: >-
-      ${{ github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'lab') &&
-      (github.event.action != 'labeled' || github.event.label.name == 'lab')) }}
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
+      run: ${{ steps.plan.outputs.run }}
+      selection: ${{ steps.plan.outputs.selection }}
       ready: ${{ steps.plan.outputs.ready }}
       installer: ${{ steps.plan.outputs.installer }}
       lanes: ${{ steps.plan.outputs.lanes }}
@@ -71,6 +68,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -80,12 +78,29 @@ jobs:
       - name: Plan the lanes
         id: plan
         env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          EVERY_SUITE: ${{ contains(github.event.pull_request.labels.*.name, 'lab') }}
           LANES: ${{ inputs.lanes || 10 }}
+          SUITES: ${{ inputs.suites }}
           VMLAB_DIR: ${{ runner.temp }}/vm
         run: |
-          args=(plan --parallel "${LANES}" --json)
-          [[ -z "${SUITES}" ]] || args+=(--suites "${SUITES}")
+          lanes="${LANES}" suites="${SUITES}"
+          if [[ "${EVENT}" == pull_request ]]; then
+            changed="$(git diff --name-only "$(git merge-base "${BASE}" HEAD)" HEAD)"
+            if ! grep -qv '\.md$' <<<"${changed}"; then
+              echo "Only Markdown changed: no suite to run" >> "$GITHUB_STEP_SUMMARY"
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [[ "${EVERY_SUITE}" != true ]]; then
+              lanes=1 suites="$(jq -r '.smoke | join(",")' tests/vm/shards.json)"
+            fi
+          fi
+          args=(plan --parallel "${lanes}" --json)
+          [[ -z "${suites}" ]] || args+=(--suites "${suites}")
           plan="$(node tests/vm/run.mjs "${args[@]}")"
+          { echo "run=true"; echo "selection=${suites}"; } >> "$GITHUB_OUTPUT"
           for key in ready installer lanes suites; do
             echo "${key}=$(jq -c -r ".${key}" <<<"${plan}")" >> "$GITHUB_OUTPUT"
           done
@@ -96,6 +111,7 @@ jobs:
   build:
     name: Build, install, sign in
     needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
@@ -126,6 +142,7 @@ jobs:
       - name: Install it onto the lab's disks
         env:
           VMLAB_COMPRESS: 1
+          SUITES: ${{ needs.plan.outputs.selection }}
         run: |
           args=(disk)
           [[ -z "${SUITES}" ]] || args+=(--suites "${SUITES}")
@@ -199,7 +216,7 @@ jobs:
   lane:
     name: Lane ${{ matrix.lane }}
     needs: [plan, build]
-    if: needs.plan.outputs.lanes != '[]'
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.lanes != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
@@ -272,7 +289,7 @@ jobs:
   report:
     name: Lab
     needs: [plan, build, lane]
-    if: always() && needs.plan.result == 'success'
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.run == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

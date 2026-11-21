@@ -95,6 +95,43 @@
       datasourceTemplate: 'github-release-attachments',
       extractVersionTemplate: '^v(?<version>.*)$',
     },
+    // The gitleaks release the Checks workflow's Security job runs, with the SHA-256 of its tarball
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/workflows/checks\\.yml$/',
+      ],
+      matchStrings: [
+        'GITLEAKS_VERSION: (?<currentValue>\\S+)\\s+GITLEAKS_SHA256: (?<currentDigest>[a-f0-9]{64})',
+      ],
+      depNameTemplate: 'gitleaks/gitleaks',
+      datasourceTemplate: 'github-release-attachments',
+      extractVersionTemplate: '^v(?<version>.*)$',
+    },
+    // The cargo-deny release the Checks workflow checks the apps' crates with (.github/actions/install-cargo-deny)
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/actions/install-cargo-deny/action\\.yml$/',
+      ],
+      matchStrings: [
+        'CARGO_DENY_VERSION: (?<currentValue>\\S+)\\s+CARGO_DENY_SHA256: (?<currentDigest>[a-f0-9]{64})',
+      ],
+      depNameTemplate: 'EmbarkStudios/cargo-deny',
+      datasourceTemplate: 'github-release-attachments',
+    },
+    // The zizmor release the Security job runs from PyPI
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/workflows/checks\\.yml$/',
+      ],
+      matchStrings: [
+        'ZIZMOR_VERSION: (?<currentValue>\\S+)',
+      ],
+      depNameTemplate: 'zizmor',
+      datasourceTemplate: 'pypi',
+    },
     {
       customType: 'regex',
       managerFilePatterns: [
