@@ -5,6 +5,9 @@
 # is run. Nothing here writes outside a temporary folder.
 
 set -euo pipefail
+# The stack the watcher's service has (systemd's 8 MiB): Python 3.14 measures the stack, not a count, before json
+# goes deeper, so with the larger one of a build host's container (GitHub's runners) the deep file below parses
+ulimit -S -s 8192 2>/dev/null || true
 
 READER=/usr/libexec/amethystora-security-reader
 T="$(realpath "$(mktemp -d)")"
