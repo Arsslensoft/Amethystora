@@ -4,8 +4,9 @@
 // (/vm/runs/last): run.log, one log per stage and per suite, a screenshot after each suite, the guest's
 // journal, results.json, and summary.md, which it prints last.
 //
-//   node run.mjs [all | build | disk | test | plan] [--keep] [--image IMAGE] [--tag TAG] [--suites NN,NN...]
-//                [--parallel N [--reuse]] [--memory MB]
+//   node run.mjs [all | build | disk | test | plan | ready] [--keep] [--image IMAGE] [--tag TAG] [--suites NN,NN...]
+//                [--parallel N [--reuse]] [--memory MB] [--json]
+//   node run.mjs report DIR [--expect NAME,...]
 //
 // all (the default) does the three in turn and stops at the first that fails; the others do one, from what
 // the last run left. --keep leaves the VMs running afterwards, for a closer look over MCP. The exit status is
@@ -23,6 +24,11 @@
 // installer disk; the screens suites are one unit, on NAME-screens, also from the ready state. plan prints the
 // lanes and runs nothing. --memory gives every VM but the screens one that much memory (default 4096). --reuse
 // starts from the ready state an earlier run made on the same disk, when there is one, instead of making it again.
+//
+// For the Lab workflow (.github/workflows/lab.yml), which runs each lane on a runner of its own: plan --json prints the
+// lanes for its matrix, planned as if the ready state were made before any of them starts; ready makes only the ready
+// state, which its build job hands to the lanes; and report DIR [--expect NAME,...] puts every results.json under DIR
+// (a folder per job) into one table, counting a suite of --expect that has none as not run.
 //
 // A suite is a bash script run as root in the guest, beside lib.sh: one "ok - ...", "not ok - ..." or
 // "skip - ..." line per check, and exit status 0 only when it passed. Exit status 100 asks for a reboot:
@@ -105,6 +111,7 @@ const keep = process.argv.includes('--keep');
 const PARALLEL = option('--parallel') === undefined ? 0 : Number(option('--parallel'));
 if (!Number.isInteger(PARALLEL) || PARALLEL < 0 || PARALLEL > 12) throw new Error('run.mjs: --parallel is 1 to 12');
 if (stage === 'plan' && !PARALLEL) throw new Error('run.mjs: plan needs --parallel N');
+const JSON_PLAN = process.argv.includes('--json');
 const REUSE = process.argv.includes('--reuse');
 const MEMORY = option('--memory') === undefined ? undefined : Number(option('--memory'));
 if (MEMORY !== undefined && !(Number.isInteger(MEMORY) && MEMORY >= 2048)) throw new Error('run.mjs: --memory is MB, 2048 or more');
@@ -114,8 +121,8 @@ const machineOf = (machine) => (typeof machine === 'string' ? MACHINES[machine] 
 // How a suite's lines start in the log: with the VM's name when several run at once
 const lane = (m) => (m.lane ? `[${m.vm}] ` : '   ');
 
-// A plan writes nothing: no run folder, and /vm/runs/last left to the run it names
-const RUN = stage === 'plan' ? '' : `/vm/runs/${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}${NAME === 'test' ? '' : `-${NAME}`}`;
+// A plan and a report write nothing: no run folder, and /vm/runs/last left to the run it names
+const RUN = ['plan', 'report'].includes(stage) ? '' : `/vm/runs/${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}${NAME === 'test' ? '' : `-${NAME}`}`;
 if (RUN) {
   fs.mkdirSync(RUN, { recursive: true });
   const LAST = NAME === 'test' ? '/vm/runs/last' : `/vm/runs/last-${NAME}`;
@@ -627,10 +634,14 @@ const kindOf = (f) => suiteHead(f).match(/^# vmlab-vm: (installer|screens)$/m)?.
 const cost = (f) => SHARDS.minutes[f] ?? SHARDS.default_minutes;
 const inOrder = (names) => [...names].sort().filter((f) => !comesLast(f)).concat([...names].sort().filter(comesLast));
 
+// The suites the ready state is made with, in the order they run
+const prepSuites = () => fs.readdirSync(SUITES).filter((f) => SHARDS.prep.includes(f) && kindOf(f) === 'default').sort();
+
 // The lanes: the prep suites first, on VM NAME, then every other suite, as units (one suite, or every screens suite
 // together), longest first onto the lane that would end soonest. The installer's suites need no ready state, so
 // they are placed first and run while the prep VM gets it ready; nothing else starts before the prep has ended.
-function planLanes(n) {
+// With prepElsewhere (the Lab workflow) the ready state is made before every lane, so that no lane waits for it.
+function planLanes(n, prepElsewhere = false) {
   const all = fs.readdirSync(SUITES).filter((f) => /^\d\d-.+\.sh$/.test(f)).sort();
   const wanted = only;
   const units = all.filter((f) => wanted(f) && kindOf(f) !== 'screens' && !SHARDS.prep.includes(f))
@@ -638,8 +649,8 @@ function planLanes(n) {
   const screens = all.filter((f) => wanted(f) && kindOf(f) === 'screens');
   if (screens.length) units.push({ kind: 'screens', suites: screens, minutes: screens.reduce((t, f) => t + cost(f), 0) });
   const needsReady = units.some((u) => u.kind !== 'installer') || all.some((f) => wanted(f) && SHARDS.prep.includes(f));
-  const prep = needsReady ? all.filter((f) => SHARDS.prep.includes(f) && kindOf(f) === 'default') : [];
-  const prepMinutes = needsReady && !(REUSE && reusable()) ? SHARDS.prep_minutes : 0;
+  const prep = needsReady ? prepSuites() : [];
+  const prepMinutes = needsReady && !prepElsewhere && !(REUSE && reusable()) ? SHARDS.prep_minutes : 0;
   const lanes = Array.from({ length: n }, (_, i) => ({ lane: i + 1, minutes: i === 0 ? prepMinutes : 0, kinds: new Set(), units: [] }));
   const place = (list) => {
     for (const u of list.sort((a, b) => b.minutes - a.minutes || a.suites[0].localeCompare(b.suites[0]))) {
@@ -671,6 +682,16 @@ function printPlan(p) {
       .map(([what, s]) => `${what ? `${what}: ` : ''}${s.join(' ')}`);
     say(`  lane ${l.lane} (about ${l.minutes} min): ${parts.join(' | ') || '(nothing)'}`);
   }
+}
+
+// The Lab workflow's plan: whether its build job makes the ready state, the lanes that have suites (the matrix of its
+// lane jobs: which disks each needs, and its suites, which it runs with test --parallel 1 --reuse --suites), and every
+// suite it runs, for the report
+function planJson(p) {
+  const lanes = p.lanes.map((l) => ({ lane: l.lane, minutes: l.minutes, suites: [...l.installer, ...l.default, ...l.screens].join(','),
+    installer: l.installer.length > 0, ready: l.default.length + l.screens.length > 0 })).filter((l) => l.suites);
+  const suites = [...p.prep, ...lanes.flatMap((l) => l.suites.split(','))];
+  return { ready: p.prep.length > 0, installer: lanes.some((l) => l.installer), lanes, suites: suites.join(',') };
 }
 
 // The prep VM, its suites run, kept as the ready state: once the first boot's Flatpaks are in (taken half done,
@@ -770,23 +791,64 @@ async function testParallel() {
   return passed;
 }
 
+// The ready state alone, as --parallel makes it, for VMs on other machines to start from (the Lab workflow's build
+// job): the prep suites on VM NAME, the first boot's Flatpaks in, powered off. Kept only when every prep suite passed.
+async function ready() {
+  const began = Date.now();
+  const results = [];
+  fs.rmSync(READY, { force: true });
+  const made = await onMachine({ ...MACHINES.default, lane: 0 }, prepSuites(), results, 'journal-prep', true);
+  fs.writeFileSync(`${RUN}/results.json`, `${JSON.stringify(results, null, 2)}\n`);
+  const passed = made && results.every((r) => r.passed);
+  if (!passed) fs.rmSync(READY, { force: true });
+  stages.push({ stage: 'ready', passed, time: minutes(began), results });
+  return passed;
+}
+
+// The suites' results as a table, with the VM each ran on when vm, then every failure with its reasons
+function table(results, vm) {
+  const head = ['Suite', 'Result', 'ok', 'not ok', 'skipped', 'Time', ...(vm ? ['VM'] : [])];
+  const lines = ['', `| ${head.join(' | ')} |`, `|${' --- |'.repeat(head.length)}`];
+  for (const r of results) {
+    lines.push(`| ${[r.suite, r.passed ? 'passed' : '**failed**', r.ok, r.failures.length, r.skipped, r.time, ...(vm ? [r.vm] : [])].join(' | ')} |`);
+  }
+  for (const r of results.filter((x) => !x.passed)) {
+    lines.push('', `## ${r.suite} (exit ${r.exit})`, '', '```', ...(r.failures.length ? r.failures : ['(no "not ok" line: see its log)']), '```');
+  }
+  return lines;
+}
+
+// The Lab workflow's results, one folder per job under DIR, as one table: the job's folder names the VM. True only when
+// there are results and every suite passed, a suite of --expect without one counting as failed
+function report(dir) {
+  const results = [];
+  const walk = (folder, job) => {
+    for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+      const where = path.join(folder, entry.name);
+      if (entry.isDirectory()) walk(where, job ?? entry.name);
+      else if (entry.name === 'results.json') results.push(...JSON.parse(fs.readFileSync(where, 'utf8')).map((r) => ({ ...r, vm: `${job}: ${r.vm}` })));
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  for (const name of (option('--expect') || '').split(',').filter((s) => s && !results.some((r) => r.suite === s))) {
+    results.push(couldNot(name, { vm: '-' }, 'no result: its job did not finish'));
+  }
+  results.sort((a, b) => a.suite.localeCompare(b.suite));
+  const failed = results.filter((r) => !r.passed).length;
+  console.log([`# Lab: ${results.length - failed} of ${results.length} suites passed`, ...table(results, true)].join('\n'));
+  return results.length > 0 && failed === 0;
+}
+
 function summary() {
   const lines = [`# Test run ${path.basename(RUN)}`, '', `Commit: ${git('log', '-1', '--format=%h %s')}`, ''];
   for (const s of stages) {
     if (s.stage === 'prune' || s.stage === 'tag') continue;
     lines.push(`- ${s.stage}: ${s.passed ? 'passed' : '**FAILED**'} (${s.time})`);
   }
-  const tested = stages.find((s) => s.stage === 'test');
+  const tested = stages.find((s) => s.results);
   if (tested) {
     for (const l of tested.lanes || []) lines.push(`- lane ${l.lane}: ${l.time}, ${l.suites} suites`);
-    const vm = tested.lanes ? ['VM'] : [];
-    lines.push('', `| ${['Suite', 'Result', 'ok', 'not ok', 'skipped', 'Time', ...vm].join(' | ')} |`, `|${' --- |'.repeat(6 + vm.length)}`);
-    for (const r of tested.results) {
-      lines.push(`| ${[r.suite, r.passed ? 'passed' : '**failed**', r.ok, r.failures.length, r.skipped, r.time, ...(vm.length ? [r.vm] : [])].join(' | ')} |`);
-    }
-    for (const r of tested.results.filter((x) => !x.passed)) {
-      lines.push('', `## ${r.suite} (exit ${r.exit})`, '', '```', ...(r.failures.length ? r.failures : ['(no "not ok" line: see its log)']), '```');
-    }
+    lines.push(...table(tested.results, Boolean(tested.lanes)));
   }
   lines.push('', `Files: ${RUN}`);
   const text = `${lines.join('\n')}\n`;
@@ -795,9 +857,11 @@ function summary() {
 }
 
 if (stage === 'plan') {
-  printPlan(planLanes(PARALLEL));
+  if (JSON_PLAN) console.log(JSON.stringify(planJson(planLanes(PARALLEL, true))));
+  else printPlan(planLanes(PARALLEL));
   process.exit(0);
 }
+if (stage === 'report') process.exit(report(process.argv[3] || '.') ? 0 : 1);
 // The lab's own files from the commit under test, so that the MCP server is the one this run used
 for (const name of ['agent.py', 'lab.mjs', 'make-disk.sh', 'server.mjs']) {
   fs.copyFileSync(`${HERE}/${name}`, `/opt/amethystora-vm/${name}`);
@@ -807,5 +871,6 @@ let ok = true;
 if (stage === 'all' || stage === 'build') ok = await build();
 if (ok && (stage === 'all' || stage === 'disk')) ok = await disk();
 if (ok && (stage === 'all' || stage === 'test')) ok = await test();
+if (stage === 'ready') ok = await ready();
 summary();
 process.exit(ok ? 0 : 1);

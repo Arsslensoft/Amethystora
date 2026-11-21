@@ -74,6 +74,27 @@ VM ran each suite and how long each lane took. `--memory MB` gives every VM but 
 Each suite starts on a machine where only the prep suites ran before it, not every suite before it in name order:
 a suite that needs another's leftovers says so and does the work itself.
 
+### On GitHub
+
+The Lab workflow (`.github/workflows/lab.yml`) runs the same lanes on GitHub's runners, each lane on a runner of its
+own, as bootc runs its integration tests. It is started by hand (Actions, Lab, Run workflow: the image, the stream,
+the suites and how many lanes, ten by default), or on a pull request by the label `lab`:
+
+```bash
+gh workflow run Lab --ref main -f suites=11,50 -f lanes=2
+```
+
+**Plan** prints the lanes (`run.mjs plan --parallel N --json`, which plans as if the ready state were made before any
+lane starts). **Build, install, sign in** runs `run.sh build`, `run.sh disk` with `VMLAB_COMPRESS=1` (the disks'
+clusters compressed with zstd, which the VMs read as they are), and `run.sh ready` (the prep suites, then the ready state
+alone), and keeps the disks and the ready state as artifacts for a day. Each **Lane N** fetches what its suites need
+and runs `run.sh test --parallel 1 --reuse --suites ...`, and **Lab** puts every job's `results.json` into one table
+(`run.mjs report DIR --expect ...`), a suite whose job did not finish counted as failed; it is the one check to require.
+Each job's run folders, with each VM's serial console, are its artifact `lab-run-*` for two weeks, and its summary shows
+`summary.md`. `/vm` is a folder of the runner there (`VMLAB_VOLUME` in `setup.sh`), so that the disks can be handed on.
+A runner has 4 processors, 16 GB and about 50 GB free once the build space is cleared: one VM at a time, of 4 GB. Nothing
+is published and no secret is used: the image is built with throwaway keys from the layers on GHCR, as a pull request's.
+
 The lab shares one Linux VM with every other container (WSL 2's, 13.3 GB here), and when a build and a VM ran
 beside other containers it ran out of memory and Docker stopped answering (2026-10-29). So `vm_start` refuses while
 an image is being built in the lab, and when the VM's memory is not free: the kernel's `MemAvailable`, less what

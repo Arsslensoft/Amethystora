@@ -108,7 +108,11 @@ echo "make-disk: fstab:"; cat "${deployment}/etc/fstab"
 echo "make-disk: kernel arguments:"; grep -h '^options' /target/boot/loader/entries/*.conf
 SCRIPT
 fi
-qemu-img convert -O qcow2 "${raw}" "${DISKS}/${DISK}.qcow2.new"
+# With VMLAB_COMPRESS=1 its clusters are compressed (zstd): half the room, and half to send to the Lab workflow's lanes,
+# which start from it as it is
+compress=()
+[[ "${VMLAB_COMPRESS:-}" == 1 ]] && compress=(-c -o compression_type=zstd)
+qemu-img convert "${compress[@]}" -O qcow2 "${raw}" "${DISKS}/${DISK}.qcow2.new"
 rm -f "${raw}"
 
 certs="$(mktemp -d)"
