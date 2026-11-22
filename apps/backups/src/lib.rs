@@ -796,7 +796,7 @@ impl Backups {
         glib::spawn_future_local(async move { this.exclude(verb, &pattern).await });
     }
 
-    async fn exclude(&self, verb: &str, pattern: &str) {
+    async fn exclude(self: &Rc<Self>, verb: &str, pattern: &str) {
         if let Err(detail) = backend::exclude(verb, pattern).await {
             self.state.borrow_mut().banner = Some(Banner { failed: true, text: t!("That did not work."), detail });
         }
