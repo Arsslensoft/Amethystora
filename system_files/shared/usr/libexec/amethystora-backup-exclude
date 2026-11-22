@@ -1,0 +1,133 @@
+#!/usr/bin/bash
+# What the daily backup leaves out (ame backup exclude), run as the account: the patterns in
+# ~/.config/amethystora/backup-excludes, which amethystora-backup hands restic, or the image's own list in
+# /usr/share/amethystora/backup-excludes while the account has none.
+#
+#   amethystora-backup-exclude list [--json]   every pattern, and whether it is the image's
+#   amethystora-backup-exclude add PATTERN     leave something out: a folder or file inside the home (an absolute
+#                                              path, or one starting with ~/), or a restic pattern such as **/build
+#   amethystora-backup-exclude remove PATTERN  back it up again, as it was written
+#   amethystora-backup-exclude reset           go back to the image's list
+#
+# The first change copies the image's list, comments and all, so that the account's list starts from what was
+# left out before and nothing it held comes back into the backup by surprise. The file is the account's own: it
+# may write it by hand too, and this changes only the lines it is asked about.
+
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/amethystora"
+OWN="${CONFIG_DIR}/backup-excludes"
+SHIPPED="${AMETHYSTORA_BACKUP_EXCLUDES_SHIPPED:-/usr/share/amethystora/backup-excludes}"
+
+usage() {
+    echo "usage: amethystora-backup-exclude list [--json] | add PATTERN | remove PATTERN | reset" >&2
+    exit 64
+}
+
+fail() {
+    echo "$*" >&2
+    exit 1
+}
+
+# The patterns of a list: its lines less blank ones and comments, as restic reads them
+patterns() {
+    [[ -r "$1" ]] || return 0
+    sed -e 's/[[:space:]]*$//' -- "$1" | grep -vE '^(#|$)' || true
+}
+
+# What to write for PATTERN: a path inside the home made absolute, a pattern kept as it is
+pattern_of() {
+    local given="$1" home path
+    [[ -n "${given}" && "${given}" != *$'\n'* && "${given}" != \#* && "${given}" != -* ]] ||
+        fail "Name a folder or file inside your home folder, or a pattern such as **/build."
+    home="$(realpath -e -- "${HOME}")"
+    case "${given}" in
+        "~/"*) given="${home}/${given#"~/"}" ;;
+        "~") fail "Your whole home folder is what the backup is of." ;;
+    esac
+    if [[ "${given}" == /* ]]; then
+        path="$(realpath -s -m -- "${given}")"
+        [[ "${path}" == "${home}/"* ]] || fail "${path} is not inside your home folder, ${home}."
+        printf '%s' "${path}"
+    else
+        printf '%s' "${given}"
+    fi
+}
+
+# The account's own list, copied from the image's the first time
+own_list() {
+    [[ -f "${OWN}" ]] && return
+    mkdir -p -- "${CONFIG_DIR}"
+    if [[ -r "${SHIPPED}" ]]; then
+        cp -- "${SHIPPED}" "${OWN}"
+    else
+        : >"${OWN}"
+    fi
+}
+
+write_without() {
+    local pattern="$1" tmp
+    tmp="$(mktemp "${OWN}.XXXXXX")"
+    awk -v drop="${pattern}" '{ line = $0; sub(/[[:space:]]+$/, "", line) } line != drop' "${OWN}" >"${tmp}"
+    mv -f -- "${tmp}" "${OWN}"
+}
+
+cmd_list() {
+    local json=false own=false file="${SHIPPED}"
+    [[ "${1:-}" == --json ]] && json=true
+    if [[ -f "${OWN}" ]]; then
+        own=true
+        file="${OWN}"
+    fi
+    if [[ "${json}" == true ]]; then
+        jq -n --argjson own "${own}" --arg file "${OWN}" \
+            --rawfile mine <(patterns "${file}") --rawfile shipped <(patterns "${SHIPPED}") '
+            ($shipped | split("\n") | map(select(. != ""))) as $image
+            | {version: 1, $own, $file,
+               entries: ($mine | split("\n") | map(select(. != "") | {pattern: ., shipped: (. as $p | $image | index([$p]) != null)}))}'
+        return
+    fi
+    if [[ "${own}" == true ]]; then
+        echo "Left out of the backup (${OWN}):"
+    else
+        echo "Left out of the backup (the image's list, ${SHIPPED}):"
+    fi
+    patterns "${file}" | sed 's/^/  /'
+}
+
+cmd_add() {
+    [[ $# -eq 1 ]] || usage
+    local pattern
+    pattern="$(pattern_of "$1")"
+    own_list
+    if patterns "${OWN}" | grep -xF -- "${pattern}" >/dev/null; then
+        echo "Already left out of the backup: ${pattern}"
+        return
+    fi
+    printf '%s\n' "${pattern}" >>"${OWN}"
+    echo "Left out of the backup from its next run: ${pattern}"
+}
+
+cmd_remove() {
+    [[ $# -eq 1 ]] || usage
+    local pattern
+    pattern="$(pattern_of "$1")"
+    own_list
+    patterns "${OWN}" | grep -xF -- "${pattern}" >/dev/null || fail "${pattern} is not left out of the backup."
+    write_without "${pattern}"
+    echo "Backed up again from its next run: ${pattern}"
+}
+
+cmd_reset() {
+    [[ $# -eq 0 ]] || usage
+    rm -f -- "${OWN}"
+    echo "The backup leaves out what the image's list says again."
+}
+
+case "${1:-}" in
+    list) shift; cmd_list "$@" ;;
+    add) shift; cmd_add "$@" ;;
+    remove) shift; cmd_remove "$@" ;;
+    reset) shift; cmd_reset "$@" ;;
+    *) usage ;;
+esac

@@ -1,0 +1,287 @@
+#!/usr/bin/bash
+# The folders the hourly snapshots of the home folders leave out (ame security ransomware exclude), and the one
+# place they are changed.
+#
+#   amethystora-snapshot-exclude list [--json]   the folders left out: the caller's own, or every one for root
+#   amethystora-snapshot-exclude add PATH        leave PATH out (root): a folder inside the caller's home
+#   amethystora-snapshot-exclude remove PATH     snapshot PATH again (root)
+#
+# A btrfs snapshot cannot skip a path, but it stops at a subvolume: a subvolume inside /var/home is an empty
+# folder in every snapshot taken after it was made. So leaving a folder out makes it a subvolume of its own,
+# and snapshotting it again makes it a plain folder. Either way its files are copied into the new one with
+# reflinks, which share the disk's blocks, so neither takes space, then the two are swapped under the same name
+# and the old one is removed. Nothing may hold the folder meanwhile, or what it writes during the copy is lost:
+# the folder is refused while one of the account's programs holds anything in it (amethystora-what-uses).
+#
+# The snapshots taken before keep the folder as it was, so what it held is still there for up to two weeks;
+# only what changes in it from now on is not kept. Which folders are left out is root's, in
+# /etc/amethystora/snapshot-excludes, one absolute path a line, so that ransomware running as the account
+# cannot take its own folders out of the snapshots; the security watcher accepts that file, and leaves the
+# folders it names out of what it counts between two snapshots (the first snapshot after a folder was left
+# out would otherwise read as every file in it deleted).
+#
+# AMETHYSTORA_SNAPSHOT_HOMES, AMETHYSTORA_SNAPSHOT_EXCLUDES, AMETHYSTORA_WHAT_USES and
+# AMETHYSTORA_SNAPSHOT_TEST are for build_files/shared/test-snapshot-exclude.sh, which runs against stand-ins:
+# with the last one set, a folder holding the file .amethystora-test-subvolume counts as a subvolume.
+
+set -euo pipefail
+
+HOMES="${AMETHYSTORA_SNAPSHOT_HOMES:-/var/home}"
+LIST="${AMETHYSTORA_SNAPSHOT_EXCLUDES:-/etc/amethystora/snapshot-excludes}"
+WHAT_USES="${AMETHYSTORA_WHAT_USES:-/usr/libexec/amethystora-what-uses}"
+TEST="${AMETHYSTORA_SNAPSHOT_TEST:-}"
+TEST_MARK=.amethystora-test-subvolume
+REFLINK=always
+[[ -z "${TEST}" ]] || REFLINK=auto
+
+usage() {
+    echo "usage: amethystora-snapshot-exclude list [--json] | add PATH | remove PATH" >&2
+    exit 64
+}
+
+fail() {
+    echo "$*" >&2
+    exit 1
+}
+
+need_root() {
+    [[ "${EUID}" -eq 0 ]] || fail "This needs root: run it as  ame security ransomware exclude $1 PATH"
+}
+
+# A subvolume's root is always inode 256, on a device of its own
+is_subvolume() {
+    if [[ -n "${TEST}" ]]; then
+        [[ -e "$1/${TEST_MARK}" ]]
+        return
+    fi
+    [[ "$(stat -c %i -- "$1" 2>/dev/null)" == 256 && "$(stat -c %d -- "$1")" != "$(stat -c %d -- "$(dirname -- "$1")")" ]]
+}
+
+snapshots_possible() {
+    [[ -n "${TEST}" ]] && return 0
+    [[ "$(stat -f -c %T "${HOMES}" 2>/dev/null)" == btrfs && "$(stat -c %i "${HOMES}" 2>/dev/null)" == 256 ]]
+}
+
+# The listed paths, one a line, comments and anything that is not an absolute path in a home left out
+listed() {
+    [[ -r "${LIST}" ]] || return 0
+    grep -E "^${HOMES}/[^/]+/." "${LIST}" || true
+}
+
+is_listed() {
+    listed | grep -xF -- "$1" >/dev/null
+}
+
+# The home folder of the account that asked (sudo's or pkexec's), or nothing for root itself
+caller_home() {
+    local uid="${SUDO_UID:-${PKEXEC_UID:-}}"
+    [[ "${EUID}" -eq 0 && -n "${uid}" && "${uid}" != 0 ]] || return 0
+    getent passwd "${uid}" | cut -d: -f6 | xargs -r realpath -e -- 2>/dev/null || true
+}
+
+caller_uid() {
+    if [[ "${EUID}" -ne 0 ]]; then
+        echo "${EUID}"
+    else
+        echo "${SUDO_UID:-${PKEXEC_UID:-0}}"
+    fi
+}
+
+# PATH as given, made absolute without following anything; it must be the same once every link is followed, so
+# that no link on the way decides where the change lands
+checked_path() {
+    local given="$1" plain real home
+    [[ -n "${given}" && "${given}" != -* ]] || fail "Name a folder inside your home folder."
+    plain="$(realpath -s -m -- "${given}")"
+    real="$(realpath -e -- "${given}" 2>/dev/null)" || fail "There is no folder ${plain}."
+    [[ "${plain}" == "${real}" ]] || fail "${plain} goes through a link: name the folder it leads to, ${real}."
+    [[ -d "${real}" && ! -L "${real}" ]] || fail "${real} is not a folder."
+    [[ "${real}" =~ ^${HOMES}/[^/]+/.+ ]] || fail "${real} is not inside a home folder in ${HOMES}."
+    [[ "${real}" != "${HOMES}/.snapshots"* ]] || fail "The snapshots themselves are not a folder to leave out."
+    home="$(caller_home)"
+    if [[ -n "${home}" ]]; then
+        [[ "${real}" == "${home}/"* ]] || fail "${real} is not inside your home folder, ${home}."
+    fi
+    printf '%s' "${real}"
+}
+
+# The holders amethystora-what-uses finds among the account's own programs, by name, or nothing
+holders() {
+    local path="$1" uid owner gid out
+    owner="$(stat -c %u -- "${path}")"
+    uid="$(caller_uid)"
+    [[ "${uid}" != 0 ]] || uid="${owner}"
+    gid="$(getent passwd "${uid}" | cut -d: -f4)"
+    [[ -x "${WHAT_USES}" ]] || return 0
+    if [[ "${EUID}" -eq 0 && "${uid}" != 0 && -z "${TEST}" ]]; then
+        out="$(setpriv --reuid="${uid}" --regid="${gid:-${uid}}" --init-groups -- "${WHAT_USES}" list --json -- "${path}" 2>/dev/null)" || return 0
+    else
+        out="$("${WHAT_USES}" list --json -- "${path}" 2>/dev/null)" || return 0
+    fi
+    jq -r '[.holders[]? | select(.essential | not) | .name] | unique | join(", ")' <<<"${out}" 2>/dev/null || true
+}
+
+# Writes the list with PATH added or taken away, atomically
+rewrite() {
+    local verb="$1" path="$2" tmp
+    mkdir -p -m 0755 "${LIST%/*}"
+    tmp="$(mktemp "${LIST}.XXXXXX")"
+    {
+        echo "# Left out of the hourly snapshots of the home folders: each is a subvolume of its own."
+        echo "# Changed with: ame security ransomware exclude add|remove PATH"
+        listed | grep -vxF -- "${path}" || true
+        [[ "${verb}" == remove ]] || echo "${path}"
+    } >"${tmp}"
+    chmod 0644 "${tmp}"
+    mv -f -- "${tmp}" "${LIST}"
+}
+
+note() {
+    [[ -n "${TEST}" ]] && return 0
+    /usr/libexec/amethystora-security-config note snapshot-excludes "$1" >/dev/null 2>&1 || true
+}
+
+# The folder's owner, mode, times and SELinux label given to the one that takes its place
+same_as() {
+    chown --reference="$1" -- "$2"
+    chmod --reference="$1" -- "$2"
+    if command -v selinuxenabled >/dev/null && selinuxenabled; then
+        chcon --reference="$1" -- "$2" 2>/dev/null || restorecon -- "$2" 2>/dev/null || true
+    fi
+}
+
+# SOURCE's files into NEW, which is made by MAKE, then the two swapped and the old one removed by REMOVE
+swap_in() {
+    local source="$1" make="$2" remove="$3" parent name new old
+    parent="$(dirname -- "${source}")"
+    name="$(basename -- "${source}")"
+    new="${parent}/.${name}.amethystora-new"
+    old="${parent}/.${name}.amethystora-old"
+    [[ ! -e "${new}" && ! -e "${old}" ]] || fail "${new} or ${old} is in the way: a change to ${source} was cut short. Look at both, then remove them."
+    if [[ "${make}" == subvolume ]]; then
+        btrfs subvolume create -- "${new}" >/dev/null
+    else
+        mkdir -- "${new}"
+    fi
+    same_as "${source}" "${new}"
+    # A reflink shares the blocks, so the copy takes no space; the stand-ins of the test run where the disk has none
+    if ! cp -a --reflink="${REFLINK}" -- "${source}/." "${new}/"; then
+        remove_tree "${make}" "${new}"
+        fail "The files of ${source} could not be copied with shared blocks, so nothing was changed."
+    fi
+    # The copy carries the stand-in's mark across: the new one is what the change says it is, not the old one
+    [[ -z "${TEST}" ]] || rm -f -- "${new}/${TEST_MARK}"
+    [[ -z "${TEST}" || "${make}" != subvolume ]] || : >"${new}/${TEST_MARK}"
+    touch --reference="${source}" -- "${new}"
+    mv -T -- "${source}" "${old}"
+    if ! mv -T -- "${new}" "${source}"; then
+        mv -T -- "${old}" "${source}"
+        remove_tree "${make}" "${new}"
+        fail "${source} could not be put in place, so nothing was changed."
+    fi
+    remove_tree "${remove}" "${old}"
+}
+
+remove_tree() {
+    if [[ "$1" == subvolume && -z "${TEST}" ]]; then
+        btrfs subvolume delete -- "$2" >/dev/null
+    else
+        rm -rf --one-file-system -- "$2"
+    fi
+}
+
+cmd_list() {
+    local json=false home path rel state possible=false
+    [[ "${1:-}" == --json ]] && json=true
+    snapshots_possible && possible=true
+    # Root alone sees every account's; anyone else, and root for an account through sudo or pkexec, that account's own
+    if [[ "${EUID}" -ne 0 ]]; then
+        home="$(realpath -e -- "${HOME}" 2>/dev/null || true)"
+        [[ -n "${home}" ]] || fail "Your home folder cannot be found."
+    else
+        home="$(caller_home)"
+    fi
+    local -a rows=()
+    while IFS= read -r path; do
+        [[ -n "${path}" ]] || continue
+        if [[ -n "${home}" ]]; then
+            [[ "${path}" == "${home}/"* ]] || continue
+            rel="${path#"${home}"/}"
+        else
+            rel="${path#"${HOMES}"/}"
+        fi
+        # Left out while it is a subvolume; snapshotted again if it was made a plain folder or is gone
+        if [[ -d "${path}" ]] && is_subvolume "${path}"; then state=out; else state=in; fi
+        rows+=("${path}"$'\t'"${rel}"$'\t'"${state}")
+    done < <(listed)
+    if [[ "${json}" == true ]]; then
+        printf '%s\n' "${rows[@]}" | jq -Rsc --argjson possible "${possible}" '
+            {version: 1, $possible,
+             excluded: [split("\n")[] | select(. != "") | split("\t") | {path: .[0], rel: .[1], left_out: (.[2] == "out")}]}'
+        return
+    fi
+    if [[ ${#rows[@]} -eq 0 ]]; then
+        echo "Nothing is left out of the hourly snapshots."
+        return
+    fi
+    printf '%s\n' "${rows[@]}" | while IFS=$'\t' read -r path rel state; do
+        if [[ "${state}" == out ]]; then
+            echo "left out      ${path}"
+        else
+            echo "snapshotted   ${path}   (listed, but no longer a subvolume of its own)"
+        fi
+    done
+}
+
+cmd_add() {
+    [[ $# -eq 1 ]] || usage
+    need_root add
+    local path held
+    path="$(checked_path "$1")"
+    snapshots_possible || fail "The home folders are not on a btrfs subvolume of their own, so there are no snapshots to leave a folder out of."
+    is_listed "${path}" && is_subvolume "${path}" && { echo "${path} is already left out."; return; }
+    while IFS= read -r other; do
+        [[ -n "${other}" ]] || continue
+        [[ "${path}" != "${other}/"* ]] || fail "${path} is inside ${other}, which is left out already."
+        [[ "${other}" != "${path}/"* ]] || fail "${other} is inside ${path} and left out already: snapshot it again first."
+    done < <(listed)
+    if mountpoint -q -- "${path}" 2>/dev/null || is_subvolume "${path}"; then
+        fail "${path} is a mount or a subvolume already, which the snapshots never held."
+    fi
+    [[ -n "${TEST}" || "$(stat -c %d -- "${path}")" == "$(stat -c %d -- "${HOMES}")" ]] || fail "${path} is on another file system, which the snapshots never held."
+    if [[ -z "${TEST}" ]] && find "${path}" -mindepth 1 -type d -inum 256 -print -quit 2>/dev/null | grep -q .; then
+        fail "${path} holds a subvolume of its own: leave that one out, or remove it first."
+    fi
+    held="$(holders "${path}")"
+    [[ -z "${held}" ]] || fail "Close what is using ${path} first: ${held}"
+    swap_in "${path}" subvolume folder
+    rewrite add "${path}"
+    note add
+    echo "Left out of the hourly snapshots from now on: ${path}"
+}
+
+cmd_remove() {
+    [[ $# -eq 1 ]] || usage
+    need_root remove
+    local path held
+    path="$(realpath -s -m -- "$1")"
+    is_listed "${path}" || fail "${path} is not left out of the snapshots."
+    if [[ -d "${path}" ]] && is_subvolume "${path}"; then
+        path="$(checked_path "${path}")"
+        held="$(holders "${path}")"
+        [[ -z "${held}" ]] || fail "Close what is using ${path} first: ${held}"
+        swap_in "${path}" folder subvolume
+    elif [[ -n "$(caller_home)" && "${path}" != "$(caller_home)/"* ]]; then
+        fail "${path} is not inside your home folder."
+    fi
+    rewrite remove "${path}"
+    note remove
+    echo "In the hourly snapshots again from the next one: ${path}"
+}
+
+case "${1:-}" in
+    list) shift; cmd_list "$@" ;;
+    add) shift; cmd_add "$@" ;;
+    remove) shift; cmd_remove "$@" ;;
+    *) usage ;;
+esac

@@ -35,6 +35,10 @@ to make room give no space back; or `df` shows free space while writes still fai
 Never delete a snapshot, and never run `btrfs subvolume delete`. The space comes back as snapshots age
 out, within two weeks. Only the user may decide on `ame security ransomware off`, which stops the
 snapshots and offers to delete them, giving up ransomware protection; never run it for them.
+When one folder that changes a lot holds most of it (a game library, containers, virtual machines),
+the user can leave just that folder out with `ame security ransomware exclude add FOLDER`, which asks
+for an administrator's password; name the command, never run it. `ame security ransomware exclude`
+lists what is left out already.
 
 ### 2, 3, 4
 Control's **Free disk space** (entry `clean`, an action: hand `ame system clean` to the user with

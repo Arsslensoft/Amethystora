@@ -967,6 +967,13 @@ msgstr ""
 msgid "The home folders are snapshotted every hour. The latest is from ${AT}"
 msgstr ""
 
+#: usr/libexec/amethystora-security-status
+#, sh-format
+msgid "${LEFT_OUT} folder is left out of them. See which with:"
+msgid_plural "${LEFT_OUT} folders are left out of them. See which with:"
+msgstr[0] ""
+msgstr[1] ""
+
 #: usr/libexec/amethystora-security-status usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/backupdisk.js usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/today/getting.js
 msgid "Backups"
 msgstr ""
@@ -16370,6 +16377,28 @@ msgstr ""
 
 #: usr/share/amethystora/just/security.just
 msgid "Done. It takes effect at the next boot."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "Leaving a folder out of the hourly snapshots saves the disk space they keep for what changes in it, such as games, containers and virtual machines. From now on, what changes in it is not kept: ransomware that encrypts it can be undone only from a backup."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "The snapshots already taken keep the folder as it was, for up to two weeks. The folder becomes a subvolume of its own, which takes no space but a moment, and nothing may use it meanwhile: close the apps that do first."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+#, sh-format
+msgid "Leave ${folder} out of the hourly snapshots?"
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "The folder becomes a plain folder again, and the next snapshot keeps it. Nothing may use it meanwhile: close the apps that do first."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+#, sh-format
+msgid "Snapshot ${folder} again?"
 msgstr ""
 
 #: usr/share/amethystora/just/security.just

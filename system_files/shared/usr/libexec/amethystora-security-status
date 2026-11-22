@@ -903,8 +903,17 @@ if [[ "${SNAPSHOT_TIMER}" == true ]]; then
             "$(gettext "They are taken every hour. See why the last ones were not with:")"
     else
         AT="$(date -d "@${TAKEN}" '+%H:%M')"
-        report watching home-snapshots ok "$(gettext "Ransomware protection")" \
-            "$(eval_gettext "The home folders are snapshotted every hour. The latest is from \${AT}")"
+        # The folders left out of them (amethystora-snapshot-exclude), which only root chooses: said, never a warning
+        LEFT_OUT="$(grep -cE '^/var/home/[^/]+/.' /etc/amethystora/snapshot-excludes 2>/dev/null || true)"
+        if [[ "${LEFT_OUT:-0}" -gt 0 ]]; then
+            COMMAND="ame security ransomware exclude list"
+            report watching home-snapshots ok "$(gettext "Ransomware protection")" \
+                "$(eval_gettext "The home folders are snapshotted every hour. The latest is from \${AT}")" \
+                "$(eval_ngettext "\${LEFT_OUT} folder is left out of them. See which with:" "\${LEFT_OUT} folders are left out of them. See which with:" "${LEFT_OUT}")"
+        else
+            report watching home-snapshots ok "$(gettext "Ransomware protection")" \
+                "$(eval_gettext "The home folders are snapshotted every hour. The latest is from \${AT}")"
+        fi
     fi
 fi
 

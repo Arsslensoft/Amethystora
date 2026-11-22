@@ -68,6 +68,23 @@ goes, up to two weeks later.
 Snapshots are never deleted to make room, because ransomware that rewrites every file would then delete
 the ones from before it. Turning it off offers to delete them.
 
+### Leaving a folder out
+
+A folder that changes a lot and comes back by itself, such as games, containers or virtual machines, can
+be left out to save that space: **Security**, **Settings**, **Ransomware protection**, **Leave a folder
+out…**. From then on, what changes in it is not kept, so ransomware that encrypts it can be undone only
+from a backup. The snapshots already taken keep it as it was.
+
+```bash
+ame security ransomware exclude                  # the folders left out
+ame security ransomware exclude add ~/Games      # leave one out
+ame security ransomware exclude remove ~/Games   # snapshot it again
+```
+
+The folder becomes a btrfs subvolume of its own, which the snapshots stop at. This takes a moment and no
+space, and close the apps that use the folder first. Each change asks for an administrator's password,
+so ransomware running as you cannot take your folders out of the snapshots.
+
 ### Keep a backup elsewhere
 
 Snapshots live on the same disk, and ransomware that gets administrator rights can delete them. Keep a

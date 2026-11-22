@@ -55,6 +55,9 @@ const PATHS: &[&str] = &[
     "amethystora-pull-key",
     // Lab devices' rules, shipped and copied: only the person copies them (the helper by its own name is judged in refusal())
     "70-amethystora-lab-devices", "usr/share/amethystora/lab-devices",
+    // What the snapshots and the backup leave out: taking a folder out of either loosens what keeps it, so only the person
+    // does it (`ame security ransomware exclude list` and `ame backup exclude list` read, and pass)
+    "amethystora-snapshot-exclude", "/etc/amethystora/snapshot-excludes", "amethystora-backup-exclude", "amethystora/backup-excludes",
 ];
 
 fn base(path: &str) -> &str {
@@ -328,6 +331,8 @@ fn ame_refusal(args: &[String]) -> Option<String> {
         ["backup", "recovery-key" | "restore-from" | "other-computer" | "store", ..] => {
             Some("the backup's recovery key, its other computer and starting from it on a new computer are the user's alone".into())
         }
+        // What the backup leaves out may be read; leaving something out of it is the person's
+        ["backup", "exclude", verb, ..] if *verb != "list" => Some("what the backup leaves out is the user's to change: the agent may list it".into()),
         // Every command of the Vault is the person's: it holds what the agent must never see, and each one may prompt for them
         ["vault", ..] => Some("the Vault is the user's alone: the agent neither reads nor changes it".into()),
         // Installing a plugin, giving it more, lifting a block and going back to older code each take an administrator's approval: the agent never
@@ -405,6 +410,8 @@ fn security_refusal(args: &[&str]) -> Option<String> {
         ["profile", "light" | "balanced" | "thorough"] => true,
         // Locking, or powering off, when a device is pulled tightens: turning it off and choosing the device are the person's
         ["pull-key", "lock" | "poweroff"] => true,
+        // Which folders the snapshots leave out may be read; leaving one out, or putting one back, is the person's
+        ["ransomware", "exclude"] | ["ransomware", "exclude", "list", ..] => true,
         ["kernel-args", argument, "on"] => argument.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '=' | '-')),
         // A resolver of the list, or resuming after a pause; custom asks its servers in a terminal
         ["dns", "quad9" | "mullvad" | "cloudflare" | "google" | "resume"] => true,
@@ -429,6 +436,13 @@ mod tests {
     fn refuses_the_never_list() {
         for words in [
             "ame security duress setup",
+            "ame security ransomware exclude add /var/home/a/Games",
+            "ame security ransomware exclude remove /var/home/a/Games",
+            "sudo /usr/libexec/amethystora-snapshot-exclude add /var/home/a/Games",
+            "tee -a /etc/amethystora/snapshot-excludes",
+            "ame backup exclude add /var/home/a/Documents",
+            "ame backup exclude reset",
+            "/usr/libexec/amethystora-backup-exclude add /var/home/a/Documents",
             "git credential fill",
             "git -c credential.helper=amethystora -C /tmp credential get",
             "git-credential-amethystora get",
@@ -728,6 +742,9 @@ mod tests {
             "amethystora-lab-devices list",
             "ame security status",
             "ame security sends",
+            "ame security ransomware exclude",
+            "ame security ransomware exclude list --json",
+            "ame backup exclude list",
             "ame security scan now",
             "ame security kernel strict",
             "ame security lockdown on",

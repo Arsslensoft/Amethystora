@@ -1383,6 +1383,15 @@ test ! -e /usr/lib/udev/rules.d/90-amethystora-pull-key.rules
 grep -q 'pull_key_rule_as_written' /usr/libexec/amethystora-security-watch
 grep -qx 'ExecCondition=/usr/libexec/amethystora-security-config --is PULL_KEY lock poweroff' /usr/lib/systemd/system/amethystora-pull-key.service
 bash /ctx/build_files/shared/test-pull-key.sh
+# What the snapshots and the backup leave out: root's list of subvolumes and the account's own patterns, each changed by one
+# helper; the list ships empty (no file), the watcher accepts it in /etc, and both recipes hand their words to the helpers
+test -x /usr/libexec/amethystora-snapshot-exclude
+test -x /usr/libexec/amethystora-backup-exclude
+test ! -e /etc/amethystora/snapshot-excludes
+grep -q 'amethystora/snapshot-excludes' /usr/libexec/amethystora-security-watch
+grep -q '^ransomware ACTION="" \*MORE:' /usr/share/amethystora/just/security.just
+grep -q 'exec /usr/libexec/amethystora-backup-exclude' /usr/share/amethystora/just/backup.just
+bash /ctx/build_files/shared/test-snapshot-exclude.sh
 # GNOME's own rest reminders are what ame desktop breaks writes: the key and its two kinds of break are there
 [[ "$(GSETTINGS_BACKEND=memory gsettings get org.gnome.desktop.break-reminders selected-breaks)" == "@as []" ]]
 GSETTINGS_BACKEND=memory gsettings list-keys org.gnome.desktop.break-reminders.eyesight | grep -qx interval-seconds

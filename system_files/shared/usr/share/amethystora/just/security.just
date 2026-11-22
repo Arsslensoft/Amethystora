@@ -2013,13 +2013,43 @@ disk-unlock ACTION="":
 
 # Hourly read-only snapshots of the home folders, which ransomware running as you cannot change or delete
 [positional-arguments]
-ransomware ACTION="":
+ransomware ACTION="" *MORE:
     #!/usr/bin/bash
     set -euo pipefail
     # shellcheck source=/dev/null
     source gettext.sh
     SNAPSHOTS=/var/home/.snapshots
+    EXCLUDE=/usr/libexec/amethystora-snapshot-exclude
     action="${1:-}"
+    # The folders left out of the snapshots: listed by anyone, changed by root after saying what it costs
+    if [[ "${action}" == exclude ]]; then
+        verb="${2:-list}"
+        folder="${3:-}"
+        case "${verb}" in
+            list)
+                exec "${EXCLUDE}" list "${@:3}"
+                ;;
+            add)
+                [[ -n "${folder}" ]] || { echo "usage: ame security ransomware exclude add FOLDER" >&2; exit 64; }
+                echo "$(gettext "Leaving a folder out of the hourly snapshots saves the disk space they keep for what changes in it, such as games, containers and virtual machines. From now on, what changes in it is not kept: ransomware that encrypts it can be undone only from a backup.")"
+                echo
+                echo "$(gettext "The snapshots already taken keep the folder as it was, for up to two weeks. The folder becomes a subvolume of its own, which takes no space but a moment, and nothing may use it meanwhile: close the apps that do first.")"
+                gum confirm "$(eval_gettext "Leave \${folder} out of the hourly snapshots?")" || exit 0
+                sudo "${EXCLUDE}" add "${folder}"
+                ;;
+            remove)
+                [[ -n "${folder}" ]] || { echo "usage: ame security ransomware exclude remove FOLDER" >&2; exit 64; }
+                echo "$(gettext "The folder becomes a plain folder again, and the next snapshot keeps it. Nothing may use it meanwhile: close the apps that do first.")"
+                gum confirm "$(eval_gettext "Snapshot \${folder} again?")" || exit 0
+                sudo "${EXCLUDE}" remove "${folder}"
+                ;;
+            *)
+                echo "usage: ame security ransomware exclude [list [--json] | add FOLDER | remove FOLDER]" >&2
+                exit 64
+                ;;
+        esac
+        exit 0
+    fi
     turn_on="$(gettext "Turn on")"
     put_back="$(gettext "Put files back")"
     turn_off="$(gettext "Turn off")"

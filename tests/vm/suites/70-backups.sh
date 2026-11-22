@@ -8,7 +8,7 @@
 # a stale and a failed backup, the agent, setting up, Security, and opening it on a folder as Files does.
 # `bootc install to-disk` makes no home subvolume, so phase 1 makes one, as the installer would have, and
 # restarts.
-# vmlab-paths: @ui/modules/pill/moving.js apps/backups/* @sf/usr/libexec/amethystora-restore @sf/usr/libexec/amethystora-backup* @sf/usr/libexec/amethystora-home-snapshot @sf/*just/backup.just @sf/usr/share/user-tmpfiles.d/amethystora-restore.conf @sf/usr/libexec/amethystora-changes @sf/usr/libexec/amethystora-start-from-backup @sf/usr/lib/amethystora/backup-secrets.sh @sf/usr/lib/systemd/user/amethystora-backup-* @sf/usr/lib/firewalld/services/amethystora-backup-store.xml
+# vmlab-paths: @ui/modules/pill/moving.js apps/backups/* @sf/usr/libexec/amethystora-restore @sf/usr/libexec/amethystora-backup* @sf/usr/libexec/amethystora-home-snapshot @sf/usr/libexec/amethystora-snapshot-exclude@sf/*just/backup.just @sf/usr/share/user-tmpfiles.d/amethystora-restore.conf @sf/usr/libexec/amethystora-changes @sf/usr/libexec/amethystora-start-from-backup @sf/usr/lib/amethystora/backup-secrets.sh @sf/usr/lib/systemd/user/amethystora-backup-* @sf/usr/lib/firewalld/services/amethystora-backup-store.xml
 source "$(dirname "$0")/lib.sh"
 cd /
 
@@ -219,6 +219,46 @@ in_home 'mkdir -p Documents/notes .ssh && printf "version 1\n" >Documents/report
     head -c 33554432 /dev/urandom >Documents/big.bin'
 S1="$(snapshot)"
 check "a snapshot holds the test files" test -f "${SNAPSHOTS}/${S1}/${TEST_USER}/Documents/report.txt"
+
+# A folder left out of the snapshots (amethystora-snapshot-exclude, as `ame security ransomware exclude add` runs it under
+# sudo): a subvolume of its own with the same files, owner and label, empty in the next snapshot, listed for the account,
+# changed only by root, refused while the account holds it, and a plain folder again with its files after remove
+EXCLUDE=/usr/libexec/amethystora-snapshot-exclude
+TESTER_UID="$(id -u "${TEST_USER}")"
+in_home 'mkdir -p Games/Library && printf "save 1\n" >Games/Library/save.dat'
+label_before="$(stat -c %C "${HOME_DIR}/Games")"
+check "a folder of the home is left out of the snapshots" env SUDO_UID="${TESTER_UID}" "${EXCLUDE}" add "${HOME_DIR}/Games"
+check "it is a subvolume of its own" test "$(stat -c %i "${HOME_DIR}/Games")" = 256
+check "with its files" grep -qx "save 1" "${HOME_DIR}/Games/Library/save.dat"
+check "the account's, with the label it had" test "$(stat -c '%U %C' "${HOME_DIR}/Games")" = "${TEST_USER} ${label_before}"
+check "and the account can write to it" in_home 'printf "save 2\n" >Games/Library/save.dat'
+check "the list names it" grep -qxF "${HOME_DIR}/Games" /etc/amethystora/snapshot-excludes
+S_OUT="$(snapshot)"
+check "the next snapshot has it empty" test -z "$(ls -A "${SNAPSHOTS}/${S_OUT}/${TEST_USER}/Games" 2>&1)"
+check "and still has everything else" test -f "${SNAPSHOTS}/${S_OUT}/${TEST_USER}/Documents/report.txt"
+check "the account lists its own" sh -c "runuser -u '${TEST_USER}' -- '${EXCLUDE}' list --json | jq -e '.excluded == [{path: \"${HOME_DIR}/Games\", rel: \"Games\", left_out: true}]'"
+check "the account cannot change it" sh -c "! runuser -u '${TEST_USER}' -- '${EXCLUDE}' add '${HOME_DIR}/Documents' 2>/dev/null"
+check "the report says a folder is left out" sh -c "runuser -u '${TEST_USER}' -- /usr/libexec/amethystora-security-status --json |
+    jq -e '.checks[] | select(.id == \"home-snapshots\") | .details | any(test(\"left out\"))'"
+as_tester bash -c 'cd ~/Documents && exec sleep 120' &
+holder=$!
+wait_for 10 pgrep -u "${TEST_USER}" -x sleep >/dev/null
+check "a folder a program of the account is in is refused" sh -c "! env SUDO_UID='${TESTER_UID}' '${EXCLUDE}' add '${HOME_DIR}/Documents' >/dev/null 2>&1 && test \"\$(stat -c %i '${HOME_DIR}/Documents')\" != 256"
+kill "${holder}" 2>/dev/null; pkill -u "${TEST_USER}" -x sleep 2>/dev/null; wait "${holder}" 2>/dev/null
+check "it is snapshotted again" env SUDO_UID="${TESTER_UID}" "${EXCLUDE}" remove "${HOME_DIR}/Games"
+check "a plain folder again" test "$(stat -c %i "${HOME_DIR}/Games")" != 256
+check "with what was written while it was left out" grep -qx "save 2" "${HOME_DIR}/Games/Library/save.dat"
+check "off the list" sh -c "! grep -qxF '${HOME_DIR}/Games' /etc/amethystora/snapshot-excludes"
+S_IN="$(snapshot)"
+check "and in the next snapshot" grep -qx "save 2" "${SNAPSHOTS}/${S_IN}/${TEST_USER}/Games/Library/save.dat"
+in_home 'rm -rf Games'
+
+# What the backup leaves out is the account's own: ame backup exclude, which the Status page runs too
+check "ame backup exclude add leaves a folder of the home out" as_tester ame backup exclude add "${HOME_DIR}/Videos"
+check "starting from the image's list" grep -qxF '**/node_modules' "${HOME_DIR}/.config/amethystora/backup-excludes"
+check "and lists it" sh -c "runuser -u '${TEST_USER}' -- /usr/libexec/amethystora-backup-exclude list --json | jq -e '.own and any(.entries[]; .pattern == \"${HOME_DIR}/Videos\")'"
+check "ame backup exclude reset goes back to the image's list" as_tester ame backup exclude reset
+check "which leaves no list of the account's" test ! -e "${HOME_DIR}/.config/amethystora/backup-excludes"
 
 # Setting the backup up, as Backups' "Set up a backup…" does: ame backup setup in a terminal
 out="$(in_terminal 180 'Repository' "${REPO}"$'\r' 'Repository password' "${REPO_PASSWORD}"$'\r' \
