@@ -675,16 +675,18 @@ as_tester ame backup exclude add "${HOME_DIR}/VMs" >/dev/null
 dialog_shows() {
     local app="$1" title="$2" end=$((SECONDS + 30)) where
     while ((SECONDS < end)); do
-        for where in "${app}" xdg-desktop-portal-gnome xdg-desktop-portal-gtk; do
-            if user_bus python3 "${ATSPI}" "${where}" has "${title}" 2>/dev/null; then
-                user_bus python3 "${ATSPI}" "${where}" click Cancel button >/dev/null 2>&1 ||
-                    user_bus python3 "${ATSPI}" "${where}" click Cancel >/dev/null 2>&1
-                return 0
-            fi
-        done
+        # Whichever process draws it: the window's own GTK, or the desktop portal's file chooser (Files, on GNOME), by its
+        # title or by its accept button's words, which the window asked for
+        if { where="$(user_bus python3 "${ATSPI}" '*' which "${title}" 2>/dev/null)" ||
+            where="$(user_bus python3 "${ATSPI}" '*' which "Leave out" 2>/dev/null)"; } && [[ -n "${where}" ]]; then
+            user_bus python3 "${ATSPI}" "${where}" click Cancel button >/dev/null 2>&1 ||
+                user_bus python3 "${ATSPI}" "${where}" click Cancel >/dev/null 2>&1
+            return 0
+        fi
         sleep 1
     done
-    echo "no dialog named ${title} in ${app} or the portal"
+    echo "no window shows ${title} (the dialog of ${app}); the windows there are:"
+    user_bus python3 "${ATSPI}" '*' windows 2>&1 | head -n 40
     return 1
 }
 show_status
