@@ -86,6 +86,7 @@ integration	bash $CTX/build_files/shared/test-send-anyone.sh /usr/libexec/amethy
 integration	bash $CTX/build_files/shared/test-sensor-records.sh
 integration	bash $CTX/build_files/shared/test-session-helpers.sh
 integration	bash $CTX/build_files/shared/test-setup.sh
+integration	bash $CTX/build_files/shared/test-snapshot-exclude.sh
 integration	bash $CTX/build_files/shared/test-share-screen.sh
 integration	bash $CTX/build_files/shared/test-sleep-report.sh
 integration	bash $CTX/build_files/shared/test-start-from-backup.sh

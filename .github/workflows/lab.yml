@@ -110,7 +110,9 @@ jobs:
           # The long suites alone, a lane each: on a pull request only with the label lab, as every suite is
           if [[ "${SET}" == long ]]; then
             [[ -n "${suites}" ]] || suites="${long}"
+            # run.mjs takes twelve at most: past that the shortest share a lane
             lanes="$(tr ',' '\n' <<<"${suites}" | grep -c .)"
+            (( lanes <= 12 )) || lanes=12
           fi
           if [[ "${EVENT}" == pull_request ]]; then
             changed="$(git diff --name-only "$(git merge-base "${BASE}" HEAD)" HEAD)"

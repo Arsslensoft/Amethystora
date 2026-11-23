@@ -21,7 +21,7 @@ if command -v cosign >/dev/null; then
 else
     echo "::warning::cosign is not installed: ${IMAGE%:*}@${digest} is used unchecked"
 fi
-${PODMAN} pull --quiet --retry 3 "${IMAGE%:*}@${digest}" >/dev/null
+${PODMAN} pull --quiet "${IMAGE%:*}@${digest}" >/dev/null
 
 node_dir=()
 if command -v node >/dev/null; then
