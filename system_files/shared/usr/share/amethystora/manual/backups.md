@@ -73,6 +73,23 @@ It shows the last good backup and when the next one runs, with **Back up now**, 
 terminal; **Set up a backup…** before there is one) and the daily run's switch. The security report warns when no
 backup has succeeded for a week, and **Ask the agent** looks into one that failed.
 
+## Leaving things out
+
+Caches, the trash, containers, virtual machines and what tools rebuild by themselves are left out of the backup as the
+image ships. **Left out of the backup** on the Status page lists what you left out yourself, with **Back it up** to put
+one back, **Leave a folder out…** to add a folder of your home and **Back to the image's list**. A change applies from
+the next backup; the backups made before keep what they had.
+
+```bash
+ame backup exclude                       # what is left out
+ame backup exclude add ~/Videos          # a folder, or a pattern such as '**/build'
+ame backup exclude remove ~/Videos       # back it up again
+ame backup exclude reset                 # back to the image's list
+```
+
+Your list is `~/.config/amethystora/backup-excludes`, which the first change copies from the image's. The hourly
+snapshots leave out folders of their own, chosen in Security ([Leaving a folder out](viruses.md#leaving-a-folder-out)).
+
 ## Thinning old snapshots
 
 Nothing on this machine deletes from the repository, so old snapshots build up there. Thin them out from another

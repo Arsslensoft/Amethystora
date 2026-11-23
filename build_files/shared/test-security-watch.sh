@@ -1043,6 +1043,25 @@ jq -se 'length == 2
     and any(.[]; .level == "critical" and .account == "mallory" and (.text | startswith("350 files were deleted from mallory")))' \
     <<<"${FOUND}" >/dev/null || fail "ransomware behaviour: ${FOUND}"
 
+# A folder left out of the snapshots (amethystora-snapshot-exclude) is a subvolume they stop at: what changes in it is never
+# counted, and the hour in which the list changed reads what left a home as moved, not deleted, which says it quietly
+mkdir -p "${R}/etc/amethystora" "${S}/2026-10-10_1400"
+printf '# left out\n/var/home/alice/Games\n' >"${R}/etc/amethystora/snapshot-excludes"
+touch -d '2026-10-10 13:30' "${R}/etc/amethystora/snapshot-excludes"
+{
+    echo 'snapshot        ./2026-10-10_1400               uuid=3 transid=11 parent_uuid=1 parent_transid=10'
+    for i in $(seq 1 400); do echo "unlink          ./2026-10-10_1400/alice/Games/g${i}"; done
+    for i in $(seq 1 400); do echo "update_extent   ./2026-10-10_1400/alice/Games/w${i} offset=0 len=1"; done
+    for i in $(seq 1 350); do echo "unlink          ./2026-10-10_1400/dave/o300-1-0/v${i}"; done
+} >"${T}/dump"
+before="$(wc -l <"${HISTORY}")"
+timeout 300 "${WATCH}" >/dev/null || fail "the run reading snapshots with a folder left out failed"
+FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "snapshot-watch")')"
+jq -se 'length == 1 and .[0].account == "dave" and .[0].level != "critical"
+    and (.[0].text | startswith("350 files left dave"))' <<<"${FOUND}" >/dev/null ||
+    fail "a folder left out of the snapshots: ${FOUND}"
+rm -f "${R}/etc/amethystora/snapshot-excludes"
+
 # --- Polkit's questions in the journal ----------------------------------------------------------------------
 
 # A Vault question given up after a wrong password counts against that account, three of them make a finding; a Cancel does not

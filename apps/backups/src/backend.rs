@@ -29,6 +29,10 @@ use serde_json::Value;
 pub const RESTORE: &str = "/usr/libexec/amethystora-restore";
 /// The AI agent, which a failed backup can be handed to, unless the account turned it off
 pub const AGENT: &str = "/usr/bin/amethystora-agent";
+/// What the daily backup leaves out, the account's own list (ame backup exclude)
+pub const BACKUP_EXCLUDE: &str = "/usr/libexec/amethystora-backup-exclude";
+/// What the hourly snapshots leave out, root's list, read only here: Security changes it
+pub const SNAPSHOT_EXCLUDE: &str = "/usr/libexec/amethystora-snapshot-exclude";
 /// The daily backup, a user unit (amethystora-backup.timer)
 pub const UNIT: &str = "amethystora-backup.service";
 /// The three ways to put back, as the helper takes them (--keep-both, --replace, --skip)
@@ -90,6 +94,62 @@ pub struct Status {
     pub backup: BackupState,
     #[serde(skip)]
     pub agent: bool,
+    /// What the backup leaves out, as amethystora-backup-exclude lists it
+    #[serde(skip)]
+    pub excludes: Excludes,
+    /// The folders of this home the snapshots leave out, inside the home
+    #[serde(skip)]
+    pub left_out: Vec<String>,
+}
+
+/// One pattern the backup leaves out, and whether the image's own list has it
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Exclude {
+    pub pattern: String,
+    pub shipped: bool,
+}
+
+/// amethystora-backup-exclude list: the account's own list, or the image's while it has none
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct Excludes {
+    pub own: bool,
+    pub entries: Vec<Exclude>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct LeftOut {
+    rel: String,
+    left_out: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct SnapshotExcludes {
+    excluded: Vec<LeftOut>,
+}
+
+/// The folders of this home the snapshots leave out, from amethystora-snapshot-exclude's list
+pub fn left_out_of(stdout: &str) -> Vec<String> {
+    serde_json::from_str::<SnapshotExcludes>(stdout)
+        .map(|list| list.excluded.into_iter().filter(|e| e.left_out && !e.rel.is_empty()).map(|e| e.rel).collect())
+        .unwrap_or_default()
+}
+
+/// Leaves a pattern out of the backup, puts one back in, or goes back to the image's list (`add`, `remove`, `reset`).
+/// What is added is a folder the file dialog gave, inside the home; what is removed one the list just read
+pub async fn exclude(verb: &str, pattern: &str) -> Result<(), String> {
+    let mut args = vec![verb];
+    if verb != "reset" {
+        if pattern.is_empty() || pattern.starts_with('-') || pattern.contains('\n') {
+            return Err(String::new());
+        }
+        args.push(pattern);
+    }
+    let output = run(BACKUP_EXCLUDE, &args, Duration::from_secs(15)).await;
+    if output.code == 0 { Ok(()) } else { Err(tail(&output.stderr, 3)) }
 }
 
 /// amethystora-restore points: every point, newest first, whether the backup could be read, and this
@@ -409,10 +469,14 @@ pub struct Restore {
 impl Restore {
     pub async fn status(&self) -> Answer<Status> {
         let agent = glib::spawn_future_local(async { run(AGENT, &["status"], Duration::from_secs(15)).await });
+        let excludes = glib::spawn_future_local(async { run(BACKUP_EXCLUDE, &["list", "--json"], Duration::from_secs(15)).await });
+        let left_out = glib::spawn_future_local(async { run(SNAPSHOT_EXCLUDE, &["list", "--json"], Duration::from_secs(15)).await });
         let result: Answer<Status> = helper(&["status"], Duration::from_secs(60)).await;
         // The agentic features are on for this account unless `ame agent toggle` turned them off
         let on = agent.await.map(|output| output.code == 0).unwrap_or(false);
-        result.map(|status| Status { agent: on, ..status })
+        let excludes = excludes.await.ok().and_then(|output| serde_json::from_str::<Excludes>(&output.stdout).ok()).unwrap_or_default();
+        let left_out = left_out.await.map(|output| left_out_of(&output.stdout)).unwrap_or_default();
+        result.map(|status| Status { agent: on, excludes, left_out, ..status })
     }
 
     pub async fn points(&self) -> Answer<Timeline> {
@@ -519,6 +583,18 @@ pub fn diagnose() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_folders_the_snapshots_leave_out() {
+        let listed = r#"{"version": 1, "possible": true, "excluded": [
+            {"path": "/var/home/a/Games", "rel": "Games", "left_out": true},
+            {"path": "/var/home/a/Docs", "rel": "Docs", "left_out": false}]}"#;
+        assert_eq!(left_out_of(listed), vec!["Games".to_string()]);
+        assert!(left_out_of("").is_empty());
+        let excludes: Excludes = serde_json::from_str(r#"{"version": 1, "own": true, "entries": [{"pattern": "**/.cache", "shipped": true}]}"#).unwrap();
+        assert!(excludes.own);
+        assert_eq!(excludes.entries, vec![Exclude { pattern: "**/.cache".into(), shipped: true }]);
+    }
 
     fn output(stdout: &str, stderr: &str) -> Output {
         Output { code: 1, stdout: stdout.into(), stderr: stderr.into() }

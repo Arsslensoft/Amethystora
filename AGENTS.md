@@ -1259,6 +1259,16 @@ report's `backup-runs` check reads `status`. Never work out a point, a path or a
   a terminal, the daily run is `ame backup on|off`, and **Back up now** starts `amethystora-backup.service`
   and follows it in the journal. The hourly snapshots are a security switch: the window shows them and
   opens Security, and never runs `ame security`.
+- **What each leaves out.** The backup's list is the account's (`ame backup exclude`,
+  `/usr/libexec/amethystora-backup-exclude`, `~/.config/amethystora/backup-excludes`, copied from the image's on
+  the first change), which the Status page changes directly. The snapshots' is root's
+  (`ame security ransomware exclude`, `/usr/libexec/amethystora-snapshot-exclude`,
+  `/etc/amethystora/snapshot-excludes`, changed only from Security's **Ransomware protection** page, in a terminal
+  with a password): a btrfs snapshot cannot skip a path, so a folder left out becomes a subvolume of its own
+  (a reflink copy swapped in under the same name, refused while one of the account's programs holds it), which
+  every later snapshot shows empty. The watcher counts nothing under a listed folder and reads the hour in which
+  the list changed as files moved, not deleted. Both are on the agent's never list but `list`.
+  `test-snapshot-exclude.sh` holds both helpers to stand-ins, suite 70 the subvolume on a real disk.
 - **The last good backup** is the stamp `amethystora-backup` writes to
   `~/.local/state/amethystora/backup-last-success`. A daily run with none for 7 days is stale, which the
   window and the report's `backup-runs` check say. The security watcher runs as root, sees no account's

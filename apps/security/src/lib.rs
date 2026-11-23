@@ -119,6 +119,8 @@ pub(crate) struct PageState {
     pub switches: Option<Switches>,
     /// What the security watcher found, for the members of wheel
     pub events: Option<Events>,
+    /// The folders of this home the hourly snapshots leave out
+    pub snapshot_excludes: Option<backend::SnapshotExcludes>,
 }
 
 pub struct Security {
@@ -771,11 +773,17 @@ impl Security {
         let permissions = glib::spawn_future_local(backend::permissions());
         let switches = glib::spawn_future_local(backend::switches());
         let events = glib::spawn_future_local(backend::events());
+        let left_out = glib::spawn_future_local(backend::snapshot_excludes());
         // The switches answer in a moment and the report takes seconds: once a page has been drawn, a switch turned
         // on shows as on without waiting for the rest
         let switches = switches.await.unwrap_or_default();
+        let left_out = left_out.await.unwrap_or_default();
         let drawn = self.state.borrow().report.is_some();
-        self.state.borrow_mut().switches = Some(switches);
+        {
+            let mut state = self.state.borrow_mut();
+            state.switches = Some(switches);
+            state.snapshot_excludes = Some(left_out);
+        }
         if drawn {
             self.render();
         }

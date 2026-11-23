@@ -11,6 +11,18 @@ backup ACTION="" *MORE:
     ENV_FILE="${CONFIG_DIR}/backup.env"
     PASSWORD_FILE="${CONFIG_DIR}/backup-password"
     action="${1:-}"
+    # What the backup leaves out: the account's own list, which the Backups window changes too. Before anything is
+    # printed, so that --json stays JSON
+    if [[ "${action}" == exclude ]]; then
+        verb="${2:-list}"
+        case "${verb}" in
+            list | add | remove | reset) exec /usr/libexec/amethystora-backup-exclude "${verb}" "${@:3}" ;;
+            *)
+                echo "usage: ame backup exclude [list [--json] | add PATH | remove PATH | reset]" >&2
+                exit 64
+                ;;
+        esac
+    fi
     # The choices are shown in the session's language, and what gum prints back is matched against the same words
     # Translators: a choice in a menu: to set the backup up
     set_up="$(gettext "Set up")"
