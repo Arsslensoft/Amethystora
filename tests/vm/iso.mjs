@@ -2,8 +2,8 @@
 // looked at. Everything runs in the lab container, beside the other VMs, with the lab's helper reaching each system as a
 // systemd credential (lab.mjs), the installer's and the live session's too.
 //
-//   node iso.mjs installer ISO [--digest sha256:...]   the installer ISO (<image>-non-uefi.iso, bootc-image-builder's)
-//   node iso.mjs live ISO [--digest sha256:...]        the live ISO (<image>.iso, Titanoboa's)
+//   node iso.mjs installer ISO [--digest sha256:...] [--files SHA]   the installer ISO (<image>-non-uefi.iso, bootc-image-builder's)
+//   node iso.mjs live ISO [--digest sha256:...] [--files SHA]        the live ISO (<image>.iso, Titanoboa's)
 //
 // 1. The ISO is started by the firmware, Secure Boot on with Microsoft's keys, from its own boot menu's first entry: its
 //    shim, GRUB, kernel and system start, and are looked at (the installer's, or the live session).
@@ -16,7 +16,8 @@
 //    once more after a restart.
 //
 // Writes TAP-style lines (ok, not ok with indented lines saying why, skip) to stdout and DIR/results.tap, a screenshot
-// after each step, and exits 0 only when every line is ok. --digest is the image the ISO was built from, which the
+// after each step, and exits 0 only when every line is ok. --digest is the image the live ISO copies, --files the checksum
+// of the image's helpers and recipes (sha256sum of FILES_OF, then of that), which the installed machine must match; the
 // installed machine must run.
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -32,6 +33,10 @@ const FOLLOWS = process.env.ISO_IMAGE_REF || 'ghcr.io/arsslensoft/amethystora:st
 const option = (flag) => (process.argv.includes(flag) ? process.argv[process.argv.indexOf(flag) + 1] : undefined);
 const [kind, iso] = process.argv.slice(2);
 const DIGEST = option('--digest');
+// --files: the checksum of the image's helpers and recipes, made by FILES_OF in the image (lab-iso.yml)
+const FILES = option('--files');
+const FILES_OF = '/usr/libexec/amethystora-* /usr/share/amethystora/just/*.just';
+if (FILES && !/^[0-9a-f]{64}$/.test(FILES)) throw new Error(`iso.mjs: no checksum ${FILES}`);
 if (!['installer', 'live'].includes(kind) || !iso || !fs.existsSync(iso)) throw new Error('iso.mjs installer|live ISO [--digest D]');
 if (DIGEST && !/^sha256:[0-9a-f]{64}$/.test(DIGEST)) throw new Error(`iso.mjs: no digest ${DIGEST}`);
 const NAME = `iso-${kind}`;
@@ -197,9 +202,11 @@ async function installed(step) {
   const origin = await value("grep -h '^container-image-reference=' /ostree/deploy/*/deploy/*.origin");
   say(origin.split('\n').every((l) => l === `container-image-reference=ostree-image-signed:docker://${FOLLOWS}`) && origin !== '',
     `${step}: it follows ${FOLLOWS}, signature-checked`, origin);
-  if (DIGEST) {
-    const booted = await value("bootc status --format=json | jq -r '.status.booted.image.imageDigest // empty'", 60);
-    say(booted === DIGEST, `${step}: it runs the image the ISO was built from`, `booted ${booted || '(none)'}\nbuilt  ${DIGEST}`);
+  // Not by digest: bootc-image-builder repacks the image onto the ISO, so the installed manifest is a new one. The image's
+  // own helpers and recipes, which nearly every change touches, tell this build from a published one
+  if (FILES) {
+    const installed = await value(`export LC_ALL=C; sha256sum ${FILES_OF} | sha256sum | cut -d' ' -f1`, 60);
+    say(installed === FILES, `${step}: it runs the image the ISO was built from`, `installed ${installed}\nbuilt     ${FILES}`);
   }
   say(await yes('[ "$(findmnt -no FSTYPE /sysroot)" = btrfs ] && lsblk -nro TYPE,FSTYPE | grep -qx "crypt btrfs"'),
     `${step}: the system is btrfs on an encrypted partition`, await value('lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS'));

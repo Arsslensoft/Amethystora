@@ -162,6 +162,12 @@ jobs:
           rm "${RUNNER_TEMP}/image.tar"
           sudo podman tag localhost/amethystora-run:test "${IMAGE_REF}"
           echo "digest=$(sudo podman image inspect --format '{{.Digest}}' "${IMAGE_REF}")" >> "$GITHUB_OUTPUT"
+          # The image's helpers and recipes, which the installed machine must have (tests/vm/iso.mjs's FILES_OF): the
+          # ISO's builder repacks the image, so its digest is not the installed one
+          # shellcheck disable=SC2016
+          files="$(sudo podman run --rm --entrypoint /usr/bin/bash "${IMAGE_REF}" -c \
+            'export LC_ALL=C; sha256sum /usr/libexec/amethystora-* /usr/share/amethystora/just/*.just | sha256sum | cut -d" " -f1')"
+          echo "files=${files}" >> "$GITHUB_OUTPUT"
 
       - name: Build the installer ISO
         run: |
@@ -182,7 +188,8 @@ jobs:
       - name: Install from it, start what it installed
         env:
           DIGEST: ${{ steps.load.outputs.digest }}
-        run: bash tests/vm/iso.sh installer "${RUNNER_TEMP}/installer.iso" --digest "${DIGEST}"
+          FILES: ${{ steps.load.outputs.files }}
+        run: bash tests/vm/iso.sh installer "${RUNNER_TEMP}/installer.iso" --digest "${DIGEST}" --files "${FILES}"
 
       - name: Keep the run's files
         if: always()
@@ -246,6 +253,10 @@ jobs:
           sudo podman load -q -i "${RUNNER_TEMP}/lab/image.tar"
           sudo podman tag localhost/amethystora-run:test "${IMAGE_REF}"
           echo "digest=$(sudo podman image inspect --format '{{.Digest}}' "${IMAGE_REF}")" >> "$GITHUB_OUTPUT"
+          # shellcheck disable=SC2016
+          files="$(sudo podman run --rm --entrypoint /usr/bin/bash "${IMAGE_REF}" -c \
+            'export LC_ALL=C; sha256sum /usr/libexec/amethystora-* /usr/share/amethystora/just/*.just | sha256sum | cut -d" " -f1')"
+          echo "files=${files}" >> "$GITHUB_OUTPUT"
 
       - name: Build the live system
         env:
@@ -321,7 +332,8 @@ jobs:
         if: success() || failure()
         env:
           DIGEST: ${{ steps.load.outputs.digest }}
-        run: bash tests/vm/iso.sh live "${RUNNER_TEMP}/live.iso" --digest "${DIGEST}"
+          FILES: ${{ steps.load.outputs.files }}
+        run: bash tests/vm/iso.sh live "${RUNNER_TEMP}/live.iso" --digest "${DIGEST}" --files "${FILES}"
 
       - name: Keep the run's files
         if: always()
