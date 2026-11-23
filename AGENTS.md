@@ -327,6 +327,11 @@ with Universal Blue's key, which `ame security secure-boot` enrolls; `20-tests.s
   state is the finding's id (`displaylink:needs-enrollment`, `enrollment-pending`, `lockdown`,
   `sealed-no-secure-boot`, `service`, `refused`), said again only when the state changes, and it offers enrolling
   only with Secure Boot on, since without it lockdown refuses every key but the kernel's (`test-driver-status.sh`).
+  Because the driver check says a refused module, a refusal for its key or by lockdown (v4l2loopback on a new machine
+  with Secure Boot on) does not fail `systemd-modules-load`, nor the composefs root Anaconda's fstab asks to remount
+  `systemd-remount-fs`: both run through `/usr/libexec/amethystora-early-units` (their `50-amethystora-known-failures.conf`
+  drop-ins), which still fails them on anything else and passes their words to their journals, where the driver check
+  reads them (`test-early-units.sh`). A new installation starts with every unit started, which the Lab (ISOs) checks.
 - **DisplayLinkManager is sandboxed** (`displaylink.service.d/20-amethystora-sandbox.conf`, the maintainer's choice of
   2026-11-17 over a switch): any USB device can claim vendor `17e9`, and the closed manager parses it as root. The
   sandbox was drawn from what the package and the program name and tried without a dock: keep `/tmp` shared (the

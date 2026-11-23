@@ -54,6 +54,7 @@ integration	bash $CTX/build_files/shared/test-dev-services.sh
 integration	bash $CTX/build_files/shared/test-disk-health.sh
 integration	bash $CTX/build_files/shared/test-dns-domains.sh
 integration	bash $CTX/build_files/shared/test-driver-status.sh
+integration	bash $CTX/build_files/shared/test-early-units.sh
 integration	bash $CTX/build_files/shared/test-file-find.sh
 integration	bash $CTX/build_files/shared/test-files-group.sh
 integration	bash $CTX/build_files/shared/test-get-through.sh /usr/libexec/amethystora-metered

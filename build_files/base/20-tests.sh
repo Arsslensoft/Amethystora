@@ -5565,6 +5565,9 @@ mapfile -t DRIVERS_MANUAL < <(jq -r '.findings[].manual' <<<"${DRIVERS_FOUND}" |
 "${NODE[@]}" /ctx/build_files/shared/check-manual.js /usr/share/amethystora/manual --links "${DRIVERS_MANUAL[@]}"
 rm -rf "${DRIVERS_TEST}"
 bash /ctx/build_files/shared/test-driver-status.sh
+# ...which is also why a module refused for its key does not leave the start "degraded", nor the composefs root that
+# cannot be remounted: anything else systemd-modules-load or systemd-remount-fs meets still fails them
+bash /ctx/build_files/shared/test-early-units.sh
 # For developers (ame dev): a database or a mail catcher in one line, the port that is taken, and whether a container can use the graphics
 # card. Each is a program of the account's own against stand-ins for podman, systemctl, ss, the card and its devices; the images they
 # name are pinned by digest (a pull of one happens only on a person's machine), and nothing listens beyond the loopback address
