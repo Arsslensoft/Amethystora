@@ -80,8 +80,8 @@ for command in "${mine[@]}"; do
     name="$(grep -oE '(test|check)-[a-z0-9-]+\.(sh|mjs|js)' <<<"${command}" | head -1)"
     log="${RESULTS}/${name}.log"
     start="${SECONDS}"
-    # As 20-tests.sh runs them: root, from /, its own HOME, no terminal
-    (cd / && env HOME=/root TERM=dumb LANG=C.UTF-8 timeout --kill-after=30 "${LIMIT}" bash -c "${command}") \
+    # As 20-tests.sh runs them: root, from /, its own HOME, no terminal and no TERM (starship, for one, draws nothing under TERM=dumb)
+    (cd / && env -u TERM HOME=/root LANG=C.UTF-8 timeout --kill-after=30 "${LIMIT}" bash -c "${command}") \
         </dev/null >"${log}" 2>&1
     status=$?
     took=$((SECONDS - start))
