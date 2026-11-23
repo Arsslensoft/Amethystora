@@ -19,7 +19,6 @@
   "Backups": "Backups",
   "Backups in the manual": "Backups in the manual",
   "Browse": "Browse",
-  "Caches, the trash, containers, virtual machines and what a tool rebuilds by itself are left out as the image ships. A folder left out is not in the next backup; the backups made before keep it.": "Caches, the trash, containers, virtual machines and what a tool rebuilds by itself are left out as the image ships. A folder left out is not in the next backup; the backups made before keep it.",
   "Cancel": "Cancel",
   "Changed since": "Changed since",
   "Change…": "Change…",
@@ -54,6 +53,7 @@
   "Leave a folder out…": "Leave a folder out…",
   "Leave out": "Leave out",
   "Left out": "Left out",
+  "Left out of the backup": "Left out of the backup",
   "Look": "Look",
   "Looking for every version of {name}…": "Looking for every version of {name}…",
   "Looking for your snapshots and backups…": "Looking for your snapshots and backups…",
@@ -153,9 +153,9 @@
   "{count, plural, one {# selected} other {# selected}}": "{count, plural, one {# selected} other {# selected}}",
   "{count, plural, one {# snapshot of your home folder} other {# snapshots of your home folder}}": "{count, plural, one {# snapshot of your home folder} other {# snapshots of your home folder}}",
   "{count, plural, one {# was not there then.} other {# were not there then.}}": "{count, plural, one {# was not there then.} other {# were not there then.}}",
-  "{count, plural, one {Left out of the backup: # pattern} other {Left out of the backup: # patterns}}": "{count, plural, one {Left out of the backup: # pattern} other {Left out of the backup: # patterns}}",
   "{count, plural, one {Something with this name is in your folder now} other {Some of these are in your folder now}}": "{count, plural, one {Something with this name is in your folder now} other {Some of these are in your folder now}}",
   "{count, plural, one {The earlier version of # file is beside the newer one, with its date in its name.} other {The earlier versions of # files are beside the newer ones, with their date in their names.}}": "{count, plural, one {The earlier version of # file is beside the newer one, with its date in its name.} other {The earlier versions of # files are beside the newer ones, with their date in their names.}}",
+  "{count, plural, one {The image's list leaves out # pattern: caches, the trash, containers, virtual machines and what a tool rebuilds by itself. A folder left out is not in the next backup; the backups made before keep it.} other {The image's list leaves out # patterns: caches, the trash, containers, virtual machines and what a tool rebuilds by itself. A folder left out is not in the next backup; the backups made before keep it.}}": "{count, plural, one {The image's list leaves out # pattern: caches, the trash, containers, virtual machines and what a tool rebuilds by itself. A folder left out is not in the next backup; the backups made before keep it.} other {The image's list leaves out # patterns: caches, the trash, containers, virtual machines and what a tool rebuilds by itself. A folder left out is not in the next backup; the backups made before keep it.}}",
   "{days, plural, one {No backup has succeeded for # day} other {No backup has succeeded for # days}}": "{days, plural, one {No backup has succeeded for # day} other {No backup has succeeded for # days}}",
   "{folder} as it was": "{folder} as it was"
 }

@@ -235,7 +235,8 @@ watch_before="$(/usr/libexec/amethystora-security-config SNAPSHOT_WATCH)"
 in_home 'for i in $(seq 1 400); do printf "level %s\n" "$i" >"Games/Library/level $i.txt"; done'
 snapshot >/dev/null
 timeout 600 /usr/libexec/amethystora-security-watch >/dev/null 2>&1
-events_at="$(wc -l <"${EVENTS}" 2>/dev/null || echo 0)"
+events_at=0
+[[ -f "${EVENTS}" ]] && events_at="$(wc -l <"${EVENTS}")"
 no_wiper() {
     local found
     found="$(tail -n +"$((events_at + 1))" "${EVENTS}" 2>/dev/null | jq -c 'select(.key == "snapshot-watch" and .level == "critical")')"
@@ -665,37 +666,50 @@ pkill -TERM -o -u "${TEST_USER}" -f '^/usr/lib/amethystora-security/amethystora-
 
 # --- What each leaves out, in the windows ---------------------------------------------------------------------------------------
 
-# Backups' Status page: what the backup leaves out, folded away and kept open when the page is read again, a folder put back into
-# the backup, the image's list again, the folder dialog that leaves one out, and the folders the snapshots leave out
+# Backups' Status page: what the backup leaves out here, a folder put back into the backup, the image's list again, the folder
+# dialog that leaves one out (the desktop portal's, or GTK's own in the window), and the folders the snapshots leave out
 in_home 'mkdir -p Games VMs'
 env SUDO_UID="${TESTER_UID}" "${EXCLUDE}" add "${HOME_DIR}/Games" >/dev/null
 as_tester ame backup exclude add "${HOME_DIR}/VMs" >/dev/null
+# The folder dialog TITLE, in APP's window or the portal's, closed again
+dialog_shows() {
+    local app="$1" title="$2" end=$((SECONDS + 30)) where
+    while ((SECONDS < end)); do
+        for where in "${app}" xdg-desktop-portal-gnome xdg-desktop-portal-gtk; do
+            if user_bus python3 "${ATSPI}" "${where}" has "${title}" 2>/dev/null; then
+                user_bus python3 "${ATSPI}" "${where}" click Cancel button >/dev/null 2>&1 ||
+                    user_bus python3 "${ATSPI}" "${where}" click Cancel >/dev/null 2>&1
+                return 0
+            fi
+        done
+        sleep 1
+    done
+    echo "no dialog named ${title} in ${app} or the portal"
+    return 1
+}
 show_status
 check "the Status page says what the backup leaves out" atspi wait 30 "Left out of the backup"
-check "which folds open" atspi click "Left out of the backup"
-check "listing the folder left out" atspi wait 30 "~/VMs"
+check "with the folder left out here" atspi wait 30 "~/VMs"
 check "and the folder the snapshots leave out" atspi wait 30 "~/Games"
 check "Back it up puts a folder back into the backup" atspi click "Back up ~/VMs again" button
 check "which the account's list no longer has" wait_for 30 sh -c "! grep -qxF '${HOME_DIR}/VMs' '${HOME_DIR}/.config/amethystora/backup-excludes'"
-check "and the list stays open as the page reads it again" atspi wait 30 "Back to the image's list"
 check "Back to the image's list takes the account's own away" atspi click "Back to the image's list" button
 check "which is gone" wait_for 30 test ! -e "${HOME_DIR}/.config/amethystora/backup-excludes"
 check "Leave a folder out… opens a folder dialog" atspi click "Leave a folder out…" button
-check "named for the backup" atspi wait 30 "Leave a folder out of the backup"
-atspi click Cancel button >/dev/null 2>&1
+check "named for the backup" dialog_shows amethystora-backups "Leave a folder out of the backup"
 
 # Security's Ransomware protection page: the folders the snapshots leave out, each offered back in a terminal (where the recipe
 # says what it costs and sudo asks), the folder dialog, and the Settings tile's count
 sec() { user_bus python3 "${ATSPI}" amethystora-security "$@"; }
 user_bus systemd-run --user --no-block --collect --quiet -- /usr/bin/amethystora-security settings/snapshots >/dev/null 2>&1
-check "Security opens on Ransomware protection" sec wait 120 "Left out of the snapshots"
+# A section's title is in capitals, written so (section() in apps/security/src/page.rs)
+check "Security opens on Ransomware protection" sec wait 120 "LEFT OUT OF THE SNAPSHOTS"
 check "listing the folder left out" sec wait 30 "~/Games"
 check "Snapshot it again opens the recipe in a terminal" sec click "Snapshot ~/Games again" button
 check "which asks to snapshot it again" wait_for 60 pgrep -u "${TEST_USER}" -f 'ransomware exclude remove'
 pkill -u "${TEST_USER}" -f 'ransomware exclude remove' 2>/dev/null
 check "Leave a folder out… opens a folder dialog there too" sec click "Leave a folder out…" button
-check "named for the snapshots" sec wait 30 "Leave a folder out of the hourly snapshots"
-sec click Cancel button >/dev/null 2>&1
+check "named for the snapshots" dialog_shows amethystora-security "Leave a folder out of the hourly snapshots"
 check "the Settings page" sec click Settings
 check "counts the folder on its tile" sec wait 60 "On, 1 folder left out"
 pkill -TERM -o -u "${TEST_USER}" -f '^/usr/lib/amethystora-security/amethystora-security' 2>/dev/null

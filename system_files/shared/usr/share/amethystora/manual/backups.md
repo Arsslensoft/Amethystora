@@ -76,9 +76,9 @@ backup has succeeded for a week, and **Ask the agent** looks into one that faile
 ## Leaving things out
 
 Caches, the trash, containers, virtual machines and what tools rebuild by themselves are left out of the backup as the
-image ships. **Left out of the backup** on the Status page lists each, with **Back it up** to put one back and
-**Leave a folder out…** to add a folder of your home. A change applies from the next backup; the backups made before
-keep what they had.
+image ships. **Left out of the backup** on the Status page lists what you left out yourself, with **Back it up** to put
+one back, **Leave a folder out…** to add a folder of your home and **Back to the image's list**. A change applies from
+the next backup; the backups made before keep what they had.
 
 ```bash
 ame backup exclude                       # what is left out

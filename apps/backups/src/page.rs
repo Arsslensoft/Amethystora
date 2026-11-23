@@ -1266,15 +1266,24 @@ impl Backups {
         pattern.strip_prefix(&home).map(|rel| format!("~/{rel}")).unwrap_or_else(|| pattern.to_string())
     }
 
-    /// What the backup leaves out, folded away: each with the way to back it up again, and a folder chosen to leave out
-    fn excludes_list(&self) -> gtk::Expander {
+    /// What the backup leaves out: what was left out here, each with the way to back it up again, the image's own list in one
+    /// sentence (`ame backup exclude` lists it), and a folder chosen to leave out
+    fn excludes_list(&self) -> gtk::Box {
         let excludes = self.state.borrow().status.as_ref().map(|status| status.excludes.clone()).unwrap_or_default();
         let inside = ui::vbox(6, &["excludes"]);
+        inside.append(&heading(&t!("Left out of the backup"), "h4"));
+        let image = excludes.entries.iter().filter(|e| e.shipped).count() as f64;
         inside.append(&ui::limit(
-            &pretty(&t!("Caches, the trash, containers, virtual machines and what a tool rebuilds by itself are left out as the image ships. A folder left out is not in the next backup; the backups made before keep it."), &["setting-text"]),
+            &pretty(
+                &t!(
+                    "{count, plural, one {The image's list leaves out # pattern: caches, the trash, containers, virtual machines and what a tool rebuilds by itself. A folder left out is not in the next backup; the backups made before keep it.} other {The image's list leaves out # patterns: caches, the trash, containers, virtual machines and what a tool rebuilds by itself. A folder left out is not in the next backup; the backups made before keep it.}}",
+                    count = image
+                ),
+                &["setting-text"],
+            ),
             640,
         ));
-        for entry in &excludes.entries {
+        for entry in excludes.entries.iter().filter(|e| !e.shipped) {
             let row = ui::hbox(10, &["exclude-row"]);
             let shown = ui::label(&self.shown_pattern(&entry.pattern), &["code"]);
             shown.set_direction(gtk::TextDirection::Ltr);
@@ -1297,21 +1306,7 @@ impl Backups {
                 &["actions"],
             ),
         );
-        let count = excludes.entries.len() as f64;
-        let expander = gtk::Expander::builder()
-            .label(t!("{count, plural, one {Left out of the backup: # pattern} other {Left out of the backup: # patterns}}", count = count))
-            .child(&inside)
-            .expanded(self.state.borrow().excludes_open)
-            .css_classes(["excludes-expander"])
-            .build();
-        // Kept, not drawn again: a change to the list reads the status again, and the page is built anew
-        let weak = self.me.clone();
-        expander.connect_expanded_notify(move |expander| {
-            if let Some(this) = upgrade(&weak) {
-                this.state.borrow_mut().excludes_open = expander.is_expanded();
-            }
-        });
-        expander
+        inside
     }
 
     fn snapshots_card(&self) -> gtk::Box {
