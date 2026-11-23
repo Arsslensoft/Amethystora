@@ -311,8 +311,9 @@ try {
       ...answered(ownText, ['xconfig --startxonboot']), '', ownText].join('\n');
     await sh('mkdir -p /run/lab');
     await write('/run/lab/lab.ks', ks);
+    // --cmdline asks nothing and needs no terminal (the image has no script(1) to give it one)
     const begin = await sh(`systemd-run --unit=lab-install --property=StandardOutput=file:/run/lab/anaconda.out --property=StandardError=inherit \
-      /usr/bin/script -qefc '/usr/sbin/anaconda --liveinst --cmdline --kickstart=/run/lab/lab.ks' /dev/null`, 60);
+      /usr/sbin/anaconda --liveinst --cmdline --kickstart=/run/lab/lab.ks`, 60);
     if (!say(begin.rc === 0, 'Anaconda starts on the kickstart', begin.err)) throw new Error('stop');
     let state = '';
     for (const until = Date.now() + 75 * 60000; Date.now() < until; await sleep(15000)) {

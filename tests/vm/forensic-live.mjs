@@ -74,6 +74,8 @@ const args = ['-name', NAME, '-enable-kvm', '-machine', 'q35,smm=off', '-cpu', '
   '-qmp', `unix:${file('qmp')},server=on,wait=off`, '-pidfile', file('pid'), ...credentials()];
 const log = fs.openSync(file('log'), 'w');
 const qemu = spawn('qemu-system-x86_64', args, { detached: true, stdio: ['ignore', log, log] });
+let ended = '';
+qemu.on('exit', (code, signal) => { ended = `exit ${code ?? ''}${signal ? ` signal ${signal}` : ''}`; });
 qemu.unref();
 const alive = () => {
   try {
@@ -89,13 +91,16 @@ const sh = async (command, timeout = 120, extra = {}) => {
 const out = async (command, timeout) => (await sh(command, timeout)).out.trim();
 
 try {
+  // QEMU writes its pid file once it has started: until then it is not "stopped" (the helper's socket is not there yet
+  // either, so the first ping fails at once)
+  for (let i = 0; i < 50 && !alive() && !ended; i++) await sleep(200);
   // The first start is slow under nested virtualization
   for (let waited = 0; ; waited += 5) {
     try {
       await agent(NAME, { op: 'ping' }, 5);
       break;
     } catch {
-      if (!alive()) throw new Error(`QEMU stopped: ${fs.readFileSync(file('log'), 'utf8')}`);
+      if (!alive()) throw new Error(`QEMU stopped (${ended || 'no pid file'}): ${fs.readFileSync(file('log'), 'utf8')}`);
       if (waited > 1200) throw new Error('the live system did not answer within 20 minutes');
       await sleep(5000);
     }
