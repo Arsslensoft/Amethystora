@@ -113,8 +113,10 @@ async function start({ cdrom = false, kernel, extra = [], creds = {}, memory = 8
   for (const ext of ['pid', 'agent', 'qmp', 'console']) fs.rmSync(file(ext), { force: true });
   const args = ['-name', NAME, '-enable-kvm', '-machine', 'q35,smm=off', '-cpu', 'host', '-smp', '4', '-m', String(memory),
     '-global', 'ICH9-LPC.disable_s3=1', '-bios', `${OVMF}/OVMF.qemuvars.fd`, '-device', `uefi-vars-x64,jsonfile=${VARS}`,
-    '-drive', `file=${DISK},if=none,id=disk,format=qcow2,discard=unmap`, '-device', 'virtio-blk-pci,drive=disk,bootindex=1',
-    ...(cdrom ? ['-drive', `file=${iso},media=cdrom,if=none,id=cd,readonly=on,format=raw`, '-device', 'ide-cd,drive=cd,bus=ide.0,bootindex=0'] : []),
+    // A kernel handed over directly takes boot index 0 (QEMU's linuxboot), so the disks then have none
+    '-drive', `file=${DISK},if=none,id=disk,format=qcow2,discard=unmap`, '-device', `virtio-blk-pci,drive=disk${kernel ? '' : ',bootindex=1'}`,
+    ...(cdrom ? ['-drive', `file=${iso},media=cdrom,if=none,id=cd,readonly=on,format=raw`,
+      '-device', `ide-cd,drive=cd,bus=ide.0${kernel ? '' : ',bootindex=0'}`] : []),
     ...(kernel ? ['-kernel', kernel.kernel, '-initrd', kernel.initrd, '-append', kernel.append] : []),
     ...extra,
     '-netdev', 'user,id=n0', '-device', 'virtio-net-pci,netdev=n0',
@@ -139,19 +141,24 @@ async function write(target, text) {
   const a = await agent(NAME, { op: 'write', path: target, data: Buffer.from(text).toString('base64'), mode: '0644' });
   if (a.rc !== 0) throw new Error(`writing ${target}: ${a.error}`);
 }
-// Until the helper answers: the firmware, the boot menu's timeout and, under nested virtualization, a slow first start
-async function answers(minutes) {
+// Until the helper answers from the system itself: the firmware, the boot menu's timeout and, under nested
+// virtualization, a slow first start. It starts in the initramfs already (systemd hands it the credential there), where
+// nothing of the system is to be seen yet, so an answer from the initramfs is waited past; with initramfs, it is enough
+async function answers(minutes, initramfs = false) {
   for (const until = Date.now() + minutes * 60000; Date.now() < until; await sleep(5000)) {
     if (!alive()) return 'stopped';
     try {
       await agent(NAME, { op: 'ping' }, 5);
-      return 'answers';
+      if (initramfs || (await sh('test ! -e /etc/initrd-release', 10)).rc === 0) return 'answers';
     } catch {
-      // Not yet
+      // Not yet, or switching from the initramfs to the system
     }
   }
   return 'silent';
 }
+// Secure Boot as the firmware says it, which needs no mokutil (the installer's system has none): the SecureBoot variable's
+// last byte
+const SECURE_BOOT = 'test "$(od -An -t u1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null | awk \'{ print $NF }\')" = 1';
 async function shot(step) {
   try {
     fs.writeFileSync(`${DIR}/${step}.png`, await screendump(NAME));
@@ -186,7 +193,7 @@ async function installed(step) {
   const state = await value('systemctl is-system-running --wait', 900);
   say(state === 'running', `${step}: the start ends with every unit started (${state})`,
     await value('systemctl --failed --no-pager --plain; journalctl -b -p err --no-pager -n 40'));
-  say(await yes('mokutil --sb-state 2>&1 | grep -q "SecureBoot enabled"'), `${step}: Secure Boot is on`, await value('mokutil --sb-state 2>&1'));
+  say(await yes(SECURE_BOOT), `${step}: Secure Boot is on`);
   const origin = await value("grep -h '^container-image-reference=' /ostree/deploy/*/deploy/*.origin");
   say(origin.split('\n').every((l) => l === `container-image-reference=ostree-image-signed:docker://${FOLLOWS}`) && origin !== '',
     `${step}: it follows ${FOLLOWS}, signature-checked`, origin);
@@ -233,7 +240,7 @@ try {
     throw new Error('stop');
   }
   if (first === 'answers') {
-    say(await yes('mokutil --sb-state 2>&1 | grep -q "SecureBoot enabled"'), 'Secure Boot is on in the started ISO', await value('mokutil --sb-state 2>&1'));
+    say(await yes(SECURE_BOOT), 'Secure Boot is on in the started ISO');
     say(await yes('! rpm -q fedora-logos >/dev/null 2>&1'), 'the started system carries no Fedora logo package');
   }
 
@@ -324,7 +331,7 @@ try {
     say(initial !== '', 'GNOME Initial Setup starts, to make the first account', await value('systemctl status gdm --no-pager -n 20'));
     note('restarting once');
     await sh('systemctl reboot', 20).catch(() => {});
-    for (let i = 0; i < 120 && (await answers(0.05)) === 'answers'; i++) await sleep(1000);
+    for (let i = 0; i < 120 && (await answers(0.05, true)) === 'answers'; i++) await sleep(1000);
     await installed('after a restart');
     await shot('3-restarted');
     await poweroff();
