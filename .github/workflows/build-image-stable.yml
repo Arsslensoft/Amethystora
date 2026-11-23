@@ -1,14 +1,8 @@
 name: Stable Images
 on:
+  # Not on pull requests: Latest Images builds the same six images there, on the same Fedora release, and the
+  # stable stream's own step (sealing) is tried in the merge queue, on the schedule and by hand
   merge_group: # Make Stable-Daily run on merge groups
-  pull_request:
-    branches:
-      - main
-      - testing
-    paths-ignore:
-      - "**.md"
-      - ".github/workflows/*validate*.yml"
-      - "system_files/shared/etc/bazaar/**"
   schedule:
     - cron: "0 1 * * TUE" # Every Tuesday at 1:00 AM UTC
   workflow_call:
