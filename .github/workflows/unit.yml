@@ -1,0 +1,120 @@
+name: Unit tests
+
+# The tests of the logic itself, apart from a booted machine: the apps' crates (cargo test, as building the apps layer runs
+# them) and the shell's and the scripts' logic in JavaScript (tests/ci/tests.txt's unit lines, under Node, against the
+# files themselves in the last published image with this change's system_files laid over it, tests/ci/in-image.sh). They
+# hold no secret and publish nothing. The job named Unit says whether all of it passed. The helpers against stand-ins are
+# the Integration workflow's, the booted machine the Lab's.
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Every test of build_files/shared is in tests/ci/tests.txt, so that none is written and never run
+  listed:
+    name: Every test runs
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Every test is in tests/ci/tests.txt
+        run: bash tests/ci/run.sh --listed
+
+  javascript:
+    name: JavaScript
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      - name: The unit tests in the image
+        env:
+          RESULTS: ${{ runner.temp }}/results
+        run: |
+          status=0
+          sudo --preserve-env=RESULTS env "PATH=${PATH}" bash tests/ci/in-image.sh unit || status=1
+          cat "${RESULTS}/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          exit "${status}"
+
+      - name: Keep the logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-javascript-logs
+          path: ${{ runner.temp }}/results
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Building the apps layer (layers/apps.Containerfile, build-apps.sh) runs every crate's tests with the verifiers they
+  # need, on the base the apps run on. A layer GHCR has for the same key was built, and so tested, from the same files:
+  # it is used and said, and nothing is compiled again
+  rust:
+    name: Rust
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Maximize build space
+        uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6 # master
+
+      - uses: ./.github/actions/install-just
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        with:
+          install-dir: /usr/local/bin
+          use-sudo: true
+
+      - name: Build the apps layer, which runs the crates' tests
+        run: |
+          sudo rm -f /tmp/amethystora-layers-built
+          sudo env AMETHYSTORA_LAYERS=apps "$(command -v just)" build-ghcr amethystora latest main
+          if grep -q '^amethystora-apps ' /tmp/amethystora-layers-built; then
+            echo "The apps layer was built here, and every crate's tests passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::notice title=Rust::The apps layer of these exact files is on GHCR, built and tested before: nothing was compiled again"
+            echo "The apps layer of these exact files is on GHCR, built and tested before: nothing was compiled again" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The one check to require
+  unit:
+    name: Unit
+    needs: [listed, javascript, rust]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ needs.listed.result }} ${{ needs.javascript.result }} ${{ needs.rust.result }}
+        run: |
+          echo "Every test runs, JavaScript, Rust: ${RESULTS}"
+          [[ "${RESULTS}" == "success success success" ]]

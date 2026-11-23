@@ -5826,6 +5826,9 @@ bash /ctx/build_files/shared/test-vault.sh /ctx
 # nobody, the sandbox recipe, the agent's never list (tests/vm/suites/72-plugins.sh is what runs it)
 bash /ctx/build_files/shared/test-plugins.sh /ctx
 
+# The terminal's extras run nothing from a Homebrew folder the account does not own (bling.sh, bling.fish)
+bash /ctx/build_files/shared/test-bling.sh
+
 # these packages are supposed to be removed
 # and are considered footguns
 UNWANTED_PACKAGES=(
@@ -5882,6 +5885,11 @@ bash /ctx/build_files/shared/test-repo-pin.sh
 
 # Swapped-out memory: lzo-rle, with zstd for what stays unused (zram-generator.conf.d, and the hourly timer below)
 grep -qx 'compression-algorithm = lzo-rle zstd' /usr/lib/systemd/zram-generator.conf.d/10-amethystora.conf
+# ...repacked by the timer's helper, and tailscaled run only once chosen or joined, each against stand-ins; and the
+# session's small helpers (the greeting, Super+Return's terminal, the repository, a notice's Ask the agent, the buses)
+bash /ctx/build_files/shared/test-zram-recompress.sh
+bash /ctx/build_files/shared/test-tailscale.sh
+bash /ctx/build_files/shared/test-session-helpers.sh
 
 IMPORTANT_UNITS=(
     clamav-freshclam.service

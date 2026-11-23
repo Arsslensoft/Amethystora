@@ -5,6 +5,7 @@
 // journal, results.json, and summary.md, which it prints last.
 //
 //   node run.mjs [all | build | disk | test | plan | ready] [--keep] [--image IMAGE] [--tag TAG] [--suites NN,NN...]
+//                [--skip NN,NN...]
 //                [--parallel N [--reuse]] [--memory MB] [--json]
 //   node run.mjs report DIR [--expect NAME,...]
 //
@@ -13,7 +14,8 @@
 // 0 only when everything that ran passed. VMLAB_NAME (default test) names the run's image tag, disks and VMs,
 // so that two sessions' runs do not take each other's. --image builds amethystora-dx, or either with -nvidia-open or
 // -nvidia-lts, instead of amethystora; --tag builds that stream (beta, which can be on the next Fedora) instead of
-// latest; --suites runs only the suites with those numbers or names (11, 11-dock-screens).
+// latest; --suites runs only the suites with those numbers or names (11, 11-dock-screens), and --skip leaves those out
+// (the Lab workflow's run of every suite leaves out the long ones, which Lab (long suites) runs a runner each).
 //
 // --parallel N runs the suites in N VMs at once. VM NAME starts on the disk, runs the suites shards.json calls prep
 // (the boot, the first-run setup, the sign-in), waits for the first boot's Flatpaks and powers itself off: that is
@@ -63,8 +65,10 @@ if (!/^amethystora(-dx)?(-nvidia-(open|lts))?$/.test(BUILD)) throw new Error(`ru
 const TAG = option('--tag') || 'latest';
 if (!/^(latest|beta|stable)$/.test(TAG)) throw new Error(`run.mjs: no stream ${TAG}`);
 const ONLY = option('--suites')?.split(',');
+const SKIP = option('--skip')?.split(',').filter(Boolean);
 // A suite by its number (every suite of it) or by its whole name, with or without .sh
-const only = (f) => !ONLY || ONLY.some((o) => o === f.slice(0, 2) || o === f || `${o}.sh` === f);
+const named = (list, f) => list.some((o) => o === f.slice(0, 2) || o === f || `${o}.sh` === f);
+const only = (f) => (!ONLY || named(ONLY, f)) && !(SKIP && named(SKIP, f));
 const BUILT = `localhost/${BUILD}:${TAG}`;
 // What `just build` tags, kept under the run's own name at once, which the disks are made from
 const IMAGE = `localhost/amethystora-run:${NAME}`;

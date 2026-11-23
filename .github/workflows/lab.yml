@@ -35,6 +35,25 @@ on:
         description: How many runners the suites are spread over (1 to 12)
         type: number
         default: 10
+  # Lab (long suites), lab-long.yml, runs the suites shards.json calls long through this, a runner each
+  workflow_call:
+    inputs:
+      image:
+        type: string
+        default: amethystora
+      stream:
+        type: string
+        default: latest
+      suites:
+        type: string
+        default: ""
+      lanes:
+        type: number
+        default: 10
+      # all: as this workflow runs by itself; long: the long suites only, each on a lane of its own
+      set:
+        type: string
+        default: all
   # Not `labeled`: a run for another label would end in a skipped Lab, which a required check takes for a pass
   pull_request:
   merge_group:
@@ -83,9 +102,16 @@ jobs:
           EVERY_SUITE: ${{ contains(github.event.pull_request.labels.*.name, 'lab') }}
           LANES: ${{ inputs.lanes || 10 }}
           SUITES: ${{ inputs.suites }}
+          SET: ${{ inputs.set || 'all' }}
           VMLAB_DIR: ${{ runner.temp }}/vm
         run: |
-          lanes="${LANES}" suites="${SUITES}"
+          lanes="${LANES}" suites="${SUITES}" skip=""
+          long="$(jq -r '.long | join(",")' tests/vm/shards.json)"
+          # The long suites alone, a lane each: on a pull request only with the label lab, as every suite is
+          if [[ "${SET}" == long ]]; then
+            [[ -n "${suites}" ]] || suites="${long}"
+            lanes="$(tr ',' '\n' <<<"${suites}" | grep -c .)"
+          fi
           if [[ "${EVENT}" == pull_request ]]; then
             changed="$(git diff --name-only "$(git merge-base "${BASE}" HEAD)" HEAD)"
             if ! grep -qv '\.md$' <<<"${changed}"; then
@@ -93,13 +119,23 @@ jobs:
               echo "run=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            if [[ "${EVERY_SUITE}" != true ]]; then
+            if [[ "${SET}" == long && "${EVERY_SUITE}" != true ]]; then
+              echo "The long suites run for a pull request with the label lab" >> "$GITHUB_STEP_SUMMARY"
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            elif [[ "${EVERY_SUITE}" != true ]]; then
               lanes=1 suites="$(jq -r '.smoke | join(",")' tests/vm/shards.json)"
+            elif [[ "${SET}" != long ]]; then
+              # Every suite but the long ones, which Lab (long suites) runs beside this, a runner each
+              skip="${long}"
             fi
           fi
           args=(plan --parallel "${lanes}" --json)
           [[ -z "${suites}" ]] || args+=(--suites "${suites}")
+          [[ -z "${skip}" ]] || args+=(--skip "${skip}")
           plan="$(node tests/vm/run.mjs "${args[@]}")"
+          # What is left out is written into the selection, so that the build makes only the disks the lanes need
+          [[ -z "${skip}" ]] || suites="$(jq -r .suites <<<"${plan}")"
           { echo "run=true"; echo "selection=${suites}"; } >> "$GITHUB_OUTPUT"
           for key in ready installer lanes suites; do
             echo "${key}=$(jq -c -r ".${key}" <<<"${plan}")" >> "$GITHUB_OUTPUT"

@@ -36,8 +36,18 @@ mkdir -p /etc/containers/storage.rootful.conf.d
 for conf in "${vendor[@]}"; do
     printf '[storage.options]\nadditionalimagestores = []\n' >"/etc/containers/storage.rootful.conf.d/${conf##*/}"
 done
-podman pull "${BASE_IMAGE%:*}@${BASE_DIGEST}"
-podman tag "${BASE_IMAGE%:*}@${BASE_DIGEST}" "${BASE_IMAGE}"
+# The lab (lab-iso.yml) builds the live ISO of an image no registry has: LIVE_COPY_FROM names it as an archive the
+# build mounts, of the same digest. Nothing else sets it, so a published ISO's copy always comes from the registry
+if [[ -n "${LIVE_COPY_FROM:-}" ]]; then
+    [[ "${LIVE_COPY_FROM}" == oci-archive:/run/lab/* ]] || { echo "LIVE_COPY_FROM is the lab's archive, not ${LIVE_COPY_FROM}" >&2; exit 1; }
+    copied="$(podman pull -q "${LIVE_COPY_FROM}")"
+    [[ "$(podman image inspect --format '{{.Digest}}' "${copied}")" == "${BASE_DIGEST}" ]] ||
+        { echo "the lab's archive is not ${BASE_DIGEST}" >&2; exit 1; }
+    podman tag "${copied}" "${BASE_IMAGE}"
+else
+    podman pull "${BASE_IMAGE%:*}@${BASE_DIGEST}"
+    podman tag "${BASE_IMAGE%:*}@${BASE_DIGEST}" "${BASE_IMAGE}"
+fi
 for conf in "${vendor[@]}"; do rm "/etc/containers/storage.rootful.conf.d/${conf##*/}"; done
 rmdir --ignore-fail-on-non-empty /etc/containers/storage.rootful.conf.d
 rm -rf /run/containers/storage

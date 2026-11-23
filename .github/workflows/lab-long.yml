@@ -1,0 +1,47 @@
+name: Lab (long suites)
+
+# The VM lab's suites of ten minutes and more (shards.json's long: the privacy wait, hardening, the pools of disks, the
+# Vault, Control, the containers...), each on a runner of its own, beside the Lab workflow's run of every other suite:
+# the longest of them is then the whole run's time, not their sum. The same jobs as Lab's, through lab.yml (its set
+# input), so a failure here is tried again with `run.sh test --suites` as there. For a pull request with the label lab,
+# as every suite is, and by hand. It holds no secret, builds with throwaway keys and publishes nothing; its job named
+# Long / Lab says whether every long suite passed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: The image to build and test
+        type: choice
+        default: amethystora
+        options:
+          - amethystora
+          - amethystora-dx
+          - amethystora-nvidia-open
+          - amethystora-dx-nvidia-open
+          - amethystora-nvidia-lts
+          - amethystora-dx-nvidia-lts
+      stream:
+        description: The stream to build
+        type: choice
+        default: latest
+        options: [latest, beta, stable]
+      suites:
+        description: "Only these of the long suites, by number or name; empty for all of them"
+        type: string
+        default: ""
+  pull_request:
+
+permissions: {}
+
+jobs:
+  long:
+    name: Long
+    permissions:
+      contents: read
+    uses: ./.github/workflows/lab.yml
+    with:
+      image: ${{ inputs.image || 'amethystora' }}
+      stream: ${{ inputs.stream || 'latest' }}
+      suites: ${{ inputs.suites || '' }}
+      set: long

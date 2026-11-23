@@ -48,9 +48,12 @@ This document provides essential information for coding agents working with the 
 - `po/` - The gettext catalogs of the shell programs that are translated, the security report and the app permissions (text domain `amethystora`): `amethystora.pot`, which `node build_files/shared/check-translations.js --write --po po system_files/shared` writes from the scripts, and one `<language>.po` each, which `14-security.sh` compiles into `/usr/share/locale`
 - `tests/vm/` - The VM lab: a privileged container with QEMU, KVM, Secure Boot firmware, a TPM and the build's
   tools. `run.sh` builds the last commit, installs it onto a disk, boots it and runs `suites/` in it; an MCP
-  server (`server.mjs`) drives a VM by hand (`README.md`). Its helper reaches the guest as a systemd credential
+  server (`server.mjs`) drives a VM by hand (`README.md`); `iso.sh` installs from either ISO. Its helper reaches the guest as a systemd credential
   at boot: never put any of it in the image. A new feature gets its check in `suites/` with it. "Run the
   tests" means the `run-tests` skill (`.claude/skills/run-tests`), and only when asked
+- `tests/ci/` - `tests.txt`, every test of `build_files/shared` with its kind (unit, integration) and the command 20-tests.sh
+  runs it with, which the Unit and Integration workflows run in the last published image with the change's `system_files`
+  laid over it (`in-image.sh`, `run.sh`). A new test gets its line there, or `Every test runs` fails
 - `.github/workflows/` - Comprehensive CI/CD pipelines
 
 The desktop layer (the `ujust` recipes, the Homebrew Brewfiles, the setup services and hooks, the
@@ -198,7 +201,21 @@ The repository uses mandatory pre-commit validation:
 - `bump-base-images.yml` - Daily on main: resolves every tag in `image-versions.yml` to its digest, checks each against `keys/ublue-os-cosign.pub`, and proposes the changed digests in one pull request from `automation/base-images`. Its pull requests start their checks only with a `BASE_BUMP_TOKEN` secret (a token with Contents and Pull requests write on this repository); `20-tests.sh` warns when the base is more than 10 days older than the build
 - `security-rebuild.yml` - Daily on main, read-only but for the dispatch: compares the published stable image's source packages (its SBOM) with Fedora's security updates in Bodhi, and starts `Stable Images` when one was pushed after the published image's base was built and before the pinned base was. The kernel is left to the weekly build. Images carry `org.amethystora.base-created` for it
 - `checks.yml` - The quick checks the `main` ruleset requires of a pull request and a merge group: `Lint` (pre-commit and ShellCheck on the files the change touches, `just check`, `check-translations.js` and `check-manual.js` as `20-tests.sh` runs them, actionlint), `Title` (a Conventional Commits title, which squash-merging makes the commit's), `Dependencies` (`dependency-review-action`), `DCO` (every commit's `Signed-off-by:` its author's, `build_files/shared/check-dco.sh`; bots passed over), `Licences` (cargo-deny on the apps' crates: the licences, sources and bans of `apps/deny.toml`) and `Security` (zizmor's workflow findings that the base does not have, `build_files/shared/zizmor-new.mjs`; gitleaks on the change's commits, `.gitleaks.toml`; RustSec's advisories, blocking only when `apps/Cargo.lock` changes). Renaming a job means changing the ruleset with it. CodeQL's default setup scans the code and the workflows. CodeRabbit reviews each push (`.coderabbit.yaml`): it requests changes while a blocking finding or one of its pre-merge checks (licences and credits, tests with the change, security defaults) is open and approves once they are settled, and the ruleset has every review thread resolved
-- `lab.yml` - The VM lab on GitHub's runners: the smoke suites (`shards.json`) for every pull request, every suite for one labelled `lab` (from its next push) or by hand, none for Markdown alone or a merge group. One job builds the image, installs it onto the lab's disks and signs in, and the suites run in up to twelve lanes at once, each on a runner of its own, from what it handed them as artifacts; the job named Lab merges their results (`tests/vm/README.md`, On GitHub). No secret, throwaway keys, nothing published
+- `lab.yml` - The VM lab on GitHub's runners: the smoke suites (`shards.json`) for every pull request, every suite for one labelled `lab` (from its next push; the long ones are `lab-long.yml`'s then) or by hand, none for Markdown alone or a merge group. One job builds the image, installs it onto the lab's disks and signs in, and the suites run in up to twelve lanes at once, each on a runner of its own, from what it handed them as artifacts; the job named Lab merges their results (`tests/vm/README.md`, On GitHub). No secret, throwaway keys, nothing published
+- `unit.yml` - Unit tests for every pull request and merge group: `Every test runs` (`tests/ci/run.sh --listed`: every
+  `build_files/shared/test-*` is a line of `tests/ci/tests.txt`, so a new test is listed there with its kind and the
+  command 20-tests.sh runs it with), `JavaScript` (the `unit` lines under Node in the last published image with the
+  change's `system_files` laid over it, `tests/ci/in-image.sh`) and `Rust` (`AMETHYSTORA_LAYERS=apps`: the apps layer
+  built, which runs every crate's tests, or found on GHCR for the same files); the job named Unit sums them up
+- `integration.yml` - The `integration` lines of `tests/ci/tests.txt` (each helper against stand-ins, as 20-tests.sh runs
+  it) the same way, over four runners; the job named Integration sums them up. A helper that needs a package or program
+  the change adds waits for the image that has it, and is held by 20-tests.sh meanwhile
+- `lab-long.yml` - Lab (long suites): `shards.json`'s `long` suites, a runner each, through `lab.yml`'s `workflow_call`
+  (`set: long`), for a pull request labelled `lab` and by hand; Lab's own run of every suite leaves them out
+- `lab-iso.yml` - Lab (ISOs), every pull request but Markdown alone: the image built in the lab, both ISOs made from it
+  as `build-iso.yml` makes them (`iso/build-installer-iso.sh`, which that workflow runs too; `iso/live` with
+  `LIVE_COPY_FROM`, the lab's archive, never set by a published build), the live ISO's forensic start, and each ISO
+  installed and the installed machine started under Secure Boot (`tests/vm/iso.sh`); the job named ISOs sums them up
 - `validate-renovate.yml` - Validates the Renovate configuration on pull requests
 - `check-windows-programs.yml` - Weekly, and on a change to the map: every Flatpak ID in `windows-programs.json` is still on Flathub (see Windows programs)
 - `scorecard.yml` - OpenSSF Scorecard supply-chain checks (weekly)

@@ -108,116 +108,29 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Prepare the installer configuration
+      - name: Check the image
         run: |
           case "${IMAGE}" in
             amethystora | amethystora-dx | amethystora-nvidia-open | amethystora-dx-nvidia-open | amethystora-nvidia-lts | amethystora-dx-nvidia-lts) ;;
             *) echo "::error::${IMAGE} has no ISO: it is not one of the six stable images"; exit 1 ;;
           esac
-          sed -i "s|@IMAGE@|ghcr.io/arsslensoft/${IMAGE}|" iso/iso.toml
-          # The machine it installs takes updates signature-checked from the first one
-          grep -q -- "--enforce-container-sigpolicy" iso/iso.toml
-          if grep -E "^[^#]*bootc switch" iso/iso.toml | grep -v -- "--enforce-container-sigpolicy"; then
-            echo "::error::iso.toml switches the installed machine without signature checking"
-            exit 1
-          fi
 
-      # bootc-image-builder chooses the installer's packages by the image's os-release ID and has no
-      # definition for amethystora, so Fedora's is written out under that name before it starts, with
-      # two packages added: generic-logos and generic-release. Fedora's trademark guidelines ask a
-      # system built from Fedora to leave fedora-logos and fedora-release out. The list names neither,
-      # so Fedora's would arrive as dependencies; asked for by name, the generic ones conflict with
-      # them and take their place. That needs the builder's container run by hand: its GitHub action
-      # cannot add to it. The storage configuration is the action's own fix,
-      # https://github.com/osbuild/bootc-image-builder/issues/446
-      #
-      # The builder is pinned to its build of June 2026, the last that reads its definitions from that
-      # folder. Its successor, which `latest` is due to become, has them compiled in, so moving to it
-      # means rewriting this step.
-      #
-      # It looks for the image's repositories in /etc/yum.repos.d alone, where Fedora 45 keeps none of
-      # its own (osbuild/image-builder#2704): iso/builder-repos.py has its solver read what the image's
-      # dnf reads, overrides included, so that the installer still comes from Fedora's repositories only.
-      #
-      # The builder will not start without the installed system's root filesystem type, which the
-      # image does not declare in /usr/lib/bootc/install. It only writes it into a kickstart of its
-      # own, and iso.toml brings one, so Anaconda still lays out the disk; btrfs is what it chooses.
-      #
-      # Ubuntu, from 25.10, confines /usr/bin/bwrap, in a container as well, with its
-      # bwrap-userns-restrict profile, which denies every capability to whatever bwrap starts.
-      # osbuild runs each stage under bwrap, so its stages could neither chown nor mount; the profile
-      # is unloaded before the builder starts.
-      #
-      # The image is pulled by the digest the image job checked and given its tag only in this
-      # runner's store, where the builder looks for it: nothing is pulled by tag.
+      # The image is pulled by the digest the image job checked and given its tag only in this runner's store, where the
+      # builder looks for it: nothing is pulled by tag. iso/build-installer-iso.sh is the rest, which the Lab (ISOs)
+      # workflow runs on the commit's own image, and says why each step is as it is
       - name: Build ISO
         env:
-          BUILDER: quay.io/centos-bootc/bootc-image-builder@sha256:2b52843ea2bfda73b0a08d97e76b734393b1d3a804681b9fabb26723bd3a2f0b
           IMAGE_REF: ghcr.io/arsslensoft/${{ env.IMAGE }}:stable
         run: |
           sudo rm -rf /var/lib/containers/storage
           sudo mkdir -p /etc/containers
           printf '[storage]\ndriver = "overlay"\nrunroot = "/run/containers/storage"\ngraphroot = "/var/lib/containers/storage"\n' |
             sudo tee /etc/containers/storage.conf > /dev/null
-          if [[ -e /etc/apparmor.d/bwrap-userns-restrict ]]; then
-            sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict
-          fi
-          sudo podman pull "${BUILDER}"
-          sudo podman pull "${IMAGE_REF%:*}@${DIGEST}"
-          sudo podman tag "${IMAGE_REF%:*}@${DIGEST}" "${IMAGE_REF}"
-          mkdir output
-          sudo podman run --rm --privileged --security-opt label=type:unconfined_t \
-            --volume /var/lib/containers/storage:/var/lib/containers/storage \
-            --volume ./output:/output \
-            --volume ./iso/iso.toml:/config.toml:ro \
-            --volume ./iso/builder-repos.py:/builder-repos.py:ro \
-            --entrypoint /bin/bash "${BUILDER}" -c '
-              set -euo pipefail
-              python3 /builder-repos.py
-              cd /usr/share/bootc-image-builder/defs
-              for def in fedora-*.yaml; do
-                { cat "${def}"; printf "    - generic-logos\n    - generic-release\n"; } > "amethystora-${def#fedora-}"
-              done
-              exec bootc-image-builder "$@"' bash \
-            build --output /output --type anaconda-iso --rootfs btrfs --use-librepo=True \
-              --chown "$(id -u):$(id -g)" "${IMAGE_REF}"
-
-      # What the installer is made of, from the manifest the builder leaves beside the ISO, for the ISO
-      # to carry. This fails, before anything is uploaded, if Fedora's logo or release package is in
-      # the installer after all.
-      - name: List the installer's packages
-        run: |
-          python3 iso/installer-packages.py output/manifest-anaconda-iso.json > INSTALLER-PACKAGES
-
-      # Anaconda is installed from Fedora's packages and looks like Fedora's until it finds a
-      # product.img in the images/ directory of the install media, which it lays over its own root
-      # before it starts. iso/product is the Amethystora one, drawn by branding/generate.mjs.
-      - name: Brand the installer
-        run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cpio isomd5sum xorriso
-          # The web installer says what it installs by the installer's own os-release, generic-release's
-          # ("Generic"): the product image carries one that names the image as it names itself, and keeps
-          # the ID, ID_LIKE and VERSION_ID that Anaconda picks its profile and kickstart version by
-          cp -a iso/product product
-          mkdir -p product/etc
-          # shellcheck disable=SC2016
-          sudo podman run --rm --entrypoint /usr/bin/bash "ghcr.io/arsslensoft/${IMAGE}@${DIGEST}" -c \
-            '. /usr/lib/os-release && printf "NAME=\"%s\"\nVERSION=\"%s\"\nID=generic\nID_LIKE=fedora\nVERSION_ID=%s\nPRETTY_NAME=\"%s\"\n" \
-              "${NAME//\"/}" "${VERSION_ID}" "${VERSION_ID}" "${PRETTY_NAME//\"/}"' > product/etc/os-release
-          grep -qx 'VERSION_ID=[0-9][0-9]*' product/etc/os-release
-          (cd product && find . -mindepth 1 | LC_ALL=C sort | cpio --quiet -o -H newc -R 0:0 | gzip -9) > product.img
-          mkdir upload
-          # replay keeps the boot records bootc-image-builder wrote: BIOS, UEFI and the hybrid MBR/GPT.
-          # LICENSE, NOTICE and the installer's package list go beside the installer: NOTICE names what
-          # the ISO redistributes and carries the written offer for its source, which has to reach
-          # whoever receives the ISO
-          xorriso -indev output/bootiso/install.iso -outdev "upload/${ISO}" -boot_image any replay \
-            -map product.img /images/product.img -map LICENSE /LICENSE -map NOTICE /NOTICE \
-            -map INSTALLER-PACKAGES /INSTALLER-PACKAGES
-          # "Test this media" checks the image against the checksum implanted in it, which adding the
-          # file has invalidated
-          implantisomd5 --force "upload/${ISO}"
+          sudo podman pull "${IMAGE_REF%:*}@${DIGEST}"
+          sudo podman tag "${IMAGE_REF%:*}@${DIGEST}" "${IMAGE_REF}"
+          sudo bash iso/build-installer-iso.sh "${IMAGE_REF}" "upload/${ISO}"
 
       - name: Hand the ISO to the publish job
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
