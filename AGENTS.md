@@ -2388,8 +2388,9 @@ ostree images stay the default.
   every sealed machine trusts that one only.
 - **Published** with gzip layers (the composefs backend cannot pull zstd:chunked yet, bootc-dev/bootc#2408),
   pushed twice, signed with cosign and attested, then removed from the runner before the rechunk needs
-  the disk. It has no SBOM of its own. A failure fails a pull request, but never keeps the stable image
-  from publishing (`continue-on-error`).
+  the disk. It has no SBOM of its own. A failure fails a merge group, but never keeps the stable image
+  from publishing (`continue-on-error`). Stable Images does not run on pull requests (Latest Images builds the
+  same six images there), so a change to sealing is tried with a dispatch of Stable Images on its branch.
 - **Installed** only by `iso/live/amethystora-install-sealed`, in the live ISO, since Anaconda cannot
   install the composefs backend: a whole disk, a 2 GiB ESP, a discoverable root partition (LUKS2, always, btrfs,
   subvolume `root`), `bootc install to-filesystem --composefs-backend`, then shim placed in
