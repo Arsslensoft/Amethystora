@@ -311,8 +311,12 @@ try {
       ...answered(ownText, ['xconfig --startxonboot']), '', ownText].join('\n');
     await sh('mkdir -p /run/lab');
     await write('/run/lab/lab.ks', ks);
-    // --cmdline asks nothing and needs no terminal (the image has no script(1) to give it one)
+    // --cmdline asks nothing and needs no terminal (the image has no script(1) to give it one). Started from the window,
+    // Anaconda has the session's bus; a service has none, and GLib would start one with dbus-launch, which the image
+    // lacks: root's own user manager gives it one
+    await sh('systemctl start user@0.service && for i in $(seq 30); do test -S /run/user/0/bus && break; sleep 1; done', 60);
     const begin = await sh(`systemd-run --unit=lab-install --property=StandardOutput=file:/run/lab/anaconda.out --property=StandardError=inherit \
+      --setenv=XDG_RUNTIME_DIR=/run/user/0 --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus \
       /usr/sbin/anaconda --liveinst --cmdline --kickstart=/run/lab/lab.ks`, 60);
     if (!say(begin.rc === 0, 'Anaconda starts on the kickstart', begin.err)) throw new Error('stop');
     let state = '';
