@@ -1298,11 +1298,20 @@ impl Backups {
             ),
         );
         let count = excludes.entries.len() as f64;
-        gtk::Expander::builder()
+        let expander = gtk::Expander::builder()
             .label(t!("{count, plural, one {Left out of the backup: # pattern} other {Left out of the backup: # patterns}}", count = count))
             .child(&inside)
+            .expanded(self.state.borrow().excludes_open)
             .css_classes(["excludes-expander"])
-            .build()
+            .build();
+        // Kept, not drawn again: a change to the list reads the status again, and the page is built anew
+        let weak = self.me.clone();
+        expander.connect_expanded_notify(move |expander| {
+            if let Some(this) = upgrade(&weak) {
+                this.state.borrow_mut().excludes_open = expander.is_expanded();
+            }
+        });
+        expander
     }
 
     fn snapshots_card(&self) -> gtk::Box {

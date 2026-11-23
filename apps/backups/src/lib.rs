@@ -116,6 +116,8 @@ pub struct PageState {
     pub read: f64,
     /// Whether the window has been opened on its first page yet
     pub started: bool,
+    /// What the backup leaves out is folded open, which a render keeps
+    pub excludes_open: bool,
 }
 
 impl Default for PageState {
@@ -141,6 +143,7 @@ impl Default for PageState {
             daily_busy: false,
             read: 0.0,
             started: false,
+            excludes_open: false,
         }
     }
 }

@@ -227,6 +227,20 @@ EXCLUDE=/usr/libexec/amethystora-snapshot-exclude
 TESTER_UID="$(id -u "${TEST_USER}")"
 in_home 'mkdir -p Games/Library && printf "save 1\n" >Games/Library/save.dat'
 label_before="$(stat -c %C "${HOME_DIR}/Games")"
+# The security watcher reads each hour's changes from the snapshots (SNAPSHOT_WATCH): a folder taken out of them, or put back,
+# moves its files out of or into them, which must never read as a wiper deleting the account's files. Real btrfs send, not a dump
+EVENTS=/var/log/amethystora-security-events.jsonl
+watch_before="$(/usr/libexec/amethystora-security-config SNAPSHOT_WATCH)"
+/usr/libexec/amethystora-security-config set SNAPSHOT_WATCH on >/dev/null
+in_home 'for i in $(seq 1 400); do printf "level %s\n" "$i" >"Games/Library/level $i.txt"; done'
+snapshot >/dev/null
+timeout 600 /usr/libexec/amethystora-security-watch >/dev/null 2>&1
+events_at="$(wc -l <"${EVENTS}" 2>/dev/null || echo 0)"
+no_wiper() {
+    local found
+    found="$(tail -n +"$((events_at + 1))" "${EVENTS}" 2>/dev/null | jq -c 'select(.key == "snapshot-watch" and .level == "critical")')"
+    [[ -z "${found}" ]] || { echo "${found}"; return 1; }
+}
 check "a folder of the home is left out of the snapshots" env SUDO_UID="${TESTER_UID}" "${EXCLUDE}" add "${HOME_DIR}/Games"
 check "it is a subvolume of its own" test "$(stat -c %i "${HOME_DIR}/Games")" = 256
 check "with its files" grep -qx "save 1" "${HOME_DIR}/Games/Library/save.dat"
@@ -236,6 +250,8 @@ check "the list names it" grep -qxF "${HOME_DIR}/Games" /etc/amethystora/snapsho
 S_OUT="$(snapshot)"
 check "the next snapshot has it empty" test -z "$(ls -A "${SNAPSHOTS}/${S_OUT}/${TEST_USER}/Games" 2>&1)"
 check "and still has everything else" test -f "${SNAPSHOTS}/${S_OUT}/${TEST_USER}/Documents/report.txt"
+check "the watcher reads 401 files leaving the snapshots" timeout 600 /usr/libexec/amethystora-security-watch
+check "as no wiper's" no_wiper
 check "the account lists its own" sh -c "runuser -u '${TEST_USER}' -- '${EXCLUDE}' list --json | jq -e '.excluded == [{path: \"${HOME_DIR}/Games\", rel: \"Games\", left_out: true}]'"
 check "the account cannot change it" sh -c "! runuser -u '${TEST_USER}' -- '${EXCLUDE}' add '${HOME_DIR}/Documents' 2>/dev/null"
 check "the report says a folder is left out" sh -c "runuser -u '${TEST_USER}' -- /usr/libexec/amethystora-security-status --json |
@@ -251,6 +267,9 @@ check "with what was written while it was left out" grep -qx "save 2" "${HOME_DI
 check "off the list" sh -c "! grep -qxF '${HOME_DIR}/Games' /etc/amethystora/snapshot-excludes"
 S_IN="$(snapshot)"
 check "and in the next snapshot" grep -qx "save 2" "${SNAPSHOTS}/${S_IN}/${TEST_USER}/Games/Library/save.dat"
+check "the watcher reads them coming back" timeout 600 /usr/libexec/amethystora-security-watch
+check "as no wiper's either" no_wiper
+/usr/libexec/amethystora-security-config set SNAPSHOT_WATCH "${watch_before:-off}" >/dev/null
 in_home 'rm -rf Games'
 
 # What the backup leaves out is the account's own: ame backup exclude, which the Status page runs too
@@ -643,6 +662,45 @@ pkill -u "${TEST_USER}" -f 'amethystora-in-terminal ame backup|ame backup setup'
 check "Security settings opens Security" atspi click "Security settings" button
 check "which starts" wait_for 90 pgrep -u "${TEST_USER}" -f '^/usr/lib/amethystora-security/amethystora-security'
 pkill -TERM -o -u "${TEST_USER}" -f '^/usr/lib/amethystora-security/amethystora-security' 2>/dev/null
+
+# --- What each leaves out, in the windows ---------------------------------------------------------------------------------------
+
+# Backups' Status page: what the backup leaves out, folded away and kept open when the page is read again, a folder put back into
+# the backup, the image's list again, the folder dialog that leaves one out, and the folders the snapshots leave out
+in_home 'mkdir -p Games VMs'
+env SUDO_UID="${TESTER_UID}" "${EXCLUDE}" add "${HOME_DIR}/Games" >/dev/null
+as_tester ame backup exclude add "${HOME_DIR}/VMs" >/dev/null
+show_status
+check "the Status page says what the backup leaves out" atspi wait 30 "Left out of the backup"
+check "which folds open" atspi click "Left out of the backup"
+check "listing the folder left out" atspi wait 30 "~/VMs"
+check "and the folder the snapshots leave out" atspi wait 30 "~/Games"
+check "Back it up puts a folder back into the backup" atspi click "Back up ~/VMs again" button
+check "which the account's list no longer has" wait_for 30 sh -c "! grep -qxF '${HOME_DIR}/VMs' '${HOME_DIR}/.config/amethystora/backup-excludes'"
+check "and the list stays open as the page reads it again" atspi wait 30 "Back to the image's list"
+check "Back to the image's list takes the account's own away" atspi click "Back to the image's list" button
+check "which is gone" wait_for 30 test ! -e "${HOME_DIR}/.config/amethystora/backup-excludes"
+check "Leave a folder out… opens a folder dialog" atspi click "Leave a folder out…" button
+check "named for the backup" atspi wait 30 "Leave a folder out of the backup"
+atspi click Cancel button >/dev/null 2>&1
+
+# Security's Ransomware protection page: the folders the snapshots leave out, each offered back in a terminal (where the recipe
+# says what it costs and sudo asks), the folder dialog, and the Settings tile's count
+sec() { user_bus python3 "${ATSPI}" amethystora-security "$@"; }
+user_bus systemd-run --user --no-block --collect --quiet -- /usr/bin/amethystora-security settings/snapshots >/dev/null 2>&1
+check "Security opens on Ransomware protection" sec wait 120 "Left out of the snapshots"
+check "listing the folder left out" sec wait 30 "~/Games"
+check "Snapshot it again opens the recipe in a terminal" sec click "Snapshot ~/Games again" button
+check "which asks to snapshot it again" wait_for 60 pgrep -u "${TEST_USER}" -f 'ransomware exclude remove'
+pkill -u "${TEST_USER}" -f 'ransomware exclude remove' 2>/dev/null
+check "Leave a folder out… opens a folder dialog there too" sec click "Leave a folder out…" button
+check "named for the snapshots" sec wait 30 "Leave a folder out of the hourly snapshots"
+sec click Cancel button >/dev/null 2>&1
+check "the Settings page" sec click Settings
+check "counts the folder on its tile" sec wait 60 "On, 1 folder left out"
+pkill -TERM -o -u "${TEST_USER}" -f '^/usr/lib/amethystora-security/amethystora-security' 2>/dev/null
+env SUDO_UID="${TESTER_UID}" "${EXCLUDE}" remove "${HOME_DIR}/Games" >/dev/null
+in_home 'rm -rf Games VMs'
 
 close_window
 dumps="$(crashes_since "${since}" COREDUMP_UID="${uid}")"
