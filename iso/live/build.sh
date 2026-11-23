@@ -40,7 +40,10 @@ done
 # build mounts, of the same digest. Nothing else sets it, so a published ISO's copy always comes from the registry
 if [[ -n "${LIVE_COPY_FROM:-}" ]]; then
     [[ "${LIVE_COPY_FROM}" == oci-archive:/run/lab/* ]] || { echo "LIVE_COPY_FROM is the lab's archive, not ${LIVE_COPY_FROM}" >&2; exit 1; }
-    copied="$(podman pull -q "${LIVE_COPY_FROM}")"
+    # An archive is unpacked into TMPDIR first, and /var/tmp is a small tmpfs in this build: the build's own disk instead
+    mkdir -p /var/lib/live-copy-tmp
+    copied="$(TMPDIR=/var/lib/live-copy-tmp podman pull -q "${LIVE_COPY_FROM}")"
+    rm -rf /var/lib/live-copy-tmp
     [[ "$(podman image inspect --format '{{.Digest}}' "${copied}")" == "${BASE_DIGEST}" ]] ||
         { echo "the lab's archive is not ${BASE_DIGEST}" >&2; exit 1; }
     podman tag "${copied}" "${BASE_IMAGE}"
