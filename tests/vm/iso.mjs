@@ -327,7 +327,9 @@ try {
     const result = await value('systemctl show -p Result,ExecMainStatus lab-install');
     await shot('2-install');
     if (!say(/Result=success/.test(result) && /ExecMainStatus=0/.test(result), 'Anaconda installs from the live session with the answers alone', `${state}\n${result}\n` +
-      await value('tail -n 30 /run/lab/anaconda.out; tail -n 30 /tmp/anaconda.log; tail -n 20 /tmp/storage.log 2>/dev/null', 60))) throw new Error('stop');
+      // What Anaconda said last, after its logs' errors, so that the end shown is its own
+      await value('grep -hE "ERROR|CRITICAL|Traceback|Error:" /tmp/anaconda.log /tmp/storage.log /tmp/packaging.log 2>/dev/null | tail -n 12; ' +
+        'echo "--- anaconda"; tail -n 24 /run/lab/anaconda.out', 60))) throw new Error('stop');
     await poweroff();
   }
 
