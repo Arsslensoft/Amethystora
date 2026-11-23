@@ -20,8 +20,9 @@ fail() { echo "test-sleep-report: $*" >&2; exit 1; }
 cat >"${T}/bin/journalctl" <<'EOF'
 #!/usr/bin/bash
 [[ " $* " == *" MESSAGE_ID=8811e6df2a8e40f58a94cea26f8ebf14 "* ]] || exit 1
-[[ -e "${JOURNAL_FAILS:-/nonexistent}" ]] && exit 1
-[[ -e "${JOURNAL_EMPTY:-/nonexistent}" ]] && exit 0
+# Only when named: a machine may well have a /nonexistent (an account's home), which made every journal fail
+[[ -n "${JOURNAL_FAILS:-}" && -e "${JOURNAL_FAILS}" ]] && exit 1
+[[ -n "${JOURNAL_EMPTY:-}" && -e "${JOURNAL_EMPTY}" ]] && exit 0
 printf '{"__REALTIME_TIMESTAMP":"1000000000","__MONOTONIC_TIMESTAMP":"100000000"}\n{"__REALTIME_TIMESTAMP":"3000000000","__MONOTONIC_TIMESTAMP":"300000000"}\n{"__REALTIME_TIMESTAMP":"2000000000","__MONOTONIC_TIMESTAMP":"200000000"}\nnot json\n'
 EOF
 chmod +x "${T}/bin/journalctl"
@@ -83,9 +84,7 @@ echo "PNP0C0D:00" >"${S}/class/wakeup/wakeup6/name"
 # The last wake was 10 seconds before "now"
 export AMETHYSTORA_SLEEP_NOW_MS=310000
 WHY="$(python3 -I "${REPORT}" why --json --after-ms 1000 --since 1)"
-jq -e '.wakes == [1000, 2000, 3000]' <<<"${WHY}" >/dev/null ||
-    fail "the wakes, in order, without what is not JSON: ${WHY} (uid $(id -u); the stand-in journal: $(python3 -I -c \
-        'import subprocess; d = subprocess.run(["journalctl", "-b", "MESSAGE_ID=8811e6df2a8e40f58a94cea26f8ebf14"], capture_output=True, text=True); print(d.returncode, repr(d.stdout[:80]), repr(d.stderr[:200]))' 2>&1))"
+jq -e '.wakes == [1000, 2000, 3000]' <<<"${WHY}" >/dev/null || fail "the wakes, in order, without what is not JSON: ${WHY}"
 jq -e '.readable == true and .last_wake_ago_s == 10' <<<"${WHY}" >/dev/null || fail "root reads the journal, the last wake 10 s ago: ${WHY}"
 jq -e '[.sources[].id] | index("usb:1111:2222") == null' <<<"${WHY}" >/dev/null || fail "a source that fired before it slept was named: ${WHY}"
 jq -e '[.sources[].id] | (index("lid") == null) and (index("usb:1111:3333") == null)' <<<"${WHY}" >/dev/null ||
