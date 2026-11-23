@@ -2,7 +2,7 @@
 # in-image.sh KIND [SHARD/OF]: tests/ci/run.sh inside the last published image, with this checkout's system_files laid
 # over it, as the Unit and Integration workflows run it (and as anyone can on a machine with podman). The image is
 # CI_IMAGE (default ghcr.io/arsslensoft/amethystora:latest), pulled once its signature checks out against cosign.pub
-# when cosign is there; the checkout goes in at /ctx, the Node on PATH at /opt/node, and the results come back in
+# when cosign is there; the checkout goes in at /ctx, the Node on PATH at /ci-node (the image's /opt is a link into /var, which a container lacks), and the results come back in
 # RESULTS (default ./ci-results). What the change makes at build time (the apps, the schemas, the packages) is the
 # published image's: a test of a helper that needs a new package or program waits for the image that has it.
 set -euo pipefail
@@ -25,7 +25,7 @@ ${PODMAN} pull --quiet "${IMAGE%:*}@${digest}" >/dev/null
 
 node_dir=()
 if command -v node >/dev/null; then
-    node_dir=(--volume "$(dirname "$(dirname "$(realpath "$(command -v node)")")"):/opt/node:ro" --env NODE=/opt/node/bin/node)
+    node_dir=(--volume "$(dirname "$(dirname "$(realpath "$(command -v node)")")"):/ci-node:ro" --env NODE=/ci-node/bin/node)
 elif [[ "$1" == unit ]]; then
     echo "in-image.sh: the unit tests need Node on PATH" >&2
     exit 1
