@@ -153,7 +153,7 @@ EOF
         same "its terminal key, one of the image's custom keybindings, is the file's" \
             "$(fresh gsettings get "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${CUSTOM}/custom20/" binding)" "'<Super>t'"
         same "...whose command stays the image's" \
-            "$(fresh gsettings get "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${CUSTOM}/custom20/" command)" "'xdg-terminal-exec'"
+            "$(fresh gsettings get "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${CUSTOM}/custom20/" command)" "'/usr/libexec/amethystora-workspace-terminal'"
         same "its windows are classic" "$(fresh gsettings get "${TILING}" enabled)" false
         same "the tiling's gap is the file's" "$(fresh gsettings get "${TILING}" window-gap)" 20
         # GNOME Shell reads the extension's own compiled schemas before the system's
