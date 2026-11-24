@@ -143,7 +143,9 @@ try {
     say((await out('runuser -u liveuser -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus gsettings get org.gnome.desktop.media-handling automount')) === 'false',
       "GNOME's automount is off");
     say((await sh(`udevadm info -q property -n /dev/${dev}1 | grep -qx UDISKS_IGNORE=1`)).rc === 0, 'udisks is told to ignore the disk');
-    await check('udisks shows nothing of the disk', `udisksctl dump 2>&1 | grep "block_devices/${dev}" && { udevadm info -q property -n /dev/${dev} | grep -E "UDISKS|ANACONDA"; exit 1; }; true`);
+    // UDISKS_IGNORE makes udisks flag each block object HintIgnore, which is what GNOME and every client leave alone: the objects are still listed
+    await check('udisks flags the disk and every partition of it to be ignored (HintIgnore)',
+      `r=0; for p in /dev/${dev} /dev/${dev}[0-9]*; do i="$(udisksctl info -b $p 2>&1)"; grep -qE 'HintIgnore: +true' <<<"$i" || { echo "$p: $(grep -E 'Hint(Ignore|Auto)|^Error' <<<"$i" | tr '\n' ' ')"; r=1; }; done; exit $r`);
     // The top bar's words: the pill file of the live account, within five minutes of the session
     let pill = '';
     for (let i = 0; i < 60 && !pill.includes('Disks read-only'); i++) {
@@ -157,8 +159,9 @@ try {
     // mount(8) retries a write-protected device read-only, so "refused" is either: it fails, or what it mounted is read-only and takes no write
     await check('a read-write mount is refused, or comes up read-only and takes no write',
       'mkdir -p /mnt/w; if mount -o rw,noload /dev/disk/by-label/evid-ext4 /mnt/w 2>&1; then findmnt -no OPTIONS /mnt/w; findmnt -no OPTIONS /mnt/w | grep -qw ro && ! touch /mnt/w/x 2>/dev/null; r=$?; umount /mnt/w; exit $r; fi');
-    say((await sh('mkdir -p /mnt/w && { mount /dev/disk/by-label/evid-ext4 /mnt/w 2>&1 && ! touch /mnt/w/x 2>/dev/null; r=$?; umount /mnt/w 2>/dev/null; exit $r; } || true')).rc === 0,
-      'a plain mount of a dirty file system is refused, or read-only, and nothing can be written in it');
+    // Refused is a pass; mounted, it must take no write
+    await check('a plain mount of a dirty file system is refused, or read-only, and nothing can be written in it',
+      'mkdir -p /mnt/w; if mount /dev/disk/by-label/evid-ext4 /mnt/w 2>&1; then findmnt -no OPTIONS /mnt/w; ! touch /mnt/w/x 2>/dev/null; r=$?; umount /mnt/w; exit $r; fi; exit 0');
 
     // --- The manual's mounts, one file system after another ---
     const mounts = {

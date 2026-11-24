@@ -334,8 +334,8 @@ try {
       `${ended ? 'ended' : `still ${state} after two hours`}\n${result}\n` +
       // What runs and what Anaconda said last, after its logs' errors, so that the end shown is its own
       await value('ps -eo etime,pcpu,args --sort=-pcpu | grep -E "[a]naconda|[b]ootc|[p]odman|[o]stree|[s]kopeo" | head -n 8 | cut -c1-200; ' +
-        'grep -hE "ERROR|CRITICAL|Traceback|Error:" /tmp/anaconda.log /tmp/storage.log /tmp/packaging.log 2>/dev/null | tail -n 10; ' +
-        'echo "--- packaging"; tail -n 8 /tmp/packaging.log 2>/dev/null; echo "--- anaconda"; tail -n 16 /run/lab/anaconda.out', 60))) throw new Error('stop');
+        'echo "--- errors and warnings"; grep -hE " (ERR|CRT|WRN) |ERROR|CRITICAL|Traceback" /tmp/anaconda.log /tmp/storage.log /tmp/packaging.log /tmp/program.log 2>/dev/null | tail -n 25 | cut -c1-300; ' +
+        'echo "--- the log before it ended"; grep -vE " DBG " /tmp/anaconda.log 2>/dev/null | tail -n 12 | cut -c1-300; echo "--- anaconda"; tail -n 8 /run/lab/anaconda.out', 90))) throw new Error('stop');
     await poweroff();
   }
 
