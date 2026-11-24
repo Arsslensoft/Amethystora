@@ -146,7 +146,7 @@ jobs:
               else
                 [[ "${is_long}" == true ]] || picked+=("${want}")
               fi
-            done < <(tr ',' '\n' < tests/vm/lab-suites | tr -d '\r ')
+            done < <(sed 's/#.*//' tests/vm/lab-suites | tr ',' '\n' | tr -d '\r ')
             if (( ${#picked[@]} == 0 )); then
               echo "tests/vm/lab-suites names no suite of this set" >> "$GITHUB_STEP_SUMMARY"
               echo "run=false" >> "$GITHUB_OUTPUT"
