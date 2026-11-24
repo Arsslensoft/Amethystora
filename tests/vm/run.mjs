@@ -576,7 +576,7 @@ async function suite(machine, name) {
   const result = {
     suite: name,
     // A suite ends with status 1 when a check failed: it passes when every check that failed is a known one
-    passed: (rc === 0 && failures.length === 0) || (rc === 1 && failures.length === 0 && known.length > 0),
+    passed: failures.length === 0 && (rc === 0 || (rc === 1 && known.length > 0)),
     known,
     exit: rc,
     ok: lines.filter((l) => l.startsWith('ok')).length,

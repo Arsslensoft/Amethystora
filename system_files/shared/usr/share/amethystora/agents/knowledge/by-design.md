@@ -273,4 +273,4 @@ build attestation, or needs gh and a GitHub login. Change: wait, pin an older ve
 
 Symptom: a crash leaves no core for `coredumpctl debug`; the machine powers off after 18 hours locked; the
 boot menu asks for a password to edit an entry; printers and devices are not discovered and mobile broadband
-does not work (Avahi and ModemManager are off by the switch, passim is off in the image). Change: `ame security network-daemons off` (the user's) brings all three back.
+does not work (Avahi and ModemManager are off by the switch, passim is off in the image). Change: `ame security network-daemons off` (the user's) brings Avahi and ModemManager back; passim stays off unless `systemctl unmask passim.service`.

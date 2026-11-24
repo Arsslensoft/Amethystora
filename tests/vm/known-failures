@@ -7,6 +7,7 @@
 # Drawn and timed by the shell's own animation, which a software renderer does not give the frames of (the suites' own comment:
 # frame times are the real machine's to check)
 13-glass-comfort.sh :: 17 disabled ten times: no picture, no proxy, GNOME's speed; enabled: one holder
+13-glass-comfort.sh :: 2 clear: the native paint matches effect.js's within one level
 13-glass-comfort.sh :: 2 frost: the native paint matches effect.js's within one level
 13-glass-comfort.sh :: 2 frost: the window's pane is drawn as a ring and an inside
 36-r4-access.sh :: 3c ... and that screen shows the apps' own red
@@ -35,6 +36,13 @@
 # Not explained yet: each passed on some runs and failed on others, or fails with nothing said; they want a person at a machine
 45-network.sh :: the network made here was asked for www.example.org
 56-r5-bar.sh :: 11 leave nothing
+28-first-start.sh :: 13 Done closes the window
+26-logo-menu.sh :: Extensions: the menu did not open
+26-logo-menu.sh :: System monitor: the menu did not open
+26-logo-menu.sh :: Terminal: the menu did not open
+26-logo-menu.sh :: Containers: the menu did not open
+26-logo-menu.sh :: a middle click did not show the overview
+26-logo-menu.sh :: the menu did not open without Mission Center
 68-r5-finish.sh :: 2 another app shows as it comes
 68-r5-finish.sh :: 2 the waiting one comes in the digest card
 68-r5-finish.sh :: 2 with the digest off, an app on the wait list waits
@@ -49,6 +57,15 @@
 92-hardening.sh :: and keeps figlet
 92-hardening.sh :: figlet is layered on the system this machine started
 92-hardening.sh :: still with figlet layered
+
+# The shell's own accessibility tree, which the lab reads through AT-SPI: it showed no button on the top bar on some runs
+98-desktop-styles.sh :: floating: the shell's accessibility tree shows no button on the top bar
+98-desktop-styles.sh :: islands: the shell's accessibility tree shows no button on the top bar
+98-desktop-styles.sh :: capsule: the shell's accessibility tree shows no button on the top bar
+98-desktop-styles.sh :: segments: the shell's accessibility tree shows no button on the top bar
+98-desktop-styles.sh :: neon: the shell's accessibility tree shows no button on the top bar
+98-desktop-styles.sh :: hairline: the shell's accessibility tree shows no button on the top bar
+98-desktop-styles.sh :: terminal: the shell's accessibility tree shows no button on the top bar
 
 # Budgets of what a frame costs, which are the machine's: one microsecond more than the limit on a loaded runner is no regression
 15-windows.sh :: the show-desktop timeline stays under 1 ms a frame

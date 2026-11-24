@@ -118,7 +118,7 @@ on, in case one is why something stopped working.
 | `ame security lockdown strict` | Root cannot read the running kernel either, with Secure Boot on too; `ame security lockdown on` goes back, from the next restart | `bpftrace`, `perf` with kernel data, eBPF security tools |
 | `ame security time` | The clock set only from time servers that prove who they are (NTS), three agreeing, never one a network suggests | Networks that block port 4460 leave the clock unsynced |
 | `ame security firewall-away` | Networks you have not named home answer nothing; it asks which are home first, and `ame security home-networks` names more. Not while the firewall zone is off | Printers and shares only at home, as phone pairing always is |
-| `ame security network-daemons` | Avahi and ModemManager stopped, and passim (fwupd's sharing of firmware updates with machines nearby, which the image leaves off) kept off; `off` brings all three back | Printers by address only; no mobile broadband; each machine downloads its own firmware updates |
+| `ame security network-daemons` | Avahi and ModemManager stopped, and passim (fwupd's sharing of firmware updates with machines nearby, which the image leaves off) kept off; `off` brings Avahi and ModemManager back | Printers by address only; no mobile broadband; each machine downloads its own firmware updates |
 | `ame security block-bluetooth` | Bluetooth cannot load | Headphones, mice and keyboards that use it |
 | `ame security block-webcam` | The USB webcam driver cannot load, at once unless an app is using it, otherwise from the next restart | The webcam |
 | `ame security block-automount` | USB sticks and disks mounted only when you open them | A click in Files |

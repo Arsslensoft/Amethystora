@@ -68,6 +68,8 @@ concurrency:
 env:
   IMAGE: ${{ inputs.image || 'amethystora' }}
   STREAM: ${{ inputs.stream || 'latest' }}
+  # A runner is not the machine suite 71's baseline was measured on: its numbers are recorded and not compared
+  VMLAB_RECORD_ONLY: "1"
 
 jobs:
   # What runs, and the lanes, by the suites' minutes in tests/vm/shards.json, as `run.sh plan --parallel N` prints them
