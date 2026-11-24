@@ -128,7 +128,7 @@ classic
 # --- 15.0 Schema and defaults ---------------------------------------------------------------------------------------
 same "the windows schema has the spec's keys and defaults" \
     "$(gs list-recursively "${SCHEMA}" | cut -d' ' -f2- | LC_ALL=C sort | paste -sd ';')" \
-    "corner-bottom-left 'none';corner-bottom-right 'none';corner-top-left 'none';corner-top-right 'none';dim false;drop-down true;drop-down-key ['<Super><Alt>Return'];frame false;gesture-down true;gesture-pinch true;gesture-spread true;gesture-today true;hold-super true;hold-super-delay 1000;keep-on-top true;keep-on-top-key ['<Super><Alt>p'];places true;recording-sizes true;reopen true;reopen-key ['<Super><Alt>t'];scratchpad true;see-through false;see-through-apps @a{si} {};show-desktop false;snap true;snap-chooser ['<Super>z'];switcher true"
+    "corner-bottom-left 'none';corner-bottom-right 'none';corner-top-left 'none';corner-top-right 'none';dim false;drop-down true;drop-down-key ['<Super><Alt>Return'];frame false;gesture-down true;gesture-pinch true;gesture-spread true;gesture-today true;hand-over true;hold-super true;hold-super-delay 1000;keep-on-top true;keep-on-top-key ['<Super><Alt>p'];places true;recording-sizes true;reopen true;reopen-key ['<Super><Alt>t'];scratchpad true;see-through false;see-through-apps @a{si} {};show-desktop false;snap true;snap-chooser ['<Super>z'];switcher true"
 check "the windows module runs" is_true "${UI}.has('windows')"
 
 # A plain window with no size of its own to defend (Files will not shrink to a quarter of the lab's 1280 x 800), for
@@ -393,7 +393,9 @@ locked() { [[ "$(loginctl show-session "${SESSION}" -p LockedHint --value)" == y
 check "a push into the bottom right corner locks the screen" wait_for 10 locked
 loginctl unlock-session "${SESSION}"
 wait_for 60 sh -c "[ \"\$(loginctl show-session ${SESSION} -p LockedHint --value)\" = no ]"
-sleep 5
+# The unlock turns the extension on again, which a slow machine takes longer over: the corner is set once it is back
+wait_for 60 is_true "!!${W}.corners"
+sleep 10
 ame_ desktop windows corner top-left desktop >/dev/null
 sleep 1
 push=()
