@@ -319,17 +319,23 @@ try {
       --setenv=XDG_RUNTIME_DIR=/run/user/0 --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus \
       /usr/sbin/anaconda --liveinst --cmdline --kickstart=/run/lab/lab.ks`, 60);
     if (!say(begin.rc === 0, 'Anaconda starts on the kickstart', begin.err)) throw new Error('stop');
+    // Two hours: the copy it installs is read from the squashed system on a virtual DVD
     let state = '';
-    for (const until = Date.now() + 75 * 60000; Date.now() < until; await sleep(15000)) {
+    const running = (s) => ['active', 'activating', 'deactivating', 'reloading'].includes(s);
+    for (const until = Date.now() + 120 * 60000; Date.now() < until; await sleep(15000)) {
       state = await value('systemctl show -p ActiveState --value lab-install', 30).catch(() => 'no answer');
-      if (!['active', 'activating', 'deactivating'].includes(state)) break;
+      if (!running(state) && state !== 'no answer') break;
     }
     const result = await value('systemctl show -p Result,ExecMainStatus lab-install');
     await shot('2-install');
-    if (!say(/Result=success/.test(result) && /ExecMainStatus=0/.test(result), 'Anaconda installs from the live session with the answers alone', `${state}\n${result}\n` +
-      // What Anaconda said last, after its logs' errors, so that the end shown is its own
-      await value('grep -hE "ERROR|CRITICAL|Traceback|Error:" /tmp/anaconda.log /tmp/storage.log /tmp/packaging.log 2>/dev/null | tail -n 12; ' +
-        'echo "--- anaconda"; tail -n 24 /run/lab/anaconda.out', 60))) throw new Error('stop');
+    // A unit still running says Result=success and ExecMainStatus=0 too: only one that has ended counts
+    const ended = !running(state) && state !== 'no answer';
+    if (!say(ended && /Result=success/.test(result) && /ExecMainStatus=0/.test(result), 'Anaconda installs from the live session with the answers alone',
+      `${ended ? 'ended' : `still ${state} after two hours`}\n${result}\n` +
+      // What runs and what Anaconda said last, after its logs' errors, so that the end shown is its own
+      await value('ps -eo etime,pcpu,args --sort=-pcpu | grep -E "[a]naconda|[b]ootc|[p]odman|[o]stree|[s]kopeo" | head -n 8 | cut -c1-200; ' +
+        'grep -hE "ERROR|CRITICAL|Traceback|Error:" /tmp/anaconda.log /tmp/storage.log /tmp/packaging.log 2>/dev/null | tail -n 10; ' +
+        'echo "--- packaging"; tail -n 8 /tmp/packaging.log 2>/dev/null; echo "--- anaconda"; tail -n 16 /run/lab/anaconda.out', 60))) throw new Error('stop');
     await poweroff();
   }
 
