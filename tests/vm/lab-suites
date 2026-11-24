@@ -1,0 +1,37 @@
+# The suites a pull request with the label lab runs, while trying fixes to them (.github/workflows/lab.yml; removed
+# when they are green and every suite runs again)
+11-dock-screens
+13-glass-comfort
+14-motion
+15-windows
+16-search
+19-today
+21-look-colour
+23-sound-lock
+25-every-app
+26-logo-menu
+28-first-start
+31-files
+31-spaces
+36-r4-access
+41-image-setup
+43-r4-capture
+45-network
+51-r5-look
+53-r4-privacy
+56-r5-bar
+57-r5-windows
+58-r5-keys
+59-r5-tools
+64-r5-phone
+67-r4-later
+68-r5-finish
+70-backups
+71-r7-cost
+72-plugins
+73-update-check
+77-while-playing
+80-control
+87-agent-tools
+96-tiling-settings
+98-desktop-styles

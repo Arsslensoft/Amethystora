@@ -198,7 +198,7 @@ started() { grep -q started "${WORK}/$1.log" 2>/dev/null; }
 
 # --- 1-2: the keys, the place, and nothing while nothing is shared ---------------------------------------------------
 same "1 the schema's keys" "$(GSETTINGS_BACKEND=memory gsettings list-keys "${PRIVACY}" | sort | paste -sd ' ')" \
-    "network-apps share-guard share-guard-apps share-guard-private shield"
+    "network-apps share-guard share-guard-apps share-guard-private shield zone-notice"
 same "1 the defaults" "$(for k in share-guard share-guard-private shield network-apps; do GSETTINGS_BACKEND=memory gsettings get "${PRIVACY}" "${k}"; done | paste -sd ' ')" \
     "'blur' true 'tile' false"
 order="$(ev "[...${UI}.keys()].join(' ')")"
