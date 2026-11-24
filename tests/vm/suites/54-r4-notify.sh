@@ -348,6 +348,10 @@ census='(() => { const m = {}; const v = a => { const k = a.style_class || a.con
 off() { ev "Main.extensionManager.disableExtension('${UUID}'); 'x'" >/dev/null; wait_for 20 state_is 2 && sleep 1; }
 on() { ev "Main.extensionManager.enableExtension('${UUID}'); 'x'" >/dev/null; wait_for 20 state_is 1; }
 off
+# One cycle first: GNOME builds parts of its own the first time (a banner's header and icon) and keeps them, which is not the
+# extension's to take away; what is counted is what ten more cycles leave behind
+on || true
+off
 ev "globalThis.vmlabCensus = ${census}; 'x'" >/dev/null
 cycles=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do

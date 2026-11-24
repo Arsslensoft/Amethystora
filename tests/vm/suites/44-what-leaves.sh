@@ -121,7 +121,9 @@ sleep "${IDLE_SECONDS}"
 kill "${MONITOR}" 2>/dev/null
 pkill -f 'resolvectl monitor' 2>/dev/null
 sort -u "${NAMES}" | sed 's/\.$//' >"${NAMES}.sorted"
-ALLOWED='(^|\.)(fedoraproject\.org|ghcr\.io|githubusercontent\.com|github\.com|flathub\.org|fwupd\.org|beacondb\.net|ntp\.org|cloudflare\.com|clamav\.net|brew\.sh|local|lan|home\.arpa|localhost|invalid|arpa)$|^_|^$'
+# dualstack.p2.shared.global.fastly.net is what a listed host's own address answers with (Flathub is served from Fastly): resolved asks for the
+# name a CNAME leads to as well, which is not a destination of its own
+ALLOWED='(^|\.)(dualstack\.p2\.shared\.global\.fastly\.net|fedoraproject\.org|ghcr\.io|githubusercontent\.com|github\.com|flathub\.org|fwupd\.org|beacondb\.net|ntp\.org|cloudflare\.com|clamav\.net|brew\.sh|local|lan|home\.arpa|localhost|invalid|arpa)$|^_|^$'
 UNLISTED="$(grep -vE "${ALLOWED}" "${NAMES}.sorted" || true)"
 if [[ -z "${UNLISTED}" ]]; then
     ok "every name looked up while idle is one the list names ($(wc -l <"${NAMES}.sorted") names)"
