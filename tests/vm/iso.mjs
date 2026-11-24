@@ -306,36 +306,59 @@ try {
     note('2. installing from the live session: Anaconda on its own kickstart and the answers');
     const ownText = await value('cat /usr/share/anaconda/interactive-defaults.ks');
     if (!say(/^bootc /m.test(ownText), 'the live installer\'s kickstart installs the image it carries (bootc)', ownText.slice(0, 400))) throw new Error('stop');
-    // xconfig: a run without a window would otherwise make the installed machine start to a text console
-    const ks = ['# The answers a person gives (tests/vm/iso.mjs), then the live installer\'s own kickstart', 'cmdline',
-      ...answered(ownText, ['xconfig --startxonboot']), '', ownText].join('\n');
     await sh('mkdir -p /run/lab');
-    await write('/run/lab/lab.ks', ks);
     // --cmdline asks nothing and needs no terminal (the image has no script(1) to give it one). Started from the window,
     // Anaconda has the session's bus; a service has none, and GLib would start one with dbus-launch, which the image
     // lacks: root's own user manager gives it one
     await sh('systemctl start user@0.service && for i in $(seq 30); do test -S /run/user/0/bus && break; sleep 1; done', 60);
-    const begin = await sh(`systemd-run --unit=lab-install --property=StandardOutput=file:/run/lab/anaconda.out --property=StandardError=inherit \
-      --setenv=XDG_RUNTIME_DIR=/run/user/0 --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus \
-      /usr/sbin/anaconda --liveinst --cmdline --kickstart=/run/lab/lab.ks`, 60);
-    if (!say(begin.rc === 0, 'Anaconda starts on the kickstart', begin.err)) throw new Error('stop');
+    const running = (st) => ['active', 'activating', 'deactivating', 'reloading'].includes(st);
+    // How Anaconda is started, tried in turn until one gets past the kickstart: Anaconda in command-line mode ends in
+    // "mandatory spokes are not completed" when the disk is not chosen as an automated installation chooses it, and then
+    // waits for ever. Each is stopped as soon as it has logged a critical error
+    const variants = [
+      { name: 'on the kickstart alone', args: '--cmdline', extra: [] },
+      { name: "as the installer's window starts it, with the disk named", args: '--liveinst --cmdline', extra: ['ignoredisk --only-use=vda'] },
+    ];
+    // xconfig: a run without a window would otherwise make the installed machine start to a text console
+    let chosen = null;
+    const trouble = async () => (await value('echo "--- errors and warnings"; grep -hE " (ERR|CRT|WRN) |ERROR|CRITICAL|Traceback" /tmp/anaconda.log /tmp/storage.log /tmp/packaging.log /tmp/program.log 2>/dev/null | tail -n 25 | cut -c1-300; ' +
+      'echo "--- storage and the log before it ended"; grep -hiE "partitioning|disk selection|ready|spoke" /tmp/anaconda.log 2>/dev/null | tail -n 14 | cut -c1-260; grep -vE " DBG " /tmp/anaconda.log 2>/dev/null | tail -n 8 | cut -c1-260; ' +
+      'echo "--- anaconda"; tail -n 6 /run/lab/anaconda.out; ps -eo etime,pcpu,args --sort=-pcpu | grep -E "[a]naconda|[b]ootc|[p]odman|[o]stree|[s]kopeo" | head -n 6 | cut -c1-180', 90));
+    for (const [i, variant] of variants.entries()) {
+      const ks = ["# The answers a person gives (tests/vm/iso.mjs), then the live installer's own kickstart", 'cmdline',
+        ...answered(ownText, ['xconfig --startxonboot', ...variant.extra]), '', ownText].join('\n');
+      await write('/run/lab/lab.ks', ks);
+      await sh(`systemctl stop lab-install 2>/dev/null; systemctl reset-failed lab-install 2>/dev/null; pkill -f pyanaconda; mkdir -p /tmp/earlier${i}; mv /tmp/*.log /tmp/earlier${i}/ 2>/dev/null; : >/run/lab/anaconda.out; true`, 60);
+      const begin = await sh(`systemd-run --unit=lab-install --property=StandardOutput=file:/run/lab/anaconda.out --property=StandardError=inherit         --setenv=XDG_RUNTIME_DIR=/run/user/0 --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus         /usr/sbin/anaconda ${variant.args} --kickstart=/run/lab/lab.ks`, 60);
+      if (!say(begin.rc === 0, `Anaconda starts ${variant.name}`, begin.err)) throw new Error('stop');
+      // Four minutes to meet the kickstart's first error, which comes within one
+      let broke = false;
+      for (const until = Date.now() + 4 * 60000; Date.now() < until; await sleep(10000)) {
+        const st = await value('systemctl show -p ActiveState --value lab-install', 30).catch(() => 'no answer');
+        if (!running(st) && st !== 'no answer') { broke = true; break; }
+        if (await yes('grep -qE " CRT |CmdlineError" /tmp/anaconda.log 2>/dev/null', 30)) { broke = true; break; }
+      }
+      if (!broke) { chosen = variant; break; }
+      say(false, `Anaconda ${variant.name} gets past the kickstart`, await trouble());
+      await sh('systemctl stop lab-install; pkill -f pyanaconda; true', 60);
+    }
+    if (!chosen) throw new Error('stop');
+    say(true, `Anaconda goes on past the kickstart ${chosen.name}`);
     // Two hours: the copy it installs is read from the squashed system on a virtual DVD
     let state = '';
-    const running = (s) => ['active', 'activating', 'deactivating', 'reloading'].includes(s);
     for (const until = Date.now() + 120 * 60000; Date.now() < until; await sleep(15000)) {
       state = await value('systemctl show -p ActiveState --value lab-install', 30).catch(() => 'no answer');
       if (!running(state) && state !== 'no answer') break;
+      if (await yes('grep -qE " CRT |CmdlineError" /tmp/anaconda.log 2>/dev/null', 30)) break;
     }
     const result = await value('systemctl show -p Result,ExecMainStatus lab-install');
     await shot('2-install');
     // A unit still running says Result=success and ExecMainStatus=0 too: only one that has ended counts
     const ended = !running(state) && state !== 'no answer';
     if (!say(ended && /Result=success/.test(result) && /ExecMainStatus=0/.test(result), 'Anaconda installs from the live session with the answers alone',
-      `${ended ? 'ended' : `still ${state} after two hours`}\n${result}\n` +
-      // What runs and what Anaconda said last, after its logs' errors, so that the end shown is its own
-      await value('ps -eo etime,pcpu,args --sort=-pcpu | grep -E "[a]naconda|[b]ootc|[p]odman|[o]stree|[s]kopeo" | head -n 8 | cut -c1-200; ' +
-        'echo "--- errors and warnings"; grep -hE " (ERR|CRT|WRN) |ERROR|CRITICAL|Traceback" /tmp/anaconda.log /tmp/storage.log /tmp/packaging.log /tmp/program.log 2>/dev/null | tail -n 25 | cut -c1-300; ' +
-        'echo "--- the log before it ended"; grep -vE " DBG " /tmp/anaconda.log 2>/dev/null | tail -n 12 | cut -c1-300; echo "--- anaconda"; tail -n 8 /run/lab/anaconda.out', 90))) throw new Error('stop');
+      `${ended ? 'ended' : `still ${state}`}
+${result}
+${await trouble()}`)) throw new Error('stop');
     await poweroff();
   }
 
