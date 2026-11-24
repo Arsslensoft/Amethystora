@@ -42,8 +42,8 @@ done
 same "24 Folder colour holds its seven entries, each executable and marked" "${entries}" 7
 check "24 Back in time is there, executable and marked" \
     bash -c "[[ -x '${SCRIPTS}/Back in time' && \"\$(sed -n 2p '${SCRIPTS}/Back in time')\" == '# amethystora-files-menu 1.'* ]]"
-same "24 files-menu.json lists the eleven entries (Earlier versions, Copy without hidden data and What is using this? among them) and the folder" \
-    "$(jq -r '.version, (.paths | length)' "${HOME_DIR}/.local/state/amethystora/files-menu.json" 2>&1 | paste -sd ' ')" "1 12"
+same "24 files-menu.json lists the thirteen entries (Earlier versions, Copy without hidden data, Sign a PDF, What is using this? and Send to nearby among them) and the folder" \
+    "$(jq -r '.version, (.paths | length)' "${HOME_DIR}/.local/state/amethystora/files-menu.json" 2>&1 | paste -sd ' ')" "1 14"
 same "24 an entry passes Files' arguments after --" "$(sed -n 3p "${FOLDER}/Jade")" \
     'exec /usr/libexec/amethystora-folder-colour jade -- "$@"'
 

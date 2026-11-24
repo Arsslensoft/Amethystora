@@ -32,7 +32,15 @@ booted() { rpm-ostree status --json | jq -r '.deployments[] | select(.booted) | 
 count() { rpm-ostree status --json | jq '.deployments | length'; }
 deploy() { timeout 1500 ostree admin deploy --origin-file="${STATE}/origin" "$1" 2>&1; }
 # What an account new to the machine reads, before it has set anything
-fresh() { runuser -u "${ACCOUNT}" -- env HOME="/var/home/${ACCOUNT}" dbus-run-session -- "$@" 2>&1; }
+# Fedora 45 has no dbus-run-session (nor dbus-launch): the account's own systemd manager, which a new account has no session
+# to start, gives dconf the bus it writes through
+fresh() {
+    local uid
+    uid="$(id -u "${ACCOUNT}")"
+    systemctl start "user@${uid}.service" 2>/dev/null
+    for _ in $(seq 30); do [[ -S "/run/user/${uid}/bus" ]] && break; sleep 1; done
+    runuser -u "${ACCOUNT}" -- env HOME="/var/home/${ACCOUNT}" XDG_RUNTIME_DIR="/run/user/${uid}"         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" "$@" 2>&1
+}
 
 case "${SUITE_PHASE}" in
     1)
