@@ -58,8 +58,16 @@ write_into() {
     mkdir -p "${mnt}/folder"
     head -c 200000 /dev/urandom >"${mnt}/folder/blob"
     sync
-    # A crash with the log not yet applied: the journal is left to be replayed at the next mount. ext4 and XFS take the same ioctl
-    if [[ "${fs}" == ext4 || "${fs}" == xfs ]]; then xfs_io -x -c 'shutdown -f' "${mnt}" || true; fi
+    # A crash with the log not yet applied: the journal is left to be replayed at the next mount. ext4 and XFS take the same
+    # ioctl. What a mount that leaves the log alone (noload, norecovery) can read is only what was in place before it, so the
+    # evidence is let go of cleanly first, and only a second, later write is the one the crash leaves in the log
+    if [[ "${fs}" == ext4 || "${fs}" == xfs ]]; then
+        umount "${mnt}"
+        mount ${options:+-o "${options}"} "${device}" "${mnt}"
+        printf '%s\n' "written after the evidence" >"${mnt}/after-the-evidence"
+        sync
+        xfs_io -x -c 'shutdown -f' "${mnt}" || true
+    fi
     umount "${mnt}"
 }
 made() { echo "$1" >>"${manifest}"; }

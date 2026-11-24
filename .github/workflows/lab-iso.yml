@@ -43,6 +43,7 @@ jobs:
       contents: read
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      image_run: ${{ steps.plan.outputs.image_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -62,12 +63,22 @@ jobs:
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
+          # A file tests/vm/iso-image-run with the number of an earlier run of this workflow, whose image is still kept
+          # (a day), takes that image instead of building one: for trying a change to the ISO tests alone, which the
+          # image does not depend on. It is a number and nothing else, and is not kept in the repository
+          image_run=""
+          if [[ -f tests/vm/iso-image-run ]]; then
+            image_run="$(tr -d '[:space:]' < tests/vm/iso-image-run)"
+            [[ "${image_run}" =~ ^[0-9]{6,15}$ ]] || { echo "::error::tests/vm/iso-image-run is a run number"; exit 1; }
+            echo "The image of run ${image_run} is used, not built" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "image_run=${image_run}" >> "$GITHUB_OUTPUT"
 
   # The image, built in the lab from the commit as the Lab builds it, handed on as an OCI archive
   image:
     name: Image
     needs: plan
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.image_run == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
@@ -126,11 +137,13 @@ jobs:
   # The installer ISO, as build-iso.yml's ISO job makes it, installed with the answers alone
   installer:
     name: Installer ISO
-    needs: image
+    needs: [plan, image]
+    if: always() && needs.plan.outputs.run == 'true' && (needs.image.result == 'success' || needs.plan.outputs.image_run != '')
     runs-on: ubuntu-26.04
     timeout-minutes: 240
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -146,6 +159,8 @@ jobs:
         with:
           name: iso-image
           path: ${{ runner.temp }}
+          run-id: ${{ needs.plan.outputs.image_run || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Load the image
         id: load
@@ -215,11 +230,13 @@ jobs:
   # and installing from the session
   live:
     name: Live ISO
-    needs: image
+    needs: [plan, image]
+    if: always() && needs.plan.outputs.run == 'true' && (needs.image.result == 'success' || needs.plan.outputs.image_run != '')
     runs-on: ubuntu-26.04
     timeout-minutes: 360
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -235,6 +252,8 @@ jobs:
         with:
           name: iso-image
           path: ${{ runner.temp }}
+          run-id: ${{ needs.plan.outputs.image_run || github.run_id }}
+          github-token: ${{ github.token }}
 
       # The archive stays for the build, which takes the copy the live system installs from it (LIVE_COPY_FROM) rather
       # than from a registry, which has no image of this commit
@@ -367,6 +386,8 @@ jobs:
       - name: Both ISOs installed
         env:
           RESULTS: ${{ needs.image.result }} ${{ needs.installer.result }} ${{ needs.live.result }}
+          REUSED: ${{ needs.plan.outputs.image_run }}
         run: |
           echo "Image, installer ISO, live ISO: ${RESULTS}"
+          [[ -z "${REUSED}" ]] || RESULTS="${RESULTS/skipped/success}"
           [[ "${RESULTS}" == "success success success" ]]
