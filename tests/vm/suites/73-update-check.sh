@@ -48,7 +48,9 @@ if [[ -s "${FOUND}" ]]; then
             ok "the look found what is waiting: $(jq -c '{system, packages}' "${FOUND}")" || not_ok "the look's record" "$(cat "${FOUND}")"
     else
         grep -qF "${ERROR}" <<<"${OUT}" && ok "a look that could not reach the image says why: ${ERROR}" ||
-            not_ok "a failed look says why" "${OUT}"
+            not_ok "a failed look says why" "recorded: $(cat "${FOUND}")
+said: ${OUT}
+journal: $(journalctl -u amethystora-update-check.service -b --no-pager -o cat -n 12 2>&1)"
     fi
 else
     not_ok "ame update check looked, without a password" "${OUT}"
