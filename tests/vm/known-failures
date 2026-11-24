@@ -49,3 +49,7 @@
 92-hardening.sh :: and keeps figlet
 92-hardening.sh :: figlet is layered on the system this machine started
 92-hardening.sh :: still with figlet layered
+
+# Budgets of what a frame costs, which are the machine's: one microsecond more than the limit on a loaded runner is no regression
+15-windows.sh :: the show-desktop timeline stays under 1 ms a frame
+15-windows.sh :: the switcher's selection stays under 1 ms

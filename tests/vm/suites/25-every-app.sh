@@ -22,7 +22,7 @@ if [[ -e "${BOOTED}" ]]; then
     # What the login starts, the phone link among it if it is on, given time to start
     sleep 90
     systemctl start amethystora-security-watch.service
-    said="$(jq -r --argjson boot "${BOOT}" '.[] | select(.time >= $boot and .level != "quiet") | "\(.level) \(.key): \(.text)"' \
+    said="$(jq -r --argjson boot "${BOOT}" '.[] | select(.time >= $boot and .level != "quiet" and ((.text | test("^Accounts changed: system, acting as root, .* using /usr/bin/(useradd|chpasswd)( \\(\\d+ times\\)|)$")) | not)) | "\(.level) \(.key): \(.text)"' \
         "${EVENTS}" 2>/dev/null)"
     if [[ -z "${said}" ]]; then
         ok "a restart and a login made the security watcher say nothing"
@@ -49,7 +49,8 @@ fi
 
 UID_TESTER="$(id -u "${TEST_USER}")"
 HOME_DIR="$(getent passwd "${TEST_USER}" | cut -d: -f6)"
-# What the watcher had to say before any app opened is not the apps'
+# What the watcher had to say before any app opened is not the apps'. Nor is what it says of root's useradd and chpasswd, the lab's own
+# making of the test account, whenever it reads it
 systemctl start amethystora-security-watch.service
 START="$(date +%s)"
 SINCE="$(date '+%F %T')"
@@ -162,7 +163,7 @@ if [[ -z "${dumps}" ]]; then ok "no app crashed"; else not_ok "an app crashed" "
 
 # What the watcher says after the apps opened, beyond what it only records
 systemctl start amethystora-security-watch.service
-said="$(jq -r --argjson start "${START}" '.[] | select(.time >= $start and .level != "quiet") | "\(.level) \(.key): \(.text)"' \
+said="$(jq -r --argjson start "${START}" '.[] | select(.time >= $start and .level != "quiet" and ((.text | test("^Accounts changed: system, acting as root, .* using /usr/bin/(useradd|chpasswd)( \\(\\d+ times\\)|)$")) | not)) | "\(.level) \(.key): \(.text)"' \
     "${EVENTS}" 2>/dev/null)"
 if [[ -z "${said}" ]]; then
     ok "opening the apps made the security watcher say nothing"
