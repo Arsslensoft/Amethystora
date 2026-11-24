@@ -521,6 +521,14 @@ async function giveCaptionsModel(vm) {
   captionsGiven.add(vm);
 }
 
+// tests/vm/known-failures: a line "SUITE :: the start of a check's words", for a check that fails on every machine the lab runs
+// on (a pointer or a drawing that depends on the hardware) until a person has looked at it on one. Reported, never silent
+const KNOWN = fs.existsSync(`${HERE}/known-failures`)
+  ? fs.readFileSync(`${HERE}/known-failures`, 'utf8').split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.trim() && !l.startsWith('#'))
+    .map((l) => l.split(' :: ')).filter((p) => p.length === 2).map(([s, t]) => [s.trim(), t.trim()])
+  : [];
+const isKnown = (suiteName, line) => KNOWN.some(([s, t]) => suiteName === s && line.replace(/^not ok - /, '').startsWith(t));
+
 async function suite(machine, name) {
   const m = machineOf(machine);
   const { vm } = m;
@@ -531,7 +539,7 @@ async function suite(machine, name) {
   for (let phase = 1; ; phase++) {
     await install(vm);
     const env = `SUITE_PHASE=${phase} VMLAB_PASSPHRASE=${PASSPHRASE} VMLAB_TPM_PIN=${TPM_PIN} VMLAB_PROMPTS=${prompts.get(vm) ?? ''}` +
-      ` VMLAB_MENU_EDIT=${menuEdits.get(vm) ?? ''}`;
+      ` VMLAB_MENU_EDIT=${menuEdits.get(vm) ?? ''} VMLAB_RECORD_ONLY=${process.env.VMLAB_RECORD_ONLY ?? ''}`;
     prompts.delete(vm);
     menuEdits.delete(vm);
     const answer = await agent(vm, { op: 'exec', command: `${env} bash ${GUEST_DIR}/${name}`, timeout: 1800 }, 1800);
@@ -556,16 +564,20 @@ async function suite(machine, name) {
   }
   const lines = output.split('\n');
   const failures = [];
+  const known = [];
   lines.forEach((line, i) => {
     if (!line.startsWith('not ok')) return;
     // A failure with the indented lines that explain it
     const detail = [];
     for (let j = i + 1; j < lines.length && lines[j].startsWith('  '); j++) detail.push(lines[j]);
-    failures.push([line, ...detail].join('\n'));
+    // One that tests/vm/known-failures names is reported and does not fail the suite
+    (isKnown(name, line) ? known : failures).push([line, ...detail].join('\n'));
   });
   const result = {
     suite: name,
-    passed: rc === 0 && failures.length === 0,
+    // A suite ends with status 1 when a check failed: it passes when every check that failed is a known one
+    passed: (rc === 0 && failures.length === 0) || (rc === 1 && failures.length === 0 && known.length > 0),
+    known,
     exit: rc,
     ok: lines.filter((l) => l.startsWith('ok')).length,
     skipped: lines.filter((l) => l.startsWith('skip')).length,
@@ -814,7 +826,10 @@ function table(results, vm) {
   const head = ['Suite', 'Result', 'ok', 'not ok', 'skipped', 'Time', ...(vm ? ['VM'] : [])];
   const lines = ['', `| ${head.join(' | ')} |`, `|${' --- |'.repeat(head.length)}`];
   for (const r of results) {
-    lines.push(`| ${[r.suite, r.passed ? 'passed' : '**failed**', r.ok, r.failures.length, r.skipped, r.time, ...(vm ? [r.vm] : [])].join(' | ')} |`);
+    lines.push(`| ${[r.suite, r.passed ? (r.known?.length ? `passed (${r.known.length} known)` : 'passed') : '**failed**', r.ok, r.failures.length, r.skipped, r.time, ...(vm ? [r.vm] : [])].join(' | ')} |`);
+  }
+  for (const r of results.filter((x) => x.known?.length)) {
+    lines.push('', `## ${r.suite}: known failures (tests/vm/known-failures)`, '', '```', ...r.known, '```');
   }
   for (const r of results.filter((x) => !x.passed)) {
     lines.push('', `## ${r.suite} (exit ${r.exit})`, '', '```', ...(r.failures.length ? r.failures : ['(no "not ok" line: see its log)']), '```');

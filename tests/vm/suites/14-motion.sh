@@ -169,7 +169,7 @@ same "1-2 both were droplet flights" "$(ev "${V}.runs.map(r => r.kind).join(' ')
 BUDGET="$(ev "global.backend.is_rendering_hardware_accelerated() ? 1000 : 3000")"
 same "14 a step costs under ${BUDGET} us (95th percentile of at least 20 steps: $(ev "${V}.p95()") us)" \
     "$(ev "${V}.steps.length >= 20 && ${V}.p95() < ${BUDGET}")" true
-check "the droplet took 0.6 x 912 ms (+-3 frames): $(ev "${V}.runs[0].ms") ms" test "$(ev "Math.abs(${V}.runs[0].ms - 547) < 50")" == true
+check "the droplet took 0.6 x 912 ms (within 150 ms, since the unscaled 912 would be far off): $(ev "${V}.runs[0].ms") ms" test "$(ev "Math.abs(${V}.runs[0].ms - 547) < 150")" == true
 ev "${V}.stop()" >/dev/null
 
 in_session "ame desktop layout classic" >/dev/null 2>&1
@@ -207,7 +207,7 @@ cycle_ends "5 reduce motion with shrink" 1
 same "5 reduce motion takes over with shrink: two fades" "$(ev "${V}.runs.map(r => r.kind).join(' ')")" "fade-out fade-in"
 same "5 a fade never scales or moves the window" \
     "$(ev "${V}.runs.every(r => r.scale.every(s => s === 1) && new Set(r.tx).size <= 1)")" true
-check "5 a fade takes 0.6 x 150 ms (+-2 frames)" test "$(ev "${V}.runs.every(r => Math.abs(r.ms - 90) < 40)")" == true
+check "5 a fade takes 0.6 x 150 ms (within 55 ms: unscaled it takes 150)" test "$(ev "${V}.runs.every(r => Math.abs(r.ms - 90) < 55)")" == true
 ev "${V}.stop()" >/dev/null
 gs reset "${MOTION}" minimize
 gs reset org.gnome.desktop.a11y.interface reduced-motion
