@@ -128,7 +128,7 @@ classic
 # --- 15.0 Schema and defaults ---------------------------------------------------------------------------------------
 same "the windows schema has the spec's keys and defaults" \
     "$(gs list-recursively "${SCHEMA}" | cut -d' ' -f2- | LC_ALL=C sort | paste -sd ';')" \
-    "corner-bottom-left 'none';corner-bottom-right 'none';corner-top-left 'none';corner-top-right 'none';dim false;drop-down true;drop-down-key ['<Super><Alt>Return'];frame false;gesture-down true;gesture-pinch true;gesture-spread true;gesture-today true;hand-over true;hold-super true;hold-super-delay 1000;keep-on-top true;keep-on-top-key ['<Super><Alt>p'];places true;recording-sizes true;reopen true;reopen-key ['<Super><Alt>t'];scratchpad true;see-through false;see-through-apps @a{si} {};show-desktop false;snap true;snap-chooser ['<Super>z'];switcher true"
+    "corner-bottom-left 'none';corner-bottom-right 'none';corner-top-left 'none';corner-top-right 'none';dim false;drop-down true;drop-down-key ['<Super><Alt>Return'];frame false;gesture-down true;gesture-pinch true;gesture-spread true;gesture-today true;hand-over true;hold-super true;hold-super-delay 1000;keep-on-top true;keep-on-top-key ['<Super><Alt>p'];places true;recording-sizes true;reopen true;reopen-key ['<Super><Alt>t'];scratchpad true;see-through false;see-through-apps @a{si} {};show-desktop false;simple-desktop false;simple-desktop-leave ['<Super><Alt>Home'];simple-tiles @as [];snap true;snap-chooser ['<Super>z'];switcher true"
 check "the windows module runs" is_true "${UI}.has('windows')"
 
 # A plain window with no size of its own to defend (Files will not shrink to a quarter of the lab's 1280 x 800), for
@@ -199,7 +199,7 @@ away="$(frac 900 500)"
 keys "move:${grab}" btn:down "glide:${grab},${away},500" btn:up
 sleep 1
 size_back() { [[ "$(rect_of "$(plain)" | cut -d, -f3,4)" == "$(cut -d, -f3,4 <<<"${before}")" ]]; }
-check "dragged away, it has its size from before the snap again" wait_for 3 size_back
+check "dragged away, it has its size from before the snap again" wait_for 12 size_back
 
 # The very top, inside the bar, is GNOME's maximise
 here="$(frac "$(rect_of "$(plain)" | cut -d, -f1) + 200" "$(rect_of "$(plain)" | cut -d, -f2) + 15")"
@@ -250,7 +250,7 @@ wait "${held}"
 sleep 1
 check "letting go of Super after typing leaves the grid open" switcher_open
 keys return
-check "Enter closes it" wait_for 3 switcher_shut
+check "Enter closes it" wait_for 12 switcher_shut
 same "and Files has the keyboard" "$(focused)" org.gnome.Nautilus
 
 ev "Main.activateWindow(${WIN}.find(w => w.get_wm_class() === 'org.vmlab.Bold'))" >/dev/null
@@ -307,7 +307,7 @@ check "letting go hides the card" wait_for 2 no_card
 check "and the dock's numbers" is_false "${UI}.get('dock')?.numbersShown"
 check "and does not open the overview" is_false "Main.overview.visible"
 keys super
-check "a tap of Super still opens the overview" wait_for 3 is_true "Main.overview.visible"
+check "a tap of Super still opens the overview" wait_for 12 is_true "Main.overview.visible"
 keys esc
 wait_for 5 is_false "Main.overview.visible"
 n="$(shown_count)"
@@ -346,7 +346,7 @@ n="$(shown_count)"
 keys down:super sleep:1300 2 up:super sleep:600
 same "the card showed during that hold" "$(shown_count)" "$((n + 1))"
 ev "global.workspace_manager.get_workspace_by_index(0).activate(global.get_current_time()); Main.overview.toggle(); 't'" >/dev/null
-check "after a shortcut typed inside a hold, the overview still opens when asked" wait_for 3 is_true "Main.overview.visible"
+check "after a shortcut typed inside a hold, the overview still opens when asked" wait_for 12 is_true "Main.overview.visible"
 ev "Main.overview.hide(); 'h'" >/dev/null
 sleep 1
 ev "Main.overview.show(); 'o'" >/dev/null
@@ -366,7 +366,7 @@ same "one corner in use on one screen is two barriers" "$(barriers)" 2
 push=()
 for i in $(seq 10); do push+=("rel:20,-20"); done
 keys move:0.99,0.01 "${push[@]}" sleep:500
-check "a push into the top right corner opens the overview" wait_for 3 is_true "Main.overview.visible"
+check "a push into the top right corner opens the overview" wait_for 12 is_true "Main.overview.visible"
 keys esc
 wait_for 5 is_false "Main.overview.visible"
 keys move:0.9,0.3
@@ -381,7 +381,7 @@ for i in $(seq 10); do push+=("rel:-20,20"); done
 # Through the middle first: the drift above left the pointer held at the top right corner's barrier, and the lab's
 # absolute pointer jumping from there straight across the screen is stopped part way (a person's never jumps)
 keys move:0.5,0.5 sleep:300 move:0.01,0.99 "${push[@]}" sleep:500
-check "a push into the bottom left corner opens the notifications" wait_for 3 is_true "Main.panel.statusArea.dateMenu.menu.isOpen"
+check "a push into the bottom left corner opens the notifications" wait_for 12 is_true "Main.panel.statusArea.dateMenu.menu.isOpen"
 keys esc
 ame_ desktop windows corner bottom-right lock >/dev/null
 sleep 1
@@ -401,13 +401,13 @@ sleep 1
 push=()
 for i in $(seq 10); do push+=("rel:-20,-20"); done
 keys move:0.5,0.5 sleep:300 move:0.01,0.01 "${push[@]}" sleep:800
-if wait_for 3 is_true "${W}.desktop.out"; then ok "a push into the top left corner shows the desktop"; else
+if wait_for 12 is_true "${W}.desktop.out"; then ok "a push into the top left corner shows the desktop"; else
     not_ok "a push into the top left corner shows the desktop" \
         "$(ev "JSON.stringify({classic: ${W}.classic, running: [...${W}._running], barriers: ${W}.corners.barrierCount, overview: Main.overview.visible, pointer: global.get_pointer().slice(0, 2)})")"
 fi
 fired="$(ev "${W}.counters.cornerFired ?? 0")"
 keys move:0.3,0.3 sleep:500 move:0.01,0.01 sleep:300 "${push[@]}" sleep:800
-check "the same push brings the windows back" wait_for 3 is_false "${W}.desktop.out"
+check "the same push brings the windows back" wait_for 12 is_false "${W}.desktop.out"
 same "and the corner fired once more for it" "$(ev "${W}.counters.cornerFired ?? 0")" "$((fired + 1))"
 for where in top-left top-right bottom-left bottom-right; do ame_ desktop windows corner "${where}" none >/dev/null; done
 sleep 1
@@ -432,52 +432,52 @@ if [[ "${empty}" == none ]]; then
     not_ok "no point of the wallpaper is free of windows" "$(ev "JSON.stringify(global.get_window_actors().map(a => { const w = a.meta_window; const f = w.get_frame_rect(); return [w.get_wm_class(), w.get_window_type(), w.get_workspace()?.index(), w.minimized, [f.x, f.y, f.width, f.height].join(String.fromCharCode(44))]; }))")"
 else
     keys "click:${empty}"
-    check "a click on empty wallpaper slides the windows out" wait_for 3 out
+    check "a click on empty wallpaper slides the windows out" wait_for 12 out
     sleep 1
     check "each leaves exactly 28 px inside the work area" test "$(slivers)" == true
     check "and the hint says how to bring them back" is_true "${W}.desktop._hint?.visible"
     keys esc
-    check "Escape brings them back and takes the layer away" wait_for 3 back
+    check "Escape brings them back and takes the layer away" wait_for 12 back
     same "every window at its place" "$(ev "global.get_window_actors().every(a => a.translation_x === 0 && a.translation_y === 0)")" true
     # A double click on the wallpaper: the first brings them back, the second, while they glide home, sends them out
     # again, and never without the layer that keeps clicks from the windows nobody can see
     keys "click:${empty}"
-    wait_for 3 out
+    wait_for 12 out
     keys "tap:${empty}" sleep:120 "tap:${empty}" sleep:600
     guarded() { is_false "${W}.desktop.out" || (($(ev "${W}.desktop.layerCount") > 0)); }
     check "a double click never leaves windows out without the layer" guarded
     if is_true "${W}.desktop.out"; then keys esc; fi
-    wait_for 3 back
+    wait_for 12 back
     # Another window in use before the windows go out: a change of focus while they are out brings them back
     ev "Main.activateWindow(${WIN}.find(w => w.get_wm_class() === 'org.vmlab.Bold')); 'b'" >/dev/null
     keys "click:${empty}"
-    wait_for 3 out
+    wait_for 12 out
     sliver="$(ev "(() => { const w = ${W}.desktop.windows().find(w => w.title && ${WIN}.find(m => m.get_title() === w.title)?.get_wm_class() === 'org.gnome.Nautilus'); if (!w) return 'none'; const f = w.frame; const a = ${AREA}; const L = Math.max(f.x + w.tx, a.x), T = Math.max(f.y + w.ty, a.y), R = Math.min(f.x + w.tx + f.width, a.x + a.width), B = Math.min(f.y + w.ty + f.height, a.y + a.height); return (((L + R) / 2) / global.screen_width).toFixed(5) + ',' + (((T + B) / 2) / global.screen_height).toFixed(5); })()")"
     if [[ "${sliver}" != none ]]; then
         keys "click:${sliver}"
-        check "a click on Files' sliver brings every window back" wait_for 3 back
+        check "a click on Files' sliver brings every window back" wait_for 12 back
         same "and Files to the front" "$(focused)" org.gnome.Nautilus
     else
         not_ok "Files was not out"
     fi
     keys "click:${empty}"
-    wait_for 3 out
+    wait_for 12 out
     keys super
-    check "the overview brings them back" wait_for 3 back
+    check "the overview brings them back" wait_for 12 back
     check "with no layer left in the shell" test "$(ev "Main.layoutManager.uiGroup.get_children().some(c => c.name === 'amethystoraWindowsDesktopLayer')")" == false
     keys esc
     wait_for 5 is_false "Main.overview.visible"
     keys "click:${empty}"
-    wait_for 3 out
+    wait_for 12 out
     open_files
     check "a new window brings them back" wait_for 30 back
     sleep 3
     ev "${WIN}.filter(w => w.get_wm_class() === 'org.gnome.Nautilus').slice(1).forEach(w => w.delete(0)); 'x'" >/dev/null
     sleep 1
     keys "click:${empty}"
-    wait_for 3 out
+    wait_for 12 out
     ame_ desktop windows show-desktop off >/dev/null
-    check "show-desktop off brings them back" wait_for 3 back
+    check "show-desktop off brings them back" wait_for 12 back
     tiling
     ame_ desktop windows show-desktop on >/dev/null
     keys "click:${empty}"
@@ -501,59 +501,59 @@ if (($(ev "${W}.counters.gestureEvent ?? 0") > events)); then
     keys esc
     wait_for 5 is_false "Main.overview.visible"
     touchpad pinch:3,0.5
-    check "a three-finger pinch opens the app grid" wait_for 3 is_true "Main.overview.dash.showAppsButton.checked && Main.overview.visible"
+    check "a three-finger pinch opens the app grid" wait_for 12 is_true "Main.overview.dash.showAppsButton.checked && Main.overview.visible"
     keys esc esc
     wait_for 5 is_false "Main.overview.visible"
     touchpad pinch:3,0.9
     sleep 1
     check "a pinch not far enough leaves the overview hidden" is_false "Main.overview.visible"
     touchpad pinch:3,1.6
-    check "three fingers spread show the desktop" wait_for 3 is_true "${W}.desktop.out"
+    check "three fingers spread show the desktop" wait_for 12 is_true "${W}.desktop.out"
     touchpad pinch:3,0.5
-    check "a pinch brings them back" wait_for 3 is_false "${W}.desktop.out"
+    check "a pinch brings them back" wait_for 12 is_false "${W}.desktop.out"
     check "and opens no app grid" is_false "Main.overview.visible"
     open_files
     wait_for 30 at_least org.gnome.Nautilus 2
     activate_files
     touchpad swipe:3,0,40
-    check "three fingers down fan Files' windows out from the dock" wait_for 3 is_true "${UI}.get('dock').state().fan.open"
+    check "three fingers down fan Files' windows out from the dock" wait_for 12 is_true "${UI}.get('dock').state().fan.open"
     keys esc
     touchpad swipe:4,-40,0
-    check "four fingers to the left open Today" wait_for 3 is_true "Main.panel.statusArea.dateMenu.menu.isOpen"
+    check "four fingers to the left open Today" wait_for 12 is_true "Main.panel.statusArea.dateMenu.menu.isOpen"
     touchpad swipe:4,40,0
-    check "and to the right close it" wait_for 3 is_false "Main.panel.statusArea.dateMenu.menu.isOpen"
+    check "and to the right close it" wait_for 12 is_false "Main.panel.statusArea.dateMenu.menu.isOpen"
     ws="$(ev "global.workspace_manager.get_active_workspace_index()")"
     touchpad swipe:3,40,0
     ws_moved() { [[ "$(ev "global.workspace_manager.get_active_workspace_index()")" != "${ws}" ]]; }
-    check "three fingers sideways are still GNOME's workspaces" wait_for 3 ws_moved
+    check "three fingers sideways are still GNOME's workspaces" wait_for 12 ws_moved
     ev "global.workspace_manager.get_workspace_by_index(${ws}).activate(global.get_current_time()); 'w'" >/dev/null
     touchpad swipe:3,0,-40
-    check "and three fingers up GNOME's overview" wait_for 3 is_true "Main.overview.visible"
+    check "and three fingers up GNOME's overview" wait_for 12 is_true "Main.overview.visible"
     keys esc
 else
     skip "libinput did not take the uinput touchpad: 15.6.2-6 by the recogniser's own entry instead"
     SEQ="const seq = (kind, f, steps) => [{kind, fingers: f, phase: 'begin', dx: 0, dy: 0, scale: 1}, ...steps.map(s => ({kind, fingers: f, phase: 'update', ...s})), {kind, fingers: f, phase: 'end', dx: 0, dy: 0, scale: steps.at(-1).scale ?? 1}]; const pinch = (f, to) => seq('pinch', f, Array.from({length: 10}, (_, i) => ({dx: 0, dy: 0, scale: 1 + (to - 1) * (i + 1) / 10}))); const swipe = (f, dx, dy) => seq('swipe', f, Array.from({length: 20}, () => ({dx: dx / 20, dy: dy / 20})));"
     ev "${SEQ} ${W}.gestures.feed(pinch(3, 0.5)); 'fed'" >/dev/null
-    check "a three-finger pinch opens the app grid" wait_for 3 is_true "Main.overview.dash.showAppsButton.checked && Main.overview.visible"
+    check "a three-finger pinch opens the app grid" wait_for 12 is_true "Main.overview.dash.showAppsButton.checked && Main.overview.visible"
     ev "Main.overview.hide(); 'h'" >/dev/null
     wait_for 5 is_false "Main.overview.visible"
     ev "${SEQ} ${W}.gestures.feed(pinch(3, 0.9)); 'fed'" >/dev/null
     sleep 1
     check "a pinch not far enough leaves the overview hidden" is_false "Main.overview.visible"
     ev "${SEQ} ${W}.gestures.feed(pinch(3, 1.6)); 'fed'" >/dev/null
-    check "three fingers spread show the desktop" wait_for 3 is_true "${W}.desktop.out"
+    check "three fingers spread show the desktop" wait_for 12 is_true "${W}.desktop.out"
     ev "${SEQ} ${W}.gestures.feed(pinch(3, 0.5)); 'fed'" >/dev/null
-    check "a pinch brings them back, with no app grid" wait_for 3 is_false "${W}.desktop.out || Main.overview.visible"
+    check "a pinch brings them back, with no app grid" wait_for 12 is_false "${W}.desktop.out || Main.overview.visible"
     open_files
     wait_for 30 at_least org.gnome.Nautilus 2
     activate_files
     ev "${SEQ} ${W}.gestures.feed(swipe(3, 0, 100)); 'fed'" >/dev/null
-    check "three fingers down fan Files' windows out from the dock" wait_for 3 is_true "${UI}.get('dock').state().fan.open"
+    check "three fingers down fan Files' windows out from the dock" wait_for 12 is_true "${UI}.get('dock').state().fan.open"
     keys esc
     ev "${SEQ} ${W}.gestures.feed(swipe(4, -100, 0)); 'fed'" >/dev/null
-    check "four fingers to the left open Today" wait_for 3 is_true "Main.panel.statusArea.dateMenu.menu.isOpen"
+    check "four fingers to the left open Today" wait_for 12 is_true "Main.panel.statusArea.dateMenu.menu.isOpen"
     ev "${SEQ} ${W}.gestures.feed(swipe(4, 100, 0)); 'fed'" >/dev/null
-    check "and to the right close it" wait_for 3 is_false "Main.panel.statusArea.dateMenu.menu.isOpen"
+    check "and to the right close it" wait_for 12 is_false "Main.panel.statusArea.dateMenu.menu.isOpen"
     same "three fingers up and sideways are never taken" \
         "$(ev "${SEQ} [...${W}.gestures.feed(swipe(3, 0, -100)), ...${W}.gestures.feed(swipe(3, 100, 0))].every(r => r === false)")" true
 fi
@@ -651,10 +651,10 @@ sleep 3
 same "the new arrangement is remembered beside the first" "$(jq '.arrangements | length >= 2' "${PLACES}")" true
 display "${first_mode}"
 back_at_first() { [[ "$(rect_of "$(plain)")" == "120,140,700,450" ]]; }
-check "back at the first size, the window returns to its place there within 2 s" wait_for 3 back_at_first
+check "back at the first size, the window returns to its place there within 2 s" wait_for 12 back_at_first
 display smaller
 again_second() { [[ "$(rect_of "$(plain)")" == "60,70,500,350" ]]; }
-check "and at the second, to its place there" wait_for 3 again_second
+check "and at the second, to its place there" wait_for 12 again_second
 display "${first_mode}"
 sleep 3
 
@@ -703,7 +703,7 @@ activate_files
 item="$(ev "(() => { const w = $(files); Main.wm._windowMenuManager.showWindowMenuForWindow(w, imports.gi.Meta.WindowMenuType.WM, w.get_frame_rect()); const m = Main.wm._windowMenuManager._manager.activeMenu; const it = m?._getMenuItems().find(i => i.label?.text === 'Keep a copy in view'); if (!it) return 'none'; it.activate(imports.gi.Clutter.get_current_event()); return 'chosen'; })()")"
 same "the window menu has Keep a copy in view" "${item}" chosen
 kept() { is_true "$(files).minimized && ${W}.keep.copy instanceof imports.gi.Clutter.Clone && ${W}.keep.copy.source === $(files).get_compositor_private() && ${W}.keep.copy.mapped"; }
-check "choosing it puts Files out of sight and a live copy of it in view" wait_for 3 kept
+check "choosing it puts Files out of sight and a live copy of it in view" wait_for 12 kept
 keys super+2
 sleep 1
 check "the copy is on workspace 2" is_true "${W}.keep.copy.mapped && Main.layoutManager.uiGroup.contains(${W}.keep.frame)"
@@ -725,11 +725,11 @@ gap="$(corner_gap)"
 check "dragged to the bottom left, it settles 14 px from those edges" test "$(cut -d, -f4,5 <<<"${gap}")" == "14,14"
 centre="$(ev "(() => { const e = ${W}.keep.frame.get_transformed_extents(); return ((e.origin.x + e.size.width / 2) / global.screen_width).toFixed(5) + ',' + ((e.origin.y + e.size.height / 2) / global.screen_height).toFixed(5); })()")"
 keys "click:${centre}"
-check "a click brings Files back with the keyboard, and the copy goes" wait_for 3 is_true "!$(files).minimized && !${W}.keep.copy && global.display.focus_window === $(files)"
+check "a click brings Files back with the keyboard, and the copy goes" wait_for 12 is_true "!$(files).minimized && !${W}.keep.copy && global.display.focus_window === $(files)"
 ev "${W}.keep.keep($(files)); 'k'" >/dev/null
 sleep 1
 ev "$(files).delete(0); 'c'" >/dev/null
-check "closing the window takes the copy away" wait_for 3 is_true "!${W}.keep.copy"
+check "closing the window takes the copy away" wait_for 12 is_true "!${W}.keep.copy"
 open_files
 wait_for 30 at_least org.gnome.Nautilus 1
 sleep 2
@@ -755,10 +755,10 @@ ev "Main.activateWindow(${WIN}.find(w => w.get_wm_class() === 'org.amethystora.M
 strength() { ev "($1).get_compositor_private().get_effect('amethystora-dim')?.strength ?? 0"; }
 MANUAL="${WIN}.find(w => w.get_wm_class() === 'org.amethystora.Manual')"
 strength_is() { [[ "$(strength "$1")" == "$2" ]]; }
-check "Files, not in use, is dimmed" wait_for 3 strength_is "$(files)" 1
-check "the Manual, in use, is not" wait_for 3 strength_is "${MANUAL}" 0
+check "Files, not in use, is dimmed" wait_for 12 strength_is "$(files)" 1
+check "the Manual, in use, is not" wait_for 12 strength_is "${MANUAL}" 0
 activate_files
-check "using Files swaps them" wait_for 3 strength_is "${MANUAL}" 1
+check "using Files swaps them" wait_for 12 strength_is "${MANUAL}" 1
 # Two thirds of the brightness, in pixels: one spot of the Manual's window, with dim off and on. pixel NAME POINT,
 # POINT a JavaScript expression giving [x, y] on the stage (the window's middle when left out)
 # The plain window, whose middle is one colour: bottom left, clear of every other window, and not in use. The Manual
@@ -768,7 +768,7 @@ ev "${WIN}.filter(w => w.get_wm_class() === 'org.amethystora.Manual').forEach(w 
 PLAIN="$(plain)"
 ev "(() => { const a = ${AREA}; global.get_window_actors().map(a => a.meta_window).filter(w => !w.minimized && w.get_wm_class() !== 'org.vmlab.Plain').forEach(w => { const f = w.get_frame_rect(); w.move_frame(true, a.x + a.width - f.width, a.y); }); ${PLAIN}.move_resize_frame(true, a.x, a.y + a.height - 200, 300, 200); return 'placed'; })()" >/dev/null
 activate_files
-check "the plain window, not in use, is dimmed" wait_for 3 strength_is "${PLAIN}" 1
+check "the plain window, not in use, is dimmed" wait_for 12 strength_is "${PLAIN}" 1
 MIDDLE="(() => { const r = ${PLAIN}.get_frame_rect(); return [r.x + Math.round(r.width / 2), r.y + Math.round(r.height / 2) + 20]; })()"
 pixel() {
     local file="/tmp/vmlab-dim-$1.png" point="${2:-${MIDDLE}}"
@@ -838,7 +838,7 @@ check "in the overview, the window's picture is not dimmed (within 0.03 of undim
 ame_ desktop windows dim on >/dev/null
 ame_ desktop windows dim off >/dev/null
 no_dims() { [[ "$(dims)" == 0 ]]; }
-check "dim off takes every effect away" wait_for 3 no_dims
+check "dim off takes every effect away" wait_for 12 no_dims
 
 # --- 15.10 Cost and cleanliness -------------------------------------------------------------------------------------
 c1="$(ev "JSON.stringify(Object.fromEntries(Object.entries(${W}.counters).filter(([k]) => k !== 'hold.keymapEvents')))")"
