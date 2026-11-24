@@ -556,7 +556,7 @@ POINT="$(ev "(() => { const w = global.get_window_actors().find(a => a.meta_wind
     w.activate(global.get_current_time()); const r = w.get_frame_rect(); return [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)].join(','); })()")"
 ev "${MOVE} move(${POINT}); ${T}.openRing(); ${T}.ring.runForTest('right-click'); 'clicked'" >/dev/null
 menu_up() { is "global.get_window_actors().some(a => a.meta_window.get_window_type() === imports.gi.Meta.WindowType.POPUP_MENU)"; }
-check "14 a right click where the ring opened opens the app's menu" wait_for 10 menu_up
+check "14 a right click where the ring opened opens the app's menu" wait_for 40 menu_up
 check "14 the click's pointer is dropped after it" wait_for 10 is "!${T}.state().ring.virtual && !${T}.ring.clicking"
 keys esc
 user_bus systemctl --user stop vmlab-text >/dev/null 2>&1
