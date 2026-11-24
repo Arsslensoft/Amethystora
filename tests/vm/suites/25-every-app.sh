@@ -167,7 +167,11 @@ said="$(jq -r --argjson start "${START}" '.[] | select(.time >= $start and .leve
 if [[ -z "${said}" ]]; then
     ok "opening the apps made the security watcher say nothing"
 else
-    not_ok "opening the apps made the security watcher say something" "${said}"
+    # What listens, by the file it runs, which is what the image's allow list for listeners matches
+    not_ok "opening the apps made the security watcher say something" "${said}
+listening: $(ss -H -ltnp 2>/dev/null | grep -E 'passim|27500' | cut -c1-200)
+runs: $(for p in $(pidof passimd 2>/dev/null); do readlink "/proc/${p}/exe"; done)
+allowed: $(grep -hv '^#' /usr/share/amethystora/allow.d/listeners /etc/amethystora/allow.d/listeners 2>/dev/null | grep -i passim)"
 fi
 mkdir -p "${BOOTED%/*}"
 touch "${BOOTED}"
