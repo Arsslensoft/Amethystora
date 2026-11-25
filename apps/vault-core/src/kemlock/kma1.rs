@@ -53,9 +53,10 @@ pub(crate) fn encrypt_with_prefix(key: &Key, prefix: &[u8; 8], plain: &[u8], max
     for counter in 0..chunks {
         let part = &plain[(counter * CHUNK).min(plain.len())..((counter + 1) * CHUNK).min(plain.len())];
         let last = counter + 1 == chunks;
-        let mut nonce = [0u8; 12];
-        nonce[..8].copy_from_slice(prefix);
-        nonce[8..].copy_from_slice(&(counter as u32).to_be_bytes());
+        // The file's random prefix, then the chunk's counter, big-endian
+        let c = (counter as u32).to_be_bytes();
+        let p = prefix;
+        let nonce = [p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], c[0], c[1], c[2], c[3]];
         let sealed = aead::seal_with_nonce(key.as_bytes(), &nonce, part, &[u8::from(last)]);
         // The nonce is implied by the prefix and the counter, so it is not written again
         out.extend_from_slice(&sealed[12..]);
