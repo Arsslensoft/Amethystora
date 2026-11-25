@@ -333,7 +333,7 @@ ev "${P}.stop(); 'stopped'" >/dev/null
 
 # --- R4-17 Pin a capture -----------------------------------------------------------------------------------------------
 same "11 the screenshot schema" "$(in_session "gsettings list-keys ${SHOT}" | sort | paste -sd ' ') $(gs get "${SHOT}" capture-thumbnail) $(gs get "${SHOT}" capture-pin)" \
-    "capture-pin capture-thumbnail tool-settings true true"
+    "capture-pin capture-thumbnail hide-private recording-trim tool-settings translate-to true true"
 # The slide in, measured with animations forced on (the lab draws in software and turns them off)
 ev "global.force_animations = true; 'forced'" >/dev/null
 # Watched every 10 ms from before the capture: the card comes once the file is written, which a fixed wait can miss

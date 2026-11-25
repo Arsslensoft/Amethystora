@@ -190,9 +190,9 @@ gs set org.gnome.desktop.search-providers disabled "['org.mozilla.firefox.deskto
 # --- 1: the providers, in order -------------------------------------------------------------------------------------
 same "1 the search is not degraded" "$(q .degraded)" false
 # Times anywhere and Remind me (the time group) are on as the image ships; bookmarks, notes and meaning are off
-same "1 the overview's controller holds Amethystora's thirteen, in their places" \
+same "1 the overview's controller holds Amethystora's fourteen, in their places" \
     "$(ev "Main.overview.searchController._searchResults._providers.map(p => p.id).filter(id => id.startsWith('amethystora-')).join(' ')")" \
-    "amethystora-clipboard amethystora-answers amethystora-times amethystora-remind amethystora-words amethystora-timer amethystora-put-away amethystora-settings amethystora-windows amethystora-remembered amethystora-plugins amethystora-manual amethystora-agent"
+    "amethystora-clipboard amethystora-answers amethystora-times amethystora-remind amethystora-words amethystora-timer amethystora-put-away amethystora-settings amethystora-windows amethystora-remembered amethystora-plugins amethystora-games amethystora-manual amethystora-agent"
 
 # --- 2: place and width, at scale 1 and 2 ---------------------------------------------------------------------------
 place_ok() {

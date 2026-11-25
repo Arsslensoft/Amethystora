@@ -108,6 +108,12 @@ rm -f /etc/modprobe.d/l2tp_netlink-blacklist.conf /etc/modprobe.d/l2tp_ppp-black
 # device while the screen is unlocked, which undoes `ame security usb on`. Only `ame security usb locked`
 # unmasks it.
 systemctl mask usbguard-dbus.service
+# fwupd's passim, which offers the firmware metadata fwupd downloaded to every machine on the network: fwupd starts it
+# over D-Bus when firmware is looked for, and it listens on 0.0.0.0:27500 with a service of its own (a mount namespace
+# of its own), which the security watcher by design never takes for the program it names. So it is off, masked
+# (D-Bus activation would start it): each machine downloads its own firmware updates. `ame security network-daemons
+# off` unmasks it, as it unmasks Avahi and ModemManager
+systemctl mask passim.service
 # The base image's appstream cache refresh runs `appstreamcli refresh --force`
 # ordered Before=multi-user.target on every boot, which gated graphical.target by
 # ~6-11 s (measured on the critical chain). GNOME Software is not in the image, so

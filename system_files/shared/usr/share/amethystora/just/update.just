@@ -77,7 +77,8 @@ update ACTION="" VALUE="":
                     exit 0
                 fi
                 echo "$(gettext "Looking for updates…")"
-                systemctl start amethystora-update-check.service || exit $?
+                # A look that failed says why (what it recorded), then fails as the unit did
+                systemctl start amethystora-update-check.service || { failed=$?; /usr/libexec/amethystora-update-check status; exit "${failed}"; }
                 exec /usr/libexec/amethystora-update-check status
                 ;;
             on)

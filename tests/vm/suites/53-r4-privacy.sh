@@ -198,7 +198,7 @@ started() { grep -q started "${WORK}/$1.log" 2>/dev/null; }
 
 # --- 1-2: the keys, the place, and nothing while nothing is shared ---------------------------------------------------
 same "1 the schema's keys" "$(GSETTINGS_BACKEND=memory gsettings list-keys "${PRIVACY}" | sort | paste -sd ' ')" \
-    "network-apps share-guard share-guard-apps share-guard-private shield"
+    "network-apps share-guard share-guard-apps share-guard-private shield zone-notice"
 same "1 the defaults" "$(for k in share-guard share-guard-private shield network-apps; do GSETTINGS_BACKEND=memory gsettings get "${PRIVACY}" "${k}"; done | paste -sd ' ')" \
     "'blur' true 'tile' false"
 order="$(ev "[...${UI}.keys()].join(' ')")"
@@ -215,6 +215,9 @@ security_title() { ev "global.display.list_all_windows().find(w => w.get_wm_clas
 security_up() { [[ -n "$(security_title)" ]]; }
 wait_for 60 security_up || not_ok "3 Security did not open"
 SECURITY_TITLE="$(security_title)"
+# A slow machine draws the window after it is there: measure it once it shows something
+drawn() { python3 -c "import sys; sys.exit(0 if float('$(detail_of "Lab vault")') > 0.02 else 1)"; }
+wait_for 60 drawn || true
 before="$(detail_of "Lab vault")"
 share vmlab-share python3 "${WORK}/sharecast.py" 300
 if wait_for 20 started vmlab-share; then

@@ -120,7 +120,8 @@ COUNTME_UNITS=(rpm-ostree-countme.timer rpm-ostree-countme.service)
 FIRMWARE_UNITS=(fwupd-refresh.timer fwupd-refresh.service)
 NETWORK_DAEMONS=(avahi-daemon.socket avahi-daemon.service ModemManager.service)
 # ...and fwupd's passim, which offers the firmware metadata fwupd downloaded to the machines nearby: fwupd starts it
-# over D-Bus when firmware is looked for, it is never enabled, so it is only stopped and masked, then unmasked
+# over D-Bus when firmware is looked for, it is never enabled, so it is only stopped and masked. The image masks it already
+# (build_files/base/17-cleanup.sh), so `off` leaves it as the image has it
 NETWORK_ON_DEMAND=(passim.service)
 # What noexec-temp adds to /etc/fstab, each line marked so that it can be taken out again
 NOEXEC_MARK=x-amethystora-noexec
@@ -713,7 +714,7 @@ set_switch() {
                 systemctl stop "${NETWORK_ON_DEMAND[@]}" 2>/dev/null
                 systemctl mask "${NETWORK_DAEMONS[@]}" "${NETWORK_ON_DEMAND[@]}" >/dev/null 2>&1 || return 1
             else
-                systemctl unmask "${NETWORK_DAEMONS[@]}" "${NETWORK_ON_DEMAND[@]}" >/dev/null 2>&1
+                systemctl unmask "${NETWORK_DAEMONS[@]}" >/dev/null 2>&1
                 systemctl enable --now "${NETWORK_DAEMONS[@]}" 2>/dev/null || return 1
             fi
             ;;

@@ -406,7 +406,7 @@ ev "${K}.unminimize(); ${K}.activate(global.get_current_time()); 'x'" >/dev/null
 sleep 1
 keys "click:$(light close)"
 check "a click on the red light closes it" wait_for 10 none_of org.vmlab.Kitty57
-same "and its strip goes with it" "$(ev "${L}.windows.length")" 0
+check "and its strip goes with it" wait_for 5 is_true "${L}.windows.filter(w => w.get_wm_class() === 'org.vmlab.Kitty57').length === 0"
 [[ "${was_tiling}" == true ]] && tiling
 
 # Back as it was

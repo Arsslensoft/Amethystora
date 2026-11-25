@@ -9,6 +9,8 @@ FROM ${BASE_IMAGE}@${BASE_DIGEST}
 ARG BASE_IMAGE
 ARG BASE_DIGEST
 ENV BASE_IMAGE=${BASE_IMAGE} BASE_DIGEST=${BASE_DIGEST}
+# The lab's alone (build.sh, which sees it while it runs): the copy from an archive of that digest instead of the registry
+ARG LIVE_COPY_FROM=""
 COPY live/ /src/live/
 COPY product/ /src/product/
 RUN --mount=type=tmpfs,target=/var/tmp bash /src/live/build.sh && rm -rf /src

@@ -61,7 +61,8 @@ export function passes(notification) {
 // The launcher IDs a notification's app goes by, each as APP.desktop
 function idsOf(notification) {
     const source = notification.source;
-    return [source?._appId, source?.app?.get_id?.()].filter(Boolean)
+    // GNOME has named a source's app more than one way
+    return [source?._appId, source?.appId, source?.app_id, source?.app?.get_id?.(), source?._app?.get_id?.()].filter(id => typeof id === 'string' && id)
         .map(id => (id.endsWith('.desktop') ? id : `${id}.desktop`));
 }
 

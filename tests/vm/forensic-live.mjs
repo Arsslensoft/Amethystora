@@ -74,6 +74,8 @@ const args = ['-name', NAME, '-enable-kvm', '-machine', 'q35,smm=off', '-cpu', '
   '-qmp', `unix:${file('qmp')},server=on,wait=off`, '-pidfile', file('pid'), ...credentials()];
 const log = fs.openSync(file('log'), 'w');
 const qemu = spawn('qemu-system-x86_64', args, { detached: true, stdio: ['ignore', log, log] });
+let ended = '';
+qemu.on('exit', (code, signal) => { ended = `exit ${code ?? ''}${signal ? ` signal ${signal}` : ''}`; });
 qemu.unref();
 const alive = () => {
   try {
@@ -87,15 +89,23 @@ const sh = async (command, timeout = 120, extra = {}) => {
   return { rc: a.rc, out: decode(a.stdout), err: `${decode(a.stderr)}${a.error || ''}` };
 };
 const out = async (command, timeout) => (await sh(command, timeout)).out.trim();
+// A check by a command's status, which says what the command printed when it fails
+const check = async (what, command, timeout = 120) => {
+  const r = await sh(command, timeout);
+  say(r.rc === 0, what, `${r.out}${r.err}`);
+};
 
 try {
+  // QEMU writes its pid file once it has started: until then it is not "stopped" (the helper's socket is not there yet
+  // either, so the first ping fails at once)
+  for (let i = 0; i < 50 && !alive() && !ended; i++) await sleep(200);
   // The first start is slow under nested virtualization
   for (let waited = 0; ; waited += 5) {
     try {
       await agent(NAME, { op: 'ping' }, 5);
       break;
     } catch {
-      if (!alive()) throw new Error(`QEMU stopped: ${fs.readFileSync(file('log'), 'utf8')}`);
+      if (!alive()) throw new Error(`QEMU stopped (${ended || 'no pid file'}): ${fs.readFileSync(file('log'), 'utf8')}`);
       if (waited > 1200) throw new Error('the live system did not answer within 20 minutes');
       await sleep(5000);
     }
@@ -122,7 +132,8 @@ try {
     say((await sh('! ls /dev/zram* 2>/dev/null | grep -q .')).rc === 0, 'no zram device');
     say((await sh('! grep -q "^md" /proc/mdstat')).rc === 0, 'no MD array assembled');
     say((await sh('test -z "$(dmsetup ls 2>/dev/null | grep -v "^live-" | grep -v "No devices")"')).rc === 0, "no device-mapper device but the live system's own");
-    say((await sh('test -z "$(lvs --noheadings 2>/dev/null)"')).rc === 0, 'no logical volume known active');
+    // lvs lists every volume it can see, active or not: an active one has an "a" in the fifth place of its attributes
+    await check('no logical volume known active', 'v="$(lvs --noheadings -a -o lv_name,lv_attr 2>&1)"; echo "$v"; ! grep -qE "^ *\S+ +.{4}a" <<<"$v"');
     say((await sh(`! findmnt -rn -o SOURCE | grep -q "^/dev/${dev}"`)).rc === 0, 'nothing of the evidence disk is mounted');
     say((await sh('! test -x /usr/bin/liveinst')).rc === 0, 'the installer cannot be started');
     say((await sh('! ls /usr/share/applications/liveinst.desktop /usr/share/applications/anaconda.desktop 2>/dev/null | grep -q .')).rc === 0, 'the installer has no launcher');
@@ -132,7 +143,9 @@ try {
     say((await out('runuser -u liveuser -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus gsettings get org.gnome.desktop.media-handling automount')) === 'false',
       "GNOME's automount is off");
     say((await sh(`udevadm info -q property -n /dev/${dev}1 | grep -qx UDISKS_IGNORE=1`)).rc === 0, 'udisks is told to ignore the disk');
-    say((await sh(`! udisksctl dump 2>/dev/null | grep -q "block_devices/${dev}"`)).rc === 0, 'udisks shows nothing of the disk');
+    // UDISKS_IGNORE makes udisks flag each block object HintIgnore, which is what GNOME and every client leave alone: the objects are still listed
+    await check('udisks flags the disk and every partition of it to be ignored (HintIgnore)',
+      `r=0; for p in /dev/${dev} /dev/${dev}[0-9]*; do i="$(udisksctl info -b $p 2>&1)"; grep -qE 'HintIgnore: +true' <<<"$i" || { echo "$p: $(grep -E 'Hint(Ignore|Auto)|^Error' <<<"$i" | tr '\n' ' ')"; r=1; }; done; exit $r`);
     // The top bar's words: the pill file of the live account, within five minutes of the session
     let pill = '';
     for (let i = 0; i < 60 && !pill.includes('Disks read-only'); i++) {
@@ -143,9 +156,12 @@ try {
 
     // --- A write that is tried ---
     say((await sh(`dd if=/dev/zero of=/dev/${dev}1 bs=512 count=1 conv=notrunc 2>&1`)).rc !== 0, 'a write to the disk is refused');
-    say((await sh('mkdir -p /mnt/w && ! mount -o rw,noload /dev/disk/by-label/evid-ext4 /mnt/w 2>/dev/null')).rc === 0, 'a read-write mount is refused');
-    say((await sh('mkdir -p /mnt/w && { mount /dev/disk/by-label/evid-ext4 /mnt/w 2>&1 && ! touch /mnt/w/x 2>/dev/null; r=$?; umount /mnt/w 2>/dev/null; exit $r; } || true')).rc === 0,
-      'a plain mount of a dirty file system is refused, or read-only, and nothing can be written in it');
+    // mount(8) retries a write-protected device read-only, so "refused" is either: it fails, or what it mounted is read-only and takes no write
+    await check('a read-write mount is refused, or comes up read-only and takes no write',
+      'mkdir -p /mnt/w; if mount -o rw,noload /dev/disk/by-label/evid-ext4 /mnt/w 2>&1; then findmnt -no OPTIONS /mnt/w; findmnt -no OPTIONS /mnt/w | grep -qw ro && ! touch /mnt/w/x 2>/dev/null; r=$?; umount /mnt/w; exit $r; fi');
+    // Refused is a pass; mounted, it must take no write
+    await check('a plain mount of a dirty file system is refused, or read-only, and nothing can be written in it',
+      'mkdir -p /mnt/w; if mount /dev/disk/by-label/evid-ext4 /mnt/w 2>&1; then findmnt -no OPTIONS /mnt/w; ! touch /mnt/w/x 2>/dev/null; r=$?; umount /mnt/w; exit $r; fi; exit 0');
 
     // --- The manual's mounts, one file system after another ---
     const mounts = {
@@ -184,7 +200,7 @@ try {
       const r = await sh(`mdadm --assemble --readonly /dev/md/forensic /dev/${dev}7 /dev/${dev}8 >/dev/null 2>&1; mkdir -p /mnt/md && mount -o ro,noload /dev/md/forensic /mnt/md && cat /mnt/md/evidence.txt; umount /mnt/md; mdadm --stop /dev/md/forensic >/dev/null 2>&1`, 90);
       say(r.out.includes(sentence), 'the RAID1 assembled read-only by hand, mounted ro,noload and read', r.err);
     } else skip('md: the lab could not make it');
-    say((await sh(`! findmnt -rn -o SOURCE | grep -q "^/dev/${dev}"`)).rc === 0, 'nothing of the disk is left mounted');
+    await check('nothing of the disk is left mounted', `! findmnt -rn -o TARGET,SOURCE | grep "/dev/${dev}"`);
     // The one drive the findings go to: made writable on purpose, and the check says so; then put back as it was
     say((await sh(`amethystora-forensic writable /dev/${dev} 2>&1 && test "$(cat /sys/class/block/${dev}/ro)" = 0 && amethystora-forensic verify`)).rc === 0,
       'amethystora-forensic writable makes a disk writable on purpose, and the check accepts it');

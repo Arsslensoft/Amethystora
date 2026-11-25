@@ -8,8 +8,8 @@ images:
   - name: silverblue-main-45
     image: ghcr.io/ublue-os/silverblue-main
     tag: "45"
-    digest: sha256:7d599814825e7494d0cd6906e7f65f75545540ae2c25068c27cf8556fa2cedca
+    digest: sha256:e304a675ceec19537e54151c96e58ec7b17a4ffd4a0fe4e672985db2d80dd4a1
   - name: brew
     image: ghcr.io/ublue-os/brew
     tag: latest
-    digest: sha256:2993b28cf9a54efebdc418ef42228618f5c68e8b931430f2d60eddc190e30016
+    digest: sha256:9c51c948d48de69b0fadfb3d97dc1a7eaa91a4e5a2af7b2b6626fdd8fca362b1

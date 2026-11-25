@@ -121,7 +121,7 @@ trap cleanup EXIT
 # --- 1: the keys, the place -----------------------------------------------------------------------------------------
 same "1 the schema's keys and defaults" \
     "$(GSETTINGS_BACKEND=memory gsettings list-recursively "${TOOLS}" | cut -d' ' -f2- | LC_ALL=C sort | paste -sd ';')" \
-    "colour-picker ['<Super><Alt>c'];convert-in-files false;mute-microphone ['<Super><Alt>m']"
+    "colour-picker ['<Super><Alt>c'];convert-in-files false;earlier-versions true;mute-microphone ['<Super><Alt>m'];network-reach true;offer-room true;open-anything true;uninstall-takes-data true"
 order="$(ev "[...${UI}.keys()].join(' ')")"
 [[ " ${order} " =~ \ privacy\ (.*\ )?tools\ (.*\ )?focus\ $ ]] && ok "1 tools runs after privacy and before focus, focus last" ||
     not_ok "1 the modules' order" "${order}"
