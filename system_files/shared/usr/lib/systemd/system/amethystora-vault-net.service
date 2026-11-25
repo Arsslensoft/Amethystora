@@ -40,9 +40,10 @@ SystemCallArchitectures=native
 SystemCallFilter=@system-service
 UMask=0077
 LimitCORE=0
-# A response is 32 MiB at most, held three times over (the body, its base64 and the line that carries it), and at most four
+# A response is 32 MiB at most, held three times over (the body, its base64 and the line that carries it), and a request line 24 MiB
+# (the line, its parsed copy, the file and the message: about 90 MiB, 130 with the buffers that grow), and at most four
 # connections are served at once
-MemoryMax=512M
+MemoryMax=768M
 TasksMax=16
 LogLevelMax=warning
 TimeoutStopSec=5

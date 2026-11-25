@@ -91,6 +91,19 @@ impl Write for Stream {
     }
 }
 
+/// An answer with the few headers a caller needs, in the case the server wrote them
+pub struct Reply {
+    pub status: u16,
+    pub body: Zeroizing<Vec<u8>>,
+    /// Only `ANSWER_HEADERS`, names in lower case, in the order they came
+    pub headers: Vec<(String, String)>,
+}
+
+/// The only response headers that are passed on (Kemlock's DPoP nonce, the clock, the version and the retry advice)
+pub const ANSWER_HEADERS: [&str; 6] = ["dpop-nonce", "date", "etag", "retry-after", "www-authenticate", "content-type"];
+/// The longest value of one of them
+const MOST_HEADER_VALUE: usize = 512;
+
 /// What a session may reach and trust
 pub struct Session {
     origins: Vec<String>,
@@ -148,6 +161,10 @@ impl Session {
     }
 
     pub fn request(&mut self, method: &str, url: &str, headers: &[(String, String)], body: &[u8]) -> Result<(u16, Zeroizing<Vec<u8>>), Failure> {
+        self.request_full(method, url, headers, body).map(|reply| (reply.status, reply.body))
+    }
+
+    pub fn request_full(&mut self, method: &str, url: &str, headers: &[(String, String)], body: &[u8]) -> Result<Reply, Failure> {
         let (scheme, host, port, path) = split_url(url).ok_or(Failure::NotAllowed)?;
         let origin = format!("{scheme}://{host}:{port}");
         if !self.origins.contains(&origin) || path.contains('#') {
@@ -157,13 +174,15 @@ impl Session {
             return Err(Failure::NotAllowed);
         }
         // Only what the protocol's trash, restore and writes use. DELETE, and POST to an item's `/delete`, destroy it for good. The one
-        // delete the Vault ever sends is of an attachment slot it opened a moment ago and could not fill (spec-attachments 5.4), and it is
-        // that route alone: `.../ciphers/ID/attachment/ID`, no query.
+        // delete the Vault ever sends to Bitwarden is of an attachment slot it opened a moment ago and could not fill
+        // (spec-attachments 5.4), and it is that route alone: `.../ciphers/ID/attachment/ID`, no query. Kemlock's API (`/kem/v1/`) has
+        // no `/delete` routes, so a POST there is any; its one DELETE is of a file of an item, `.../kem/v1/items/ID/files/ID`, no query.
         let bare = path.split('?').next().unwrap_or("").trim_end_matches('/').to_ascii_lowercase();
+        let kemlock = is_kemlock(&bare);
         match method {
             "GET" | "PUT" => {}
-            "POST" if !bare.ends_with("/delete") => {}
-            "DELETE" if !path.contains('?') && is_slot(&bare) => {}
+            "POST" if kemlock || !bare.ends_with("/delete") => {}
+            "DELETE" if !path.contains('?') && (is_slot(&bare) || (kemlock && is_kemlock_file(&bare))) => {}
             _ => return Err(Failure::NotAllowed),
         }
         let deadline = Instant::now() + WHOLE;
@@ -187,11 +206,11 @@ impl Session {
         set_deadline(&stream, deadline)?;
         stream.write_all(&message).map_err(io_failure)?;
         stream.flush().map_err(io_failure)?;
-        let (status, body, keep) = read_response(&mut stream, deadline)?;
+        let (reply, keep) = read_response(&mut stream, deadline)?;
         if keep {
             self.open.insert(origin, stream);
         }
-        Ok((status, body))
+        Ok(reply)
     }
 
     fn connect(&self, scheme: &str, host: &str, port: u16, deadline: Instant) -> Result<Stream, Failure> {
@@ -233,10 +252,26 @@ impl Session {
 fn is_slot(path: &str) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
     let [.., "ciphers", cipher, "attachment", slot] = parts.as_slice() else { return false };
-    cipher.len() == 36
-        && cipher.bytes().enumerate().all(|(at, b)| if matches!(at, 8 | 13 | 18 | 23) { b == b'-' } else { b.is_ascii_hexdigit() })
+    is_uuid(cipher)
         && (1..=64).contains(&slot.len())
         && slot.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// A path under Kemlock's API, written the way the server reads it: no dot segment, escape or empty segment for a server to resolve
+/// into some other route (a POST there must not turn into a Bitwarden `/delete`)
+fn is_kemlock(path: &str) -> bool {
+    path.contains("/kem/v1/") && !path.contains("..") && !path.contains("/./") && !path.contains('%') && !path.contains("//") && !path.contains('\\')
+}
+
+fn is_uuid(text: &str) -> bool {
+    text.len() == 36 && text.bytes().enumerate().all(|(at, b)| if matches!(at, 8 | 13 | 18 | 23) { b == b'-' } else { b.is_ascii_hexdigit() })
+}
+
+/// `.../kem/v1/items/UUID/files/UUID` and nothing after it
+fn is_kemlock_file(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    let [.., "kem", "v1", "items", item, "files", file] = parts.as_slice() else { return false };
+    is_uuid(item) && is_uuid(file)
 }
 
 fn host_header(host: &str, port: u16, scheme: &str) -> String {
@@ -331,8 +366,8 @@ impl Reader<'_> {
     }
 }
 
-/// The status, the body, and whether the connection may be used again
-fn read_response(stream: &mut Stream, deadline: Instant) -> Result<(u16, Zeroizing<Vec<u8>>, bool), Failure> {
+/// The answer, with the headers `ANSWER_HEADERS` names, and whether the connection may be used again
+fn read_response(stream: &mut Stream, deadline: Instant) -> Result<(Reply, bool), Failure> {
     let mut reader = Reader { stream, buffer: Zeroizing::new(Vec::new()), deadline };
     loop {
         let status_line = reader.line()?;
@@ -345,6 +380,7 @@ fn read_response(stream: &mut Stream, deadline: Instant) -> Result<(u16, Zeroizi
         }
         let (mut length, mut chunked, mut keep) = (None, false, version == "HTTP/1.1");
         let mut count = 0;
+        let mut passed: Vec<(String, String)> = Vec::new();
         loop {
             let line = reader.line()?;
             if line.is_empty() {
@@ -356,7 +392,15 @@ fn read_response(stream: &mut Stream, deadline: Instant) -> Result<(u16, Zeroizi
             }
             let line = String::from_utf8_lossy(&line).to_string();
             let Some((name, value)) = line.split_once(':') else { return Err(Failure::Unreachable) };
-            let (name, value) = (name.trim().to_ascii_lowercase(), value.trim().to_ascii_lowercase());
+            let (name, original) = (name.trim().to_ascii_lowercase(), value.trim().to_string());
+            let value = original.to_ascii_lowercase();
+            if ANSWER_HEADERS.contains(&name.as_str()) {
+                // A server's word that goes on to a caller: short and one line, or no answer
+                if original.len() > MOST_HEADER_VALUE || original.chars().any(char::is_control) {
+                    return Err(Failure::Unreachable);
+                }
+                passed.push((name.clone(), original));
+            }
             match name.as_str() {
                 "content-length" => {
                     let parsed: usize = value.parse().map_err(|_| Failure::Unreachable)?;
@@ -410,7 +454,7 @@ fn read_response(stream: &mut Stream, deadline: Instant) -> Result<(u16, Zeroizi
         if !reader.buffer.is_empty() {
             keep = false;
         }
-        return Ok((status, body, keep));
+        return Ok((Reply { status, body, headers: passed }, keep));
     }
 }
 
@@ -532,5 +576,107 @@ mod tests {
         assert_eq!(session(&address).request("GET", &format!("{address}/x"), &[], b"").err(), Some(Failure::TooLarge));
         let (address, _) = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nab");
         assert_eq!(session(&address).request("GET", &format!("{address}/x"), &[], b"").err(), Some(Failure::Unreachable));
+    }
+
+    #[test]
+    fn only_the_listed_headers_come_back_in_the_case_the_server_wrote() {
+        let (address, _) = serve_once(
+            b"HTTP/1.1 401 Unauthorized\r\nDPoP-Nonce: AbCd-9_xY\r\nDate: Wed, 25 Nov 2026 10:00:00 GMT\r\nETag: \"V1-aB\"\r\nRetry-After: 7\r\nWWW-Authenticate: DPoP error=\"use_dpop_nonce\"\r\nContent-Type: Application/Json\r\nSet-Cookie: s=1\r\nX-Other: no\r\nContent-Length: 2\r\n\r\n{}",
+        );
+        let reply = session(&address).request_full("GET", &format!("{address}/kem/v1/x"), &[], b"").unwrap();
+        assert_eq!((reply.status, &reply.body[..]), (401, &b"{}"[..]));
+        let pairs: Vec<(&str, &str)> = reply.headers.iter().map(|(n, v)| (n.as_str(), v.as_str())).collect();
+        assert_eq!(
+            pairs,
+            [
+                ("dpop-nonce", "AbCd-9_xY"),
+                ("date", "Wed, 25 Nov 2026 10:00:00 GMT"),
+                ("etag", "\"V1-aB\""),
+                ("retry-after", "7"),
+                ("www-authenticate", "DPoP error=\"use_dpop_nonce\""),
+                ("content-type", "Application/Json"),
+            ]
+        );
+        // An answer with none of them has none
+        let (address, _) = serve_once(b"HTTP/1.1 200 OK\r\nX-Other: no\r\nContent-Length: 0\r\n\r\n");
+        assert!(session(&address).request_full("GET", &format!("{address}/x"), &[], b"").unwrap().headers.is_empty());
+    }
+
+    #[test]
+    fn a_listed_header_that_is_too_long_or_has_a_control_character_is_no_answer() {
+        let long = format!("HTTP/1.1 200 OK\r\nDPoP-Nonce: {}\r\nContent-Length: 0\r\n\r\n", "n".repeat(513));
+        let (address, _) = serve_once(Box::leak(long.into_bytes().into_boxed_slice()));
+        assert_eq!(session(&address).request_full("GET", &format!("{address}/x"), &[], b"").err(), Some(Failure::Unreachable));
+        let exact = format!("HTTP/1.1 200 OK\r\nDPoP-Nonce: {}\r\nContent-Length: 0\r\n\r\n", "n".repeat(512));
+        let (address, _) = serve_once(Box::leak(exact.into_bytes().into_boxed_slice()));
+        assert_eq!(session(&address).request_full("GET", &format!("{address}/x"), &[], b"").unwrap().headers[0].1.len(), 512);
+        let (address, _) = serve_once(b"HTTP/1.1 200 OK\r\nETag: a\x07b\r\nContent-Length: 0\r\n\r\n");
+        assert_eq!(session(&address).request_full("GET", &format!("{address}/x"), &[], b"").err(), Some(Failure::Unreachable));
+        // An unlisted header is not looked at
+        let (address, _) = serve_once(b"HTTP/1.1 200 OK\r\nX-Other: a\x07b\r\nContent-Length: 0\r\n\r\n");
+        assert!(session(&address).request_full("GET", &format!("{address}/x"), &[], b"").is_ok());
+    }
+
+    #[test]
+    fn kemlocks_one_delete_is_of_a_file_of_an_item() {
+        let (item, file) = ("3f2504e0-4f89-11d3-9a0c-0305e82c3301", "7C9E6679-7425-40DE-944B-E07FC1F90AE7");
+        let mut session = session("http://127.0.0.1:9");
+        // Not refused here: it goes as far as the connection, which nothing answers
+        for prefix in ["", "/vault"] {
+            let url = format!("http://127.0.0.1:9{prefix}/kem/v1/items/{item}/files/{file}");
+            assert_ne!(session.request("DELETE", &url, &[], b"").err(), Some(Failure::NotAllowed), "{url}");
+        }
+        for url in [
+            format!("http://127.0.0.1:9/kem/v1/items/{item}"),
+            format!("http://127.0.0.1:9/kem/v1/items/{item}/files"),
+            format!("http://127.0.0.1:9/kem/v1/items/{item}/files/{file}?x=1"),
+            format!("http://127.0.0.1:9/kem/v1/items/{item}/files/{file}/extra"),
+            format!("http://127.0.0.1:9/kem/v1/items/{item}/files/not-a-uuid"),
+            format!("http://127.0.0.1:9/kem/v1/items/not-a-uuid/files/{file}"),
+            format!("http://127.0.0.1:9/kem/v1/items/{item}/files/{}", file.replace('-', "")),
+            format!("http://127.0.0.1:9/kem/v1/items/{item}/files/%2e%2e"),
+            format!("http://127.0.0.1:9/kem/v1/../items/{item}/files/{file}"),
+            "http://127.0.0.1:9/kem/v1/auth/session".to_string(),
+            "http://127.0.0.1:9/kem/v1/items:batch".to_string(),
+            format!("http://127.0.0.1:9/kem/v2/items/{item}/files/{file}"),
+            format!("http://127.0.0.1:9/api/items/{item}/files/{file}"),
+        ] {
+            assert_eq!(session.request("DELETE", &url, &[], b"").err(), Some(Failure::NotAllowed), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_post_to_kemlock_is_any_and_a_post_to_a_bitwarden_delete_is_still_refused() {
+        let mut session = session("http://127.0.0.1:9");
+        for path in ["/kem/v1/items:batch", "/kem/v1/auth/opaque/start", "/kem/v1/items/3f2504e0-4f89-11d3-9a0c-0305e82c3301/files", "/kem/v1/items/x/delete"] {
+            assert_ne!(session.request("POST", &format!("http://127.0.0.1:9{path}"), &[], b"").err(), Some(Failure::NotAllowed), "{path}");
+        }
+        for path in [
+            "/api/ciphers/3f2504e0-4f89-11d3-9a0c-0305e82c3301/delete",
+            "/api/ciphers/3f2504e0-4f89-11d3-9a0c-0305e82c3301/delete/",
+            "/api/ciphers/3f2504e0-4f89-11d3-9a0c-0305e82c3301/DELETE",
+            // dressed as Kemlock's, and resolved by a server into a Bitwarden route
+            "/kem/v1/../../api/ciphers/x/delete",
+            "/kem/v1/%2e%2e/api/ciphers/x/delete",
+            "/kem/v1//api/ciphers/x/delete",
+            "/api/ciphers/x/delete?next=/kem/v1/",
+        ] {
+            assert_eq!(session.request("POST", &format!("http://127.0.0.1:9{path}"), &[], b"").err(), Some(Failure::NotAllowed), "{path}");
+        }
+        // The other methods are as before
+        assert_eq!(session.request("PATCH", "http://127.0.0.1:9/kem/v1/items", &[], b"").err(), Some(Failure::NotAllowed));
+        assert_eq!(session.request("DELETE", "http://127.0.0.1:9/kem/v1/items/x", &[], b"").err(), Some(Failure::NotAllowed));
+    }
+
+    #[test]
+    fn a_content_type_goes_with_the_request() {
+        let (address, thread) = serve_once(b"HTTP/1.1 204 No Content\r\n\r\n");
+        let reply = session(&address)
+            .request_full("POST", &format!("{address}/kem/v1/items/x"), &[("Content-Type".into(), "application/octet-stream".into()), ("DPoP".into(), "a.b.c".into())], b"\x00\x01")
+            .unwrap();
+        assert_eq!(reply.status, 204);
+        let sent = thread.join().unwrap();
+        let text = String::from_utf8_lossy(&sent);
+        assert!(text.contains("\r\nContent-Type: application/octet-stream\r\n") && text.contains("\r\nDPoP: a.b.c\r\n") && text.contains("Content-Length: 2\r\n"));
     }
 }
