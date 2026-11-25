@@ -1,0 +1,56 @@
+name: Feature request
+description: An idea for something Amethystora could do, or do better
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the idea. A feature is judged by what it costs a machine that never uses it as
+        much as by its use: on Amethystora a new feature is off until turned on, and off costs nothing.
+        See [CONTRIBUTING.md](https://github.com/arsslensoft/amethystora/blob/main/CONTRIBUTING.md).
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you post
+      options:
+        - label: I searched the existing issues and the Manual, and this isn't there already.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do, and what stops you?
+      description: The problem first, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Amethystora to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried instead?
+      description: Another app, a Flatpak, a container, a workaround.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part is it about?
+      multiple: true
+      options:
+        - The desktop (GNOME, the top bar, the dock, windows)
+        - An Amethystora app (Manual, Security, Updates, Notes, Logs, Backups, Control, Help, Vault)
+        - Security and privacy
+        - Updates, images and installing
+        - Hardware and drivers
+        - The terminal and `ame` commands
+        - Developer tools (the dx images, containers)
+        - Something else
+    validations:
+      required: true

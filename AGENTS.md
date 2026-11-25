@@ -26,6 +26,7 @@ This document provides essential information for coding agents working with the 
 - `cosign.pub` - Container signing public key
 - `keys/` - Upstream's public keys, kept here rather than fetched from a branch that can move: Universal Blue's cosign key (`ublue-os-cosign.pub`, which `just verify-container` checks the base, akmods and brew images with) and the akmods certificate `just secureboot` checks the kernel against (the 2024 key; upstream retired the 2023 one on 2026-11-11)
 - `SECURITY.md` - How to report a vulnerability (privately, through the repository's Security tab)
+- `GOVERNANCE.md`, `SUPPORT.md` - Who decides what and how, and where to ask for help (Discussions for questions, the forms for bugs and ideas)
 
 ### Key Directories
 - `system_files/` - Files copied into the image, overlaid on those of the upstream layers
@@ -221,6 +222,7 @@ The repository uses mandatory pre-commit validation:
 - `scorecard.yml` - OpenSSF Scorecard supply-chain checks (weekly)
 - `clean.yml` - Cleanup old images and artifacts
 - `moderator.yml` - Repository moderation tasks
+- `stale.yml` - Daily: an issue with no activity for 90 days is labelled `stale`, and closed 30 days later; never a pull request, nor an issue that is security, pinned, confirmed, help wanted, a good first issue, assigned or in a milestone
 
 **Workflow Architecture:**
 
@@ -2696,8 +2698,10 @@ from `main` (the `queue-latest` skill's, after a green lab run); there is no cro
 and neither a push to `main` nor the merge queue publishes: the queue's run builds
 and tests with throwaway keys. Only `Stable Images` is scheduled (Tuesdays 01:00 UTC).
 
-The `main` ruleset asks of everyone but the repository's administrators, who bypass it: a pull request,
-an approval from a code owner, the `Checks` workflow's three jobs, and the merge queue, which squashes.
+The `main` ruleset asks of everyone but the repository's administrators, who bypass it: a pull request, an
+approval from a code owner, every review thread resolved, the checks `Lint`, `Title`, `Dependencies`, `DCO`,
+`Licences`, `Security`, `Unit`, `Integration` and `Lab`, and the merge queue, which squashes. Commits made on
+GitHub's website must carry a sign-off.
 
 ### Build Script Execution Order
 The build runs the scripts in `build_files/base/` in this order, which is not the numerical one. The kernel layer runs
