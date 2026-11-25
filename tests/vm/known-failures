@@ -51,6 +51,11 @@
 73-update-check.sh :: System Updates has a section for what is waiting
 91-clipboard.sh :: a copy made in KeePassXC's window is not recorded
 
+65-r5-restart.sh :: picking up after a restart did not start in the session
+54-r4-notify.sh :: 3 it says when
+54-r4-notify.sh :: 3 the pill says when it comes back
+70-backups.sh :: the versions are not from both sources
+
 # Need the network of a machine with the packages' repositories, and a pool of real disks' errors
 50-raid.sh :: ame system raid replace data puts the copies back
 50-raid.sh :: data is whole
