@@ -2434,6 +2434,18 @@ const PNGS = [
   // Fedora's spinner theme, the fallback splash, looks its watermark up by this name
   logo({ out: "usr/share/plymouth/themes/spinner/watermark.png", width: 330, height: 64, text: "white" }),
   ...BOOT_PNGS,
+  // The repository's: the README's wordmark, drawn at three times the 360 pixels it is shown at, for a light and a
+  // dark page, and the social preview, the repository's icon below on the splash's sky
+  logo({ out: ".github/assets/amethystora-wordmark-light.png", root: ROOT, width: 1080, height: 320, text: "dark" }),
+  logo({ out: ".github/assets/amethystora-wordmark-dark.png", root: ROOT, width: 1080, height: 320, text: "white" }),
+  {
+    out: ".github/assets/social-preview.png", root: ROOT, width: 1280, height: 640,
+    html: () => `<!doctype html><html><head><style>
+    html,body{margin:0;width:1280px;height:640px;background:${BOOT.sky};overflow:hidden}
+    body{display:flex;align-items:center;justify-content:center}
+    img{width:400px;height:400px}
+  </style></head><body><img src="data:image/svg+xml;base64,${Buffer.from(tileSvg(docsGlyph)).toString("base64")}"></body></html>`,
+  },
   { out: "usr/share/backgrounds/amethystora/amethystora-l.png", width: 3840, height: 2160, html: () => wallpaperHtml("light") },
   { out: "usr/share/backgrounds/amethystora/amethystora-d.png", width: 3840, height: 2160, html: () => wallpaperHtml("dark") },
   ...[
@@ -2531,6 +2543,8 @@ write("common/assets/gem.svg", gemSvg(false, BOUNDS.join(" ")), APPS);
 write("common/assets/gem-stem.svg", gemSvg(false, BOUNDS.join(" "), FACETS.filter((f) => f.part === "stem")), APPS);
 write("usr/share/icons/hicolor/scalable/actions/amethystora-logo-symbolic.svg", symbolicSvg);
 write("usr/share/icons/hicolor/scalable/places/amethystora-docs.svg", tileSvg(docsGlyph));
+// The repository's icon: the gem, the "a" of the wordmark, on the tile
+write(".github/assets/amethystora-icon.svg", tileSvg(docsGlyph), ROOT);
 write("usr/share/icons/hicolor/scalable/places/amethystora-community.svg", tileSvg(communityGlyph));
 write("usr/share/icons/hicolor/scalable/places/amethystora-update.svg", tileSvg(updateGlyph));
 write("usr/share/icons/hicolor/scalable/places/amethystora-logs.svg", tileSvg(logsGlyph));
