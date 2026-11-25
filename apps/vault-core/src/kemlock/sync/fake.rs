@@ -11,22 +11,32 @@
 //! # Using it from another crate (`feature = "fake-server"`)
 //!
 //! ```ignore
-//! let mut server = FakeKemlock::new("http://127.0.0.1:18299");        // its DOMAIN, which is also the address it answers at
-//! let id = server.make_account("sam@example.test", "a password");     // a Kemlock-only account (OPAQUE + keys, as a client makes one)
-//! let id = server.make_compatible_account("bw@example.test", "pw");   // an account the Bitwarden API made: no Kemlock keys yet
-//! let address = server.server();                                      // `sync::address::Server` for it
-//! sign_in(&mut server, &attempt, &fake::derive, &fake::bitwarden_derive)   // the stand-in Argon2id / PBKDF2 the accounts were made with
-//! server.plant_item(email, "login", &plain);  server.plant_bw(email, "login", &cipher);  server.plant_tombstone(email, &id);
-//! server.sign_manifest(email);                // as the Kemlock app does after it writes: lists every item the server holds
-//! server.attack(Attack::StaleOnce);           // one of the hostile behaviours; `clear_attacks()` ends them
-//! server.plain_of(email, &item_id);           // what an item opens to, from the test side
-//! server.seen                                 // every request, with its headers (names in lower case)
+//! use amethystora_vault_core::kemlock::sync::fake::{self, Attack, FakeKemlock};
+//!
+//! let mut server = FakeKemlock::new("http://127.0.0.1:18299"); // its DOMAIN, which is also the address it answers at
+//! server.make_account("sam@example.test", "a password");       // a Kemlock-only account: OPAQUE, a root key under the password wrap, a signed bundle
+//! server.make_compatible_account("bw@example.test", "pw");     // an account the Bitwarden API made: no Kemlock keys until its first sign-in here
+//! let address = server.server();                               // `sync::address::Server` for it (`reachable_at` answers at another address)
+//!
+//! // The accounts were made with stand-in key derivations, so sign in with the same ones (`real_argon2 = true` before
+//! // `make_account` makes them with the real Argon2id):
+//! signin::sign_in(&mut server, &attempt, &fake::derive, &fake::bitwarden_derive)
+//! engine::run(&mut server, &convert, input, &persist)
+//!
+//! server.plant_item(email, "login", &plain);        // what another Kemlock app writes: sealed under the account's keys, at the next revision
+//! server.plant_item_as(email, &item_id, kind, &plain); // the same under an id of your choosing (an item whose plaintext `id` does not match)
+//! server.plant_bw(email, "login", &cipher);          // a Bitwarden copy: format `bw`, no key
+//! server.plant_tombstone(email, &item_id);  server.plant_foreign(email, &plain);  server.plant_wire(email, wire);
+//! server.sign_manifest(email);                       // as the Kemlock app does after it writes: lists every item of the account
+//! server.attack(Attack::StaleOnce);                  // one of the hostile behaviours; `clear_attacks()` ends them (the enum says what each does)
+//! server.plain_of(email, &id);  server.wire_of(email, &id);  server.live_ids(email);  server.revision_of(email, &id);  server.manifest(email);
+//! server.seen                                        // every request, headers in lower case; `requests_to("items:batch")` counts them
 //! ```
 //!
-//! `FakeKemlock` is an `Http` (`call`). Its Argon2id and Bitwarden PBKDF2 are stand-ins (`derive`, `bitwarden_derive`): the tests give the
-//! client the same closures, so no test pays for a 64 MiB hash (one test runs the real one). `require_totp`, `require_email_code`,
-//! `change_security_stamp`, `expire_access_tokens`, `rotate_nonce` and `clock_offset` set up the second steps, a dead session, a token
-//! that ran out, a new nonce and a clock that is off.
+//! `FakeKemlock` is an `Http` (`call`), and its fields set the rest: `features`, `config_override` (a server that is not one), `sso_only`,
+//! `access_ttl`, `max_file`, `files_disabled`, `clock_offset` (a server whose clock is off) and `down` (nothing reachable); `require_totp`,
+//! `require_email_code`, `change_security_stamp`, `expire_access_tokens` and `rotate_nonce` set up the second steps, a dead session, a token that
+//! ran out and a new nonce. No test pays for a 64 MiB hash with the stand-ins, and one test runs the real one.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -137,6 +147,8 @@ pub enum Attack {
     StaleOnce,
     /// A sync page says a federated server holds two versions of an item
     Siblings,
+    /// The next read of the changes fails with this status (503, 429, 500...) and says what it says
+    SyncFails(u16),
     /// The next manifest written is refused as another device's signed first (409 `stale-manifest`), which it did, once, listing what the server holds
     StaleManifest,
     /// A file is served with one byte changed
@@ -413,6 +425,8 @@ pub struct FakeKemlock {
     pub max_file: u64,
     pub files_disabled: bool,
     pub sso_only: bool,
+    /// Every call fails like this, before it reaches the server: nothing was reachable
+    pub down: Option<NetFailure>,
     /// Accounts made from now on use the real Argon2id, not the stand-in
     pub real_argon2: bool,
     /// What `GET /kem/v1/config` says instead, for a server that is not one
@@ -442,6 +456,7 @@ impl FakeKemlock {
             max_file: 100 * 1024 * 1024,
             files_disabled: false,
             sso_only: false,
+            down: None,
             real_argon2: false,
             config_override: None,
             attacks: Vec::new(),
@@ -915,12 +930,18 @@ impl FakeKemlock {
             }
             ("GET", ["sync"]) => {
                 let (account, _) = self.authenticate(request, path)?;
+                self.sync_fails()?;
                 self.sync(account, query_of(query, "since"), query_of(query, "limit").and_then(|l| l.parse().ok()))
             }
             ("POST", ["sync"]) => {
                 let (account, _) = self.authenticate(request, path)?;
+                self.sync_fails()?;
                 let body = body_of(request, &["since", "limit"])?;
                 self.sync(account, body.get("since").and_then(Value::as_str).map(str::to_string), body.get("limit").and_then(Value::as_u64).map(|l| l as usize))
+            }
+            ("PUT", ["items", item]) => {
+                let (account, _) = self.authenticate(request, path)?;
+                self.put_item(request, account, item)
             }
             ("POST", ["items:batch"]) => {
                 let (account, _) = self.authenticate(request, path)?;
@@ -955,6 +976,14 @@ impl FakeKemlock {
                 Ok(Reply::empty(204))
             }
             _ => Err(Reply::problem(404, "not-found", "no such route")),
+        }
+    }
+
+    fn sync_fails(&mut self) -> R<()> {
+        match self.take_attack(|a| matches!(a, Attack::SyncFails(_))) {
+            Some(Attack::SyncFails(429)) => Err(Self::rate_limited()),
+            Some(Attack::SyncFails(status)) => Err(Reply::problem(status, "overloaded", "try later")),
+            _ => Ok(()),
         }
     }
 
@@ -1354,6 +1383,76 @@ impl FakeKemlock {
         Ok(reply)
     }
 
+    /// What the server holds a write to: the owner, the id and kind, the revision it replaces and the next one, the shape of what is sealed
+    fn check_write(&self, at: usize, expected: Option<u64>, wire: &WireItem) -> R<()> {
+        let account = &self.accounts[at];
+        let stored = account.items.get(&wire.id);
+        if wire.owner != account.owner().to_string() {
+            return Err(Reply::problem(403, "forbidden", "not the account's vault"));
+        }
+        if wire.collection_id.is_some() {
+            return Err(Reply::bad("an item of a vault has no collectionId"));
+        }
+        if Uuid::parse(&wire.id).is_err() || crate::kemlock::item::check_kind(&wire.kind).is_err() {
+            return Err(Reply::problem(400, "invalid-item", "not an id or a kind"));
+        }
+        if self.accounts.iter().enumerate().any(|(other, a)| other != at && a.items.contains_key(&wire.id)) {
+            return Err(Reply::problem(409, "already-exists", "the id is another account's"));
+        }
+        if expected != stored.map(|s| s.wire.revision) {
+            return Err(Reply::problem(409, "stale-revision", "the revision is not the stored one").with(json!({"itemId": wire.id, "currentRevision": stored.map(|s| s.wire.revision)})));
+        }
+        let next = stored.map_or(1, |s| s.wire.revision + 1);
+        if wire.revision != next || stored.is_some_and(|s| s.wire.kind != wire.kind || s.wire.format != wire.format) {
+            return Err(Reply::problem(422, "invalid-revision", "an item can't change its kind or format, and its revision is the stored one plus one"));
+        }
+        if wire.format != "kem1" {
+            return Err(Reply::problem(400, "invalid-item", "a client writes kem1 items"));
+        }
+        if wire.deleted {
+            if wire.ciphertext.is_some() || wire.item_key.is_some() {
+                return Err(Reply::problem(400, "invalid-item", "a tombstone has no ciphertext"));
+            }
+            return Ok(());
+        }
+        let ciphertext = wire.ciphertext.as_deref().and_then(|c| b64_decode(c).ok());
+        let item_key = wire.item_key.as_deref().and_then(|c| b64_decode(c).ok());
+        match (ciphertext, item_key) {
+            (Some(c), Some(k)) if c.len() >= 28 && k.len() == 60 => {
+                if c.len() > 1024 * 1024 {
+                    return Err(Reply::problem(413, "item-too-large", "the ciphertext is over 1 MiB"));
+                }
+                Ok(())
+            }
+            _ => Err(Reply::problem(400, "invalid-item", "a live item has a ciphertext of 28 bytes or more and a 60-byte item key")),
+        }
+    }
+
+    /// `PUT /items/{id}`: one write, with the revision it replaces in `If-Match`, or `If-None-Match: *` for a new item
+    fn put_item(&mut self, request: &Request, at: usize, item: &str) -> R<Reply> {
+        let wire: WireItem = serde_json::from_slice(&request.body).map_err(|e| Reply::bad(&format!("the item: {e}")))?;
+        if wire.id != item {
+            return Err(Reply::bad("the id is not the path's"));
+        }
+        let header = |name: &str| request.headers.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value.clone());
+        let expected = match (header("if-none-match"), header("if-match")) {
+            (Some(_), Some(_)) => return Err(Reply::bad("one precondition, not two")),
+            (None, None) => return Err(Reply::problem(428, "precondition-required", "If-Match or If-None-Match")),
+            (Some(star), None) if star == "*" => None,
+            (Some(_), None) => return Err(Reply::bad("If-None-Match is *")),
+            (None, Some(revision)) => Some(revision.trim_start_matches("W/").trim_matches('"').parse::<u64>().map_err(|_| Reply::bad("If-Match is a revision"))?),
+        };
+        self.check_write(at, expected, &wire)?;
+        let id = self.store(at, wire);
+        let item = &self.accounts[at].items[&id];
+        let mut value = serde_json::to_value(&item.wire).unwrap_or(Value::Null);
+        if let Some(deleted_at) = &item.deleted_at {
+            value["deletedAt"] = json!(deleted_at);
+        }
+        let etag = format!("\"{}\"", item.wire.revision);
+        Ok(Reply::json(if expected.is_none() { 201 } else { 200 }, value).header("etag", &etag))
+    }
+
     fn batch(&mut self, request: &Request, at: usize) -> R<Reply> {
         let body = body_of(request, &["writes"])?;
         let writes = body.get("writes").and_then(Value::as_array).ok_or_else(|| Reply::bad("writes is a list"))?;
@@ -1381,53 +1480,8 @@ impl FakeKemlock {
             }
             parsed.push((expected, wire));
         }
-        let account = &self.accounts[at];
-        let owner = account.owner().to_string();
-        let mut stale: Option<Reply> = None;
         for (expected, wire) in &parsed {
-            let stored = account.items.get(&wire.id);
-            if wire.owner != owner {
-                return Err(Reply::problem(403, "forbidden", "not the account's vault"));
-            }
-            if wire.collection_id.is_some() {
-                return Err(Reply::bad("an item of a vault has no collectionId"));
-            }
-            if Uuid::parse(&wire.id).is_err() || crate::kemlock::item::check_kind(&wire.kind).is_err() {
-                return Err(Reply::problem(400, "invalid-item", "not an id or a kind"));
-            }
-            if self.accounts.iter().enumerate().any(|(other, a)| other != at && a.items.contains_key(&wire.id)) {
-                return Err(Reply::problem(409, "already-exists", "the id is another account's"));
-            }
-            if *expected != stored.map(|s| s.wire.revision) {
-                stale.get_or_insert_with(|| Reply::problem(409, "stale-revision", "the revision is not the stored one").with(json!({"itemId": wire.id, "currentRevision": stored.map(|s| s.wire.revision)})));
-                continue;
-            }
-            let next = stored.map_or(1, |s| s.wire.revision + 1);
-            if wire.revision != next || stored.is_some_and(|s| s.wire.kind != wire.kind || s.wire.format != wire.format) {
-                return Err(Reply::problem(422, "invalid-revision", "an item can't change its kind or format, and its revision is the stored one plus one"));
-            }
-            if wire.format != "kem1" {
-                return Err(Reply::problem(400, "invalid-item", "a client writes kem1 items"));
-            }
-            if wire.deleted {
-                if wire.ciphertext.is_some() || wire.item_key.is_some() {
-                    return Err(Reply::problem(400, "invalid-item", "a tombstone has no ciphertext"));
-                }
-            } else {
-                let ciphertext = wire.ciphertext.as_deref().and_then(|c| b64_decode(c).ok());
-                let item_key = wire.item_key.as_deref().and_then(|c| b64_decode(c).ok());
-                match (ciphertext, item_key) {
-                    (Some(c), Some(k)) if c.len() >= 28 && k.len() == 60 => {
-                        if c.len() > 1024 * 1024 {
-                            return Err(Reply::problem(413, "item-too-large", "the ciphertext is over 1 MiB"));
-                        }
-                    }
-                    _ => return Err(Reply::problem(400, "invalid-item", "a live item has a ciphertext of 28 bytes or more and a 60-byte item key")),
-                }
-            }
-        }
-        if let Some(refusal) = stale {
-            return Err(refusal);
+            self.check_write(at, *expected, wire)?;
         }
         let mut stored = Vec::new();
         for (_, wire) in parsed {
@@ -1546,6 +1600,9 @@ impl FakeKemlock {
 
 impl Http for FakeKemlock {
     fn call(&mut self, request: Request) -> Result<Response, NetFailure> {
+        if let Some(failure) = self.down {
+            return Err(failure);
+        }
         let body = String::from_utf8_lossy(&request.body[..request.body.len().min(64 * 1024)]).to_string();
         self.seen.push(Seen { method: request.method.to_string(), url: request.url.clone(), headers: request.headers.iter().map(|(n, v)| (n.to_ascii_lowercase(), v.clone())).collect(), body });
         let Some(rest) = request.url.strip_prefix(self.listen.as_str()).filter(|rest| rest.starts_with('/')).map(str::to_string) else { return Err(NetFailure::NotAllowed) };

@@ -667,3 +667,163 @@ fn a_run_that_cannot_read_what_it_needs_asks_nothing_of_the_server() {
     assert_eq!(engine::run(&mut fake, &crate::sync::convert::Direct, input(wrong, 0, false), &persist).problem, Some(Problem::Kemlock(word::KEYS_INVALID)));
     assert_eq!(fake.seen.len(), before);
 }
+
+// --- Deleting against editing, a key that is replaced, size, and a server that is down -----------------------------------------------
+
+#[test]
+fn a_delete_here_and_an_edit_there_settle_on_the_same_thing_and_nothing_is_lost() {
+    let mut fake = server();
+    let mut a = Client::connect(&mut fake, EMAIL);
+    a.put("password", PASSWORD_ID, with_id(password("Mail", "sam", "p1", "mail.example"), PASSWORD_ID));
+    assert_clean(&a.sync(&mut fake).problem);
+    let mut b = Client::connect(&mut fake, EMAIL);
+    assert_clean(&b.sync(&mut fake).problem);
+    // A trashes it, B edits it, and A's delete goes first
+    edit(&mut a, "password", PASSWORD_ID, |value| value["deletedAt"] = json!(1_765_000_000_000i64));
+    edit(&mut b, "password", PASSWORD_ID, |value| {
+        value["password"] = json!("p-edited");
+        value["updatedAt"] = json!(1_765_000_100_000i64);
+    });
+    assert_clean(&a.sync(&mut fake).problem);
+    let id = sid(&fake, PASSWORD_ID);
+    assert!(fake.wire_of(EMAIL, &id).unwrap().deleted);
+    // B changed it since it last read, so the server's deletion does not take it to B's trash: B's change goes back over it
+    assert_clean(&b.sync(&mut fake).problem);
+    assert!(!fake.wire_of(EMAIL, &id).unwrap().deleted);
+    assert_eq!(fake.plain_of(EMAIL, &id).unwrap()["password"], "p-edited");
+    assert!(!crate::sync::map::deleted(&b.locals[&("password".to_string(), PASSWORD_ID.to_string())]));
+    // A, whose copy is in its trash, does not delete what B wrote over there: the item stays alive where it was changed, and A keeps its trashed copy
+    assert_clean(&a.sync(&mut fake).problem);
+    assert!(!fake.wire_of(EMAIL, &id).unwrap().deleted);
+    assert!(crate::sync::map::deleted(&a.locals[&("password".to_string(), PASSWORD_ID.to_string())]));
+    assert_eq!(fake.revision_of(EMAIL, &id), Some(3));
+    assert_clean(&b.sync(&mut fake).problem);
+    assert_eq!(fake.revision_of(EMAIL, &id), Some(3));
+}
+
+#[test]
+fn a_trash_here_goes_to_the_server_when_the_server_still_holds_what_the_vault_held() {
+    let mut fake = server();
+    let mut a = Client::connect(&mut fake, EMAIL);
+    a.put("password", PASSWORD_ID, with_id(password("Mail", "sam", "p1", "mail.example"), PASSWORD_ID));
+    assert_clean(&a.sync(&mut fake).problem);
+    let id = sid(&fake, PASSWORD_ID);
+    // The item is trashed here, and over there the same item is written again with nothing changed (a newer revision of it, so that the run reads it)
+    edit(&mut a, "password", PASSWORD_ID, |value| value["deletedAt"] = json!(1_765_000_000_000i64));
+    let same = fake.plain_of(EMAIL, &id).unwrap();
+    fake.plant_item_as(EMAIL, &id, "login", &same);
+    fake.sign_manifest(EMAIL);
+    let outcome = a.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert_eq!(outcome.report.trashed_there, 1);
+    assert!(fake.wire_of(EMAIL, &id).unwrap().deleted);
+}
+
+#[test]
+fn a_key_replaced_on_the_server_is_a_conflict_and_the_vaults_key_is_never_overwritten_or_deleted() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    client.add(key_local(SSH_ID, "laptop", "ssh", crate::keys::KeyType::Ed25519));
+    assert_clean(&client.sync(&mut fake).problem);
+    let held = client.value("key", SSH_ID);
+    // The Kemlock app puts another key under the same entry
+    let id = sid(&fake, SSH_ID);
+    let other = key_local(SSH_ID, "laptop", "ssh", crate::keys::KeyType::Ed25519);
+    let mut plain = fake.plain_of(EMAIL, &id).unwrap();
+    plain["private"] = other.value["key"].clone();
+    plain["public"] = json!(other.value["public"]["pem"].as_str().unwrap().lines().filter(|line| !line.starts_with("-----")).collect::<String>());
+    fake.plant_item_as(EMAIL, &id, "ssh-key", &plain);
+    fake.sign_manifest(EMAIL);
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert_eq!(outcome.report.conflicts, 1);
+    assert_eq!(client.value("key", SSH_ID), held, "the vault's key is as it was");
+    assert_eq!(fake.plain_of(EMAIL, &id).unwrap()["private"], other.value["key"], "and the server's is not written over either");
+    assert_eq!(fake.revision_of(EMAIL, &id), Some(2));
+    assert_clean(&client.sync(&mut fake).problem);
+    assert_eq!(fake.revision_of(EMAIL, &id), Some(2));
+}
+
+#[test]
+fn many_items_go_in_batches_that_fit_what_a_server_takes() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    for n in 0..520 {
+        let id = format!("00000000-0000-4000-8000-{n:012}");
+        client.put("password", &id, with_id(password(&format!("Site {n}"), "u", "p", &format!("site{n}.example")), &id));
+    }
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert_eq!(fake.live_ids(EMAIL).len(), 520);
+    assert_eq!(fake.requests_to("items:batch"), 2, "five hundred and then the rest");
+    // And items large enough that the body, not the count, fills a batch: each batch is under what the server takes
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    for n in 0..12 {
+        let id = format!("00000000-0000-4000-8000-{n:012}");
+        let mut value = with_id(password(&format!("Big {n}"), "u", "p", &format!("big{n}.example")), &id);
+        value["note"] = json!("n".repeat(120_000));
+        client.put("password", &id, value);
+    }
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert_eq!(fake.live_ids(EMAIL).len(), 12);
+    let batches: Vec<usize> = fake.seen.iter().filter(|seen| seen.path().ends_with("items:batch")).map(|seen| seen.body.len()).collect();
+    assert!(batches.len() >= 2, "{batches:?}");
+}
+
+#[test]
+fn a_server_that_is_down_or_busy_costs_a_run_and_nothing_else() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    every_kind(&mut client);
+    assert_clean(&client.sync(&mut fake).problem);
+    edit(&mut client, "password", PASSWORD_ID, |value| value["password"] = json!("p2"));
+    fake.attack(Attack::SyncFails(503));
+    let outcome = client.sync(&mut fake);
+    assert_eq!(outcome.problem, Some(Problem::ServerDown));
+    assert!(outcome.problem.as_ref().unwrap().passes());
+    fake.attack(Attack::SyncFails(429));
+    let outcome = client.sync(&mut fake);
+    assert_eq!(outcome.problem, Some(Problem::RateLimited));
+    assert_eq!(fake.revision_of(EMAIL, &sid(&fake, PASSWORD_ID)), Some(1));
+    // Nothing reachable at all
+    fake.down = Some(crate::sync::api::NetFailure::Unreachable);
+    let outcome = client.sync(&mut fake);
+    assert_eq!(outcome.problem, Some(Problem::Net(crate::sync::api::NetFailure::Unreachable)));
+    // And the next run that can goes on from where the vault was
+    fake.down = None;
+    assert_clean(&client.sync(&mut fake).problem);
+    assert_eq!(fake.revision_of(EMAIL, &sid(&fake, PASSWORD_ID)), Some(2));
+    assert_eq!(fake.plain_of(EMAIL, &sid(&fake, PASSWORD_ID)).unwrap()["password"], "p2");
+}
+
+#[test]
+fn what_cannot_be_exported_or_is_set_to_ask_or_to_stay_home_is_not_written() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    // A key that never leaves the vault
+    let mut sealed_in = key_local(SSH_ID, "hardware", "ssh", crate::keys::KeyType::Ed25519);
+    sealed_in.meta["exportable"] = json!(false);
+    sealed_in.value["exportable"] = json!(false);
+    client.add(sealed_in);
+    // An item set to ask every time, which was not chosen, and one the person said to keep at home
+    let mut asks = local_password("00000000-0000-4000-8000-0000000000a1", "Asks");
+    asks.approval = crate::protocol::Approval::Ask;
+    client.add(asks);
+    client.put("password", "00000000-0000-4000-8000-0000000000a2", with_id(password("Home", "u", "p", "home.example"), "00000000-0000-4000-8000-0000000000a2"));
+    client.connection.choices.insert("password.00000000-0000-4000-8000-0000000000a2".into(), "off".into());
+    client.put("password", PASSWORD_ID, with_id(password("Goes", "u", "p", "goes.example"), PASSWORD_ID));
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert_eq!(fake.live_ids(EMAIL), vec![PASSWORD_ID.to_string()]);
+    // Chosen, the one that asks goes
+    client.connection.choices.insert("password.00000000-0000-4000-8000-0000000000a1".into(), "on".into());
+    assert_clean(&client.sync(&mut fake).problem);
+    assert_eq!(fake.live_ids(EMAIL).len(), 2);
+}
+
+fn local_password(id: &str, title: &str) -> crate::sync::map::Local {
+    let value = with_id(password(title, "u", "p", &format!("{}.example", title.to_lowercase())), id);
+    crate::sync::map::Local { kind: "password".into(), id: id.into(), name: title.into(), meta: serde_json::Value::Null, approval: crate::protocol::Approval::WhileOpen, value }
+}

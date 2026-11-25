@@ -652,11 +652,6 @@ fn both(run: &mut Run<'_>, id: &str, cached: &Cached, plain: &Value, local: &Loc
     let changed_here = linked_hash.as_ref().is_none_or(|hash| *hash != map::hash(local));
     let server_changed = true;
     let _ = server_changed;
-    let local_gone = map::deleted(local);
-    if local_gone {
-        // In the vault's trash and still on the server: a tombstone, planned with the rest of what is here
-        return Ok(());
-    }
     let taken = items::take(&cached.kind, plain, Some(local), file, run.now_ms, run.convert);
     let read = match taken {
         Taken::Item(read) if !read.needs_file => read,
@@ -685,6 +680,17 @@ fn both(run: &mut Run<'_>, id: &str, cached: &Cached, plain: &Value, local: &Loc
     };
     run.by_part.insert(key_of(local), id.to_string());
     let theirs = Local { kind: read.kind.to_string(), id: read.id.clone(), name: read.name.clone(), meta: read.meta.clone(), approval: local.approval, value: read.value.clone() };
+    if map::deleted(local) {
+        // In the vault's trash and still live on the server. If the server's copy is what the vault held, the trash goes there (the tombstone is planned
+        // with the rest of what is here); if it was changed over there, that change is not deleted: it stays, and so does the vault's trashed copy
+        if map::hash(&theirs) != map::hash(local) {
+            run.by_part.remove(&key_of(local));
+            if let Some(c) = run.cache.get_mut(id) {
+                c.part = None;
+            }
+        }
+        return Ok(());
+    }
     // A counter never goes back and a code spent here stays spent: what is read over the vault's item is held to that, so the server's own copy
     // is read apart, to tell when the server is the one behind and has to be told
     let clamped_kind = matches!(local.kind.as_str(), crate::items::KIND_ACCOUNT | crate::items::KIND_BACKUP_CODES);
