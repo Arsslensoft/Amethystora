@@ -408,6 +408,12 @@ License, which the file holds and which ships in usr/share/licenses/2fa-director
 
   - 2fa.directory  https://github.com/2factorauth/twofactorauth
 
+The Vault's client of Kemlock Server (apps/vault-core/src/kemlock) is written from that server's documented byte formats,
+by the server's own author, and is held to its known-answer test vectors, which are public domain (CC0-1.0) and are copied
+unchanged, with their licence, into apps/vault-core/tests/kemlock-vectors (commit 05a71bbf of github.com/Arsslensoft/Kemlock-Server).
+
+  - Kemlock Server test vectors  https://github.com/Arsslensoft/Kemlock-Server/tree/main/test-vectors
+
 The answer to "will it run?" (usr/libexec/amethystora-will-it-run) comes from a trimmed copy of the community list of games and
 the state of their anti-cheat on Linux, Are We Anti-Cheat Yet? (usr/share/amethystora/anticheat-list.json), made from its
 repository's games.json at one commit and under the MIT License of that repository, which the file holds and which ships in
