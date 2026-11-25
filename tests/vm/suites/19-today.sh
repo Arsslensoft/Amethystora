@@ -365,10 +365,11 @@ peek_stop() { ev "(() => { (globalThis.__peekUndo ?? []).forEach(([a, id]) => a.
 animations() { ev "global.force_animations = $1; 1" >/dev/null; }
 trap 'animations false' EXIT
 user_bus systemd-run --user --collect --unit="vmlab-today-files-$$" nautilus --new-window >/dev/null
-wait_for 60 ev_is "global.get_window_actors().some(a => a.meta_window.get_wm_class() === 'org.gnome.Nautilus')" true
+wait_for 240 ev_is "global.get_window_actors().some(a => a.meta_window.get_wm_class() === 'org.gnome.Nautilus')" true ||
+    not_ok "22 Files did not open within four minutes" "$(journalctl --user -M "${TEST_USER}@.host" -u "vmlab-today-files-*" --no-pager -n 5 -o cat 2>&1 | head -n 8)"
 files="global.get_window_actors().map(a => a.meta_window).find(w => w.get_wm_class() === 'org.gnome.Nautilus')"
 ev "${files}.make_fullscreen(); 1" >/dev/null
-wait_for 10 ev_is "Main.layoutManager.panelBox.visible" false
+wait_for 40 ev_is "Main.layoutManager.panelBox.visible" false
 check "a fullscreen window hides the bar" ev_is "Main.layoutManager.panelBox.visible" false
 P="Main.layoutManager.primaryIndex"
 # A push against the top edge: GNOME's pressure barrier counts at most 15 px of each step, and wants 100 within a

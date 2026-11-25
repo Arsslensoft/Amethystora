@@ -80,8 +80,8 @@ for theme in "${SYSTEM_THEMES_DIR}"/*/; do
     # What the terminal and the prompt read has to be accepted by the programs that read it: a key either does not
     # know would be a warning at the top of every new terminal, or colours that are not applied
     if command -v starship >/dev/null; then
-        [[ -z "$(STARSHIP_CONFIG="${T}/stage/starship.toml" starship prompt 2>&1 >/dev/null)" ]] ||
-            fail "${slug}: starship does not accept its prompt"
+        said="$(STARSHIP_CONFIG="${T}/stage/starship.toml" starship prompt 2>&1 >/dev/null)"
+        [[ -z "${said}" ]] || fail "${slug}: starship does not accept its prompt: ${said}"
     fi
     if command -v kitty >/dev/null; then
         KITTY_THEME="${T}/stage/kitty-theme.conf" kitty +runpy '

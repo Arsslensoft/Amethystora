@@ -20,8 +20,9 @@ fail() { echo "test-sleep-report: $*" >&2; exit 1; }
 cat >"${T}/bin/journalctl" <<'EOF'
 #!/usr/bin/bash
 [[ " $* " == *" MESSAGE_ID=8811e6df2a8e40f58a94cea26f8ebf14 "* ]] || exit 1
-[[ -e "${JOURNAL_FAILS:-/nonexistent}" ]] && exit 1
-[[ -e "${JOURNAL_EMPTY:-/nonexistent}" ]] && exit 0
+# Only when named: a machine may well have a /nonexistent (an account's home), which made every journal fail
+[[ -n "${JOURNAL_FAILS:-}" && -e "${JOURNAL_FAILS}" ]] && exit 1
+[[ -n "${JOURNAL_EMPTY:-}" && -e "${JOURNAL_EMPTY}" ]] && exit 0
 printf '{"__REALTIME_TIMESTAMP":"1000000000","__MONOTONIC_TIMESTAMP":"100000000"}\n{"__REALTIME_TIMESTAMP":"3000000000","__MONOTONIC_TIMESTAMP":"300000000"}\n{"__REALTIME_TIMESTAMP":"2000000000","__MONOTONIC_TIMESTAMP":"200000000"}\nnot json\n'
 EOF
 chmod +x "${T}/bin/journalctl"

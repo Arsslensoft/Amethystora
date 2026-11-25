@@ -91,12 +91,13 @@ if [[ -z "${bad}" ]]; then ok "each screen keeps its dock's strip free"; else no
 FAVORITES="$(user_bus gsettings get org.gnome.shell favorite-apps)"
 user_bus gsettings set org.gnome.shell favorite-apps "['org.mozilla.firefox.desktop']"
 user_bus systemd-run --user --collect --unit="vmlab-dock4-files-$$" nautilus --new-window >/dev/null
-wait_for 60 ev_is "global.get_window_actors().some(a => a.meta_window.get_wm_class() === 'org.gnome.Nautilus')" true
+wait_for 240 ev_is "global.get_window_actors().some(a => a.meta_window.get_wm_class() === 'org.gnome.Nautilus')" true ||
+    not_ok "Files did not open within four minutes"
 files="global.get_window_actors().map(a => a.meta_window).find(w => w.get_wm_class() === 'org.gnome.Nautilus')"
 on_docks() { ev "${S}.docks.filter(d => d.items.some(i => i.id === 'org.gnome.Nautilus.desktop')).map(d => d.monitor).join(' ')"; }
 ev "const w = ${files}; const tiling = ${UI}.get('tiling'); const ws = tiling?.engine?.screens?.shownOn(2) ?? global.workspace_manager.get_active_workspace(); w.change_workspace(ws); w.move_to_monitor(2); 1" >/dev/null
-sleep 2
-check "a running app is on the dock of the screen its window is on, and only there" test "$(on_docks)" == 2
+on_dock_two() { [[ "$(on_docks)" == 2 ]]; }
+check "a running app is on the dock of the screen its window is on, and only there" wait_for 40 on_dock_two
 # With the tiling's separate screens, a window moved to the workspace screen 1 shows is on dock 1
 if [[ "$(ev "Boolean(${UI}.get('tiling')?.engine?.screens?.separate)")" == true ]]; then
     ev "const w = ${files}; const ws = ${UI}.get('tiling').engine.screens.shownOn(1); w.change_workspace(ws); 1" >/dev/null

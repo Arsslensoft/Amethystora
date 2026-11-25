@@ -84,7 +84,14 @@ if [[ "${SUITE_PHASE}" == 1 ]]; then
     save="$(runuser -u "${TEST_USER}" -- "${HELPER}" saved account)"
     check "what it replaced is saved first, in ${save}" grep -qx "clock-show-seconds=true" "${save}/dconf.ini"
     crashed="$(crashes_since "${since}" "COREDUMP_UID=${TUID}")"
-    [[ -z "${crashed}" ]] && ok "nothing of the session crashed" || not_ok "something of the session crashed" "${crashed}"
+    if [[ -z "${crashed}" ]]; then
+        ok "nothing of the session crashed"
+    else
+        # Where it crashed, for whoever looks: the program, the signal and the top of its stack, and what it said last
+        not_ok "something of the session crashed" "${crashed}
+$(coredumpctl info gnome-shell --no-pager 2>&1 | grep -E 'Signal|Stack trace|#[0-9] ' | head -n 14 | cut -c1-200)
+$(journalctl -b _COMM=gnome-shell --no-pager -o cat -n 12 2>/dev/null | cut -c1-200)"
+    fi
 
     out="$(in_session ame system reset-settings undo account 2>&1)"
     if [[ "$(dconf_get /org/gnome/desktop/interface/clock-show-seconds)" == true && "$(theme)" == tokyo-night ]] && ! tiling_on &&

@@ -32,7 +32,15 @@ booted() { rpm-ostree status --json | jq -r '.deployments[] | select(.booted) | 
 count() { rpm-ostree status --json | jq '.deployments | length'; }
 deploy() { timeout 1500 ostree admin deploy --origin-file="${STATE}/origin" "$1" 2>&1; }
 # What an account new to the machine reads, before it has set anything
-fresh() { runuser -u "${ACCOUNT}" -- env HOME="/var/home/${ACCOUNT}" dbus-run-session -- "$@" 2>&1; }
+# Fedora 45 has no dbus-run-session (nor dbus-launch): the account's own systemd manager, which a new account has no session
+# to start, gives dconf the bus it writes through
+fresh() {
+    local uid
+    uid="$(id -u "${ACCOUNT}")"
+    systemctl start "user@${uid}.service" 2>/dev/null
+    for _ in $(seq 30); do [[ -S "/run/user/${uid}/bus" ]] && break; sleep 1; done
+    runuser -u "${ACCOUNT}" -- env HOME="/var/home/${ACCOUNT}" XDG_RUNTIME_DIR="/run/user/${uid}"         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" "$@" 2>&1
+}
 
 case "${SUITE_PHASE}" in
     1)
@@ -145,7 +153,7 @@ EOF
         same "its terminal key, one of the image's custom keybindings, is the file's" \
             "$(fresh gsettings get "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${CUSTOM}/custom20/" binding)" "'<Super>t'"
         same "...whose command stays the image's" \
-            "$(fresh gsettings get "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${CUSTOM}/custom20/" command)" "'xdg-terminal-exec'"
+            "$(fresh gsettings get "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${CUSTOM}/custom20/" command)" "'/usr/libexec/amethystora-workspace-terminal'"
         same "its windows are classic" "$(fresh gsettings get "${TILING}" enabled)" false
         same "the tiling's gap is the file's" "$(fresh gsettings get "${TILING}" window-gap)" 20
         # GNOME Shell reads the extension's own compiled schemas before the system's

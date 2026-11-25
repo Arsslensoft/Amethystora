@@ -4,7 +4,8 @@
 # stays unused until then. A device with one algorithm only (`ame system zram fast|compact`) is left alone.
 set -uo pipefail
 
-for dev in /sys/block/zram*; do
+# AMETHYSTORA_ZRAM_SYS is a stand-in for /sys/block, for test-zram-recompress.sh
+for dev in "${AMETHYSTORA_ZRAM_SYS:-/sys/block}"/zram*; do
     [[ -e "${dev}/recompress" && "$(cat "${dev}/disksize" 2>/dev/null)" != 0 ]] || continue
     # The second algorithm is the one in brackets on the line for priority 1
     grep -q '^#1: .*\[' "${dev}/recomp_algorithm" 2>/dev/null || continue

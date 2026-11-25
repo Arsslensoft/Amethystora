@@ -25,4 +25,4 @@ if ! docker exec amevm test -c /dev/kvm; then
 fi
 git bundle create - HEAD 2>/dev/null | docker exec -i amevm sh -c "cat >/vm/head-${NAME}.bundle"
 docker exec amevm sh -c "rm -rf ${SRC} && git clone -q /vm/head-${NAME}.bundle ${SRC}"
-exec docker exec -e "VMLAB_NAME=${NAME}" -e "VMLAB_COMPRESS=${VMLAB_COMPRESS:-}" amevm node "${SRC}/tests/vm/run.mjs" "$@"
+exec docker exec -e "VMLAB_NAME=${NAME}" -e "VMLAB_COMPRESS=${VMLAB_COMPRESS:-}" -e "VMLAB_RECORD_ONLY=${VMLAB_RECORD_ONLY:-}" amevm node "${SRC}/tests/vm/run.mjs" "$@"

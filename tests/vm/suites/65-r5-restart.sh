@@ -100,8 +100,14 @@ plant_resume "vmlab-old:0000000"
 loginctl unlock-sessions
 systemctl restart gdm
 ready() { is "typeof ${W}?.resume?.save" function; }
-if ! wait_for 240 has_session || ! wait_for 120 ready; then
+# GDM 51 now and then shows its greeter instead of signing the account in again (seen on Fedora 45): it is restarted once more
+wait_for 120 has_session || systemctl restart gdm
+if ! wait_for 240 has_session || ! wait_for 180 ready; then
     not_ok "picking up after a restart did not start in the session"
+    # The suite after this one finds the account signed in, as it would have been
+    rm -f "${RESUME}"
+    systemctl restart gdm
+    wait_for 240 has_session || true
     finish
 fi
 wait_for 30 is "Main.layoutManager._startingUp" false

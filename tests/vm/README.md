@@ -97,6 +97,37 @@ Each job's run folders, with each VM's serial console, are its artifact `lab-run
 A runner has 4 processors, 16 GB and about 50 GB free once the build space is cleared: one VM at a time, of 4 GB. Nothing
 is published and no secret is used: the image is built with throwaway keys from the layers on GHCR, as a pull request's.
 
+The suites of ten minutes and more (`shards.json`'s `long`) are a workflow of their own, **Lab (long suites)**
+(`lab-long.yml`), which runs this one's jobs through `workflow_call` with `set: long`: one lane, and one runner, for each,
+so that the longest is the whole run's time. A pull request with the label `lab` runs them there, and Lab's run of every
+suite leaves them out (`run.mjs plan --skip`). By hand: `gh workflow run "Lab (long suites)" --ref main -f suites=93`.
+
+`tests/vm/known-failures` names checks (`SUITE :: the start of the check's words`) that fail on a runner and have not been looked at on a
+machine with a screen: a suite whose only failures are listed passes, and its summary says `passed (N known)` and prints them.
+A suite that fails is run once more on the same machine, and passes only if the second run does (the summary says `passed on the second run` and prints what the first run failed; `VMLAB_NO_RETRY=1` runs each once): on a runner a session now and then does not come up. A check that fails and is not listed fails its suite as before; take a line out once its check has been seen to pass. Suite 71's
+numbers are the maintainer's machine's, so with `VMLAB_RECORD_ONLY` (set by `lab.yml`) it records them and compares nothing.
+
+**Lab (ISOs)** (`lab-iso.yml`) tries installing for every pull request: the image built here, its installer ISO made by
+`iso/build-installer-iso.sh` and its live ISO as `build-iso.yml` makes it, each installed by `iso.sh` (below) on a
+runner of its own, the live ISO's forensic start tried first.
+
+### Installing from the ISOs
+
+```bash
+bash tests/vm/iso.sh installer amethystora-non-uefi.iso [--digest sha256:...]
+bash tests/vm/iso.sh live amethystora.iso [--digest sha256:...]
+```
+
+`iso.mjs` starts the ISO under Secure Boot from its own boot menu and looks at what it started (the installer's system,
+or the live session with the image it installs, read-only), installs onto a blank 40 GiB disk with only the answers a
+person gives (the whole disk, encrypted, the language and keyboard: the installer ISO's own kernel with its entry's
+arguments and a kickstart of those answers that runs the ISO's own kickstart, under UEFI with Secure Boot off since the
+firmware checks no kernel it is handed directly; the live ISO from its session, Anaconda on `interactive-defaults.ks`
+with the same answers), then starts the disk alone under Secure Boot with the passphrase as a credential, twice: every
+unit started, the signed origin, `--digest`'s image running, btrfs on LUKS2, SELinux and its labels, the firewall,
+no Fedora logo, the new installation's snapshots, GNOME Initial Setup. Its lines are in `/vm/iso/KIND/results.tap`, with
+a screenshot after each step. Written on 2026-11-23 and not run yet.
+
 The lab shares one Linux VM with every other container (WSL 2's, 13.3 GB here), and when a build and a VM ran
 beside other containers it ran out of memory and Docker stopped answering (2026-10-29). So `vm_start` refuses while
 an image is being built in the lab, and when the VM's memory is not free: the kernel's `MemAvailable`, less what

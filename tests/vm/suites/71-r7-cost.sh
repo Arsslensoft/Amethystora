@@ -78,6 +78,9 @@ check "the shell did not restart while it was measured" test "$(user_systemctl s
 
 if [[ ! -s "${BASELINE}" ]]; then
     skip "no baseline beside this suite: the numbers above are only recorded"
+elif [[ -n "${VMLAB_RECORD_ONLY:-}" ]]; then
+    # The baseline is the numbers of the maintainer's own lab, which only the maintainer raises; another machine's are not comparable
+    skip "this machine is not the baseline's (VMLAB_RECORD_ONLY): the numbers above are recorded, not compared"
 else
     within() {
         local name="$1" extra="$2" base now

@@ -137,7 +137,14 @@ same "2 always waits" "$(gs get "${PILL}" digest-wait)" "['${APP}.desktop']"
 before="$(ev "${H}.digestHeld")"
 notify --hint=string:desktop-entry:${APP} "vmlab waits" "for the digest"
 poke
-check "2 with the digest off, an app on the wait list waits" wait_for 20 is "${H}.digestHeld > ${before}" true
+if wait_for 20 is "${H}.digestHeld > ${before}" true; then
+    ok "2 with the digest off, an app on the wait list waits"
+else
+    not_ok "2 with the digest off, an app on the wait list waits" "the app is known to the shell: $(ev "String(!!imports.gi.Shell.AppSystem.get_default().lookup_app('${APP}.desktop'))")
+held now: $(ev "${H}.digestHeld"), before: ${before}; the hold is on: $(ev "String(${H}._holding())")
+the sources: $(ev "Main.messageTray.getSources().map(s => s.constructor.name + ':' + Object.getOwnPropertyNames(s).filter(k => /app|id|desktop/i.test(k)).join('/') + '=' + [s._appId, s.appId, s.app?.get_id?.()].join('/')).join(' | ')")
+the lists: $(gs get "${PILL}" digest-wait) $(gs get "${PILL}" digest-through); the shell said: $(journalctl --user -M "${TEST_USER}@.host" -b --no-pager -o cat 2>/dev/null | grep -i 'amethystora' | tail -n 5)"
+fi
 notify "vmlab other" "comes as it comes"
 poke
 check "2 another app shows as it comes" wait_for 20 is "Main.messageTray._banner?.notification?.title ?? ''" "vmlab other"

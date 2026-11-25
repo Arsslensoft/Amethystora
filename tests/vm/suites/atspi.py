@@ -261,6 +261,14 @@ def main(argv):
         checked = node.get_state_set().contains(Atspi.StateType.CHECKED)
         if checked != want:
             activate(node)
+            # A switch whose action does nothing (libadwaita's on GNOME 51 may take the press and not the toggle) is pressed
+            # by the pointer, as a person would
+            time.sleep(1.5)
+            if node.get_state_set().contains(Atspi.StateType.CHECKED) != want:
+                try:
+                    pointer_click(node)
+                except Exception as error:
+                    print(f"the pointer could not press it: {error}", file=sys.stderr)
         return
     if command == "text":
         for node, _ in walk(app):
