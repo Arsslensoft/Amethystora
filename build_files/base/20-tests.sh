@@ -427,6 +427,7 @@ grep -q '"Copy without hidden data")" /usr/libexec/amethystora-clean-copy$' /usr
 grep -vh '^ *#' /usr/libexec/amethystora-clean-copy | grep -qE 'NAUTILUS_SCRIPT_|eval |bash -c|sh -c|--inplace' && false
 grep -q 'mv -n -- ' /usr/libexec/amethystora-clean-copy
 [[ "$(/usr/libexec/amethystora-clean-copy /tmp/x >/dev/null 2>&1; echo $?)" == 64 ]]
+bash /ctx/build_files/shared/test-clean-copy-kinds.sh
 # Sign a PDF (R7-42): Files' entry over the Vault's own `pdf sign`, with a card that says a reader calls the signer unknown. It
 # reads argv only, runs no shell on a path and never signs without the card
 test -x /usr/libexec/amethystora-pdf-sign
