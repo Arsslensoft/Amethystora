@@ -37,7 +37,7 @@ Say what the Vault is for in one or two sentences, and give the way, never the s
 | To use an SSH key without it lying in `~/.ssh` | `ame vault ssh on`, then `ame vault key import`, in their own terminal; `ssh` then asks the Vault. |
 | To keep a login file out of the home folder | `ame vault protect PATH`, and `ame vault run NAME -- COMMAND` to use it. It says first what that cannot do. |
 | To sign a PDF | **Vault**, Certificates, then Sign a PDF, or `ame vault pdf sign FILE`. Only computers that trust their root accept it. |
-| To fill logins in the browser | The Vault has no extension of its own: **Vault**, In your browser, has the steps. Connect Sync, install Bitwarden's extension from the browser's store, choose the self-hosted server with the address Sync uses, and sign in with the same account. What syncs as Plain fills there; sealed items stay on this computer. |
+| To fill logins in the browser | The Vault has no extension of its own: **Vault**, In your browser, has the steps. Connect Sync, install Bitwarden's extension from the browser's store, choose the self-hosted server with the address Sync uses, and sign in with the same account. What syncs fills there; items that do not sync stay on this computer. |
 | To move their codes from another app | **Vault**, Authenticator, Move or save your codes. |
 | To back it up | `ame vault backup`; the recovery key opens it. |
 
@@ -62,7 +62,7 @@ The manual's page is `vault.md` (`amethystora-manual vault`); point to its secti
   administrator; whoever trusted the old root has to trust the new one.
 - **"Where are the files?"** In `/var/lib/amethystora/vault`, owned by the service's own user, outside the home folder, so
   that neither the snapshots nor Backups hold them. The sealed backup (`ame vault backup`) is in the home.
-- **"Does it sync?"** Only to a Bitwarden or Vaultwarden server the person connects (`ame vault sync connect`); off until then. Each kind (passwords, codes, backup-codes, keys, certificates, files) is one switch, off, plain or sealed (`ame vault sync kind KIND off|on|sealed`, or the Sync page): plain is what Bitwarden's apps open, sealed a note only this vault opens. Passwords, codes and backup codes are plain until changed; keys, certificates and files are off. Files and large items go as attachments, only to the connected server, and not at all to Bitwarden's own cloud, which keeps them at a storage host the Vault never contacts.
+- **"Does it sync?"** Only to a Bitwarden or Vaultwarden server the person connects (`ame vault sync connect`); off until then. Each kind (passwords, codes, backup-codes, keys, certificates, files) is one switch, off or on (`ame vault sync kind KIND off|on`, or the Sync page): on goes plain, as what Bitwarden's apps open, and a kind Bitwarden has no type for goes as a plain secure note. There is no sealed choice any more: an old one counts as on, and the note it made is replaced by the plain copy at the next sync. Passwords, codes and backup codes are on until changed; keys, certificates and files are off. Files and large items go as attachments, only to the connected server, and not at all to Bitwarden's own cloud, which keeps them at a storage host the Vault never contacts.
   The Vault sends nothing else by itself, and service logos are off until the person turns them on.
 
 ## What you may read
