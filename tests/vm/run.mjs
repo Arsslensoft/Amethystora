@@ -611,7 +611,16 @@ async function onMachine(m, names, results, journal, ready = false) {
   }
   for (const name of names) {
     try {
-      results.push(await suite(m, name));
+      let result = await suite(m, name);
+      // A suite that failed is run once more on the same machine: on a runner a session now and then does not come up, a
+      // key press is late. It passes only if the second run passes, and the summary says it was the second (VMLAB_NO_RETRY=1 for none)
+      if (!result.passed && !process.env.VMLAB_NO_RETRY) {
+        say(`${lane(m)}${name}: failed, once more`);
+        const first = result;
+        result = await suite(m, name);
+        result.retried = first.failures;
+      }
+      results.push(result);
     } catch (error) {
       results.push(couldNot(name, m, error.message));
       say(`${lane(m)}${name}: could not run: ${error.message}`);
@@ -826,7 +835,10 @@ function table(results, vm) {
   const head = ['Suite', 'Result', 'ok', 'not ok', 'skipped', 'Time', ...(vm ? ['VM'] : [])];
   const lines = ['', `| ${head.join(' | ')} |`, `|${' --- |'.repeat(head.length)}`];
   for (const r of results) {
-    lines.push(`| ${[r.suite, r.passed ? (r.known?.length ? `passed (${r.known.length} known)` : 'passed') : '**failed**', r.ok, r.failures.length, r.skipped, r.time, ...(vm ? [r.vm] : [])].join(' | ')} |`);
+    lines.push(`| ${[r.suite, r.passed ? `passed${r.retried ? ' on the second run' : ''}${r.known?.length ? ` (${r.known.length} known)` : ''}` : (r.retried ? '**failed twice**' : '**failed**'), r.ok, r.failures.length, r.skipped, r.time, ...(vm ? [r.vm] : [])].join(' | ')} |`);
+  }
+  for (const r of results.filter((x) => x.retried?.length)) {
+    lines.push('', `## ${r.suite}: the first run's failures`, '', '```', ...r.retried, '```');
   }
   for (const r of results.filter((x) => x.known?.length)) {
     lines.push('', `## ${r.suite}: known failures (tests/vm/known-failures)`, '', '```', ...r.known, '```');

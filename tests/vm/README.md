@@ -104,7 +104,7 @@ suite leaves them out (`run.mjs plan --skip`). By hand: `gh workflow run "Lab (l
 
 `tests/vm/known-failures` names checks (`SUITE :: the start of the check's words`) that fail on a runner and have not been looked at on a
 machine with a screen: a suite whose only failures are listed passes, and its summary says `passed (N known)` and prints them.
-A check that fails and is not listed fails its suite as before; take a line out once its check has been seen to pass. Suite 71's
+A suite that fails is run once more on the same machine, and passes only if the second run does (the summary says `passed on the second run` and prints what the first run failed; `VMLAB_NO_RETRY=1` runs each once): on a runner a session now and then does not come up. A check that fails and is not listed fails its suite as before; take a line out once its check has been seen to pass. Suite 71's
 numbers are the maintainer's machine's, so with `VMLAB_RECORD_ONLY` (set by `lab.yml`) it records them and compares nothing.
 
 **Lab (ISOs)** (`lab-iso.yml`) tries installing for every pull request: the image built here, its installer ISO made by

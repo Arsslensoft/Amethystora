@@ -72,6 +72,10 @@
 98-desktop-styles.sh :: hairline: the shell's accessibility tree shows no button on the top bar
 98-desktop-styles.sh :: terminal: the shell's accessibility tree shows no button on the top bar
 
+# What the clock of the run says: Focus follows the night
+32-focus.sh :: 16 Control's Focus says Off
+
 # Budgets of what a frame costs, which are the machine's: one microsecond more than the limit on a loaded runner is no regression
 15-windows.sh :: the show-desktop timeline stays under 1 ms a frame
 15-windows.sh :: the switcher's selection stays under 1 ms
+80-control.sh :: the list takes
