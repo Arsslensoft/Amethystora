@@ -16,6 +16,7 @@
   <a href="https://github.com/arsslensoft/amethystora/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/arsslensoft/amethystora/actions/workflows/codeql.yml/badge.svg"></a>
   <br>
   <a href="https://scorecard.dev/viewer/?uri=github.com/Arsslensoft/amethystora"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/Arsslensoft/amethystora/badge"></a>
+  <a href="https://www.bestpractices.dev/projects/17113"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/17113/badge"></a>
   <a href="LICENSE"><img alt="Licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-blue"></a>
   <a href="https://github.com/arsslensoft/amethystora/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/arsslensoft/amethystora?display_name=tag"></a>
   <a href="cosign.pub"><img alt="Signed with cosign" src="https://img.shields.io/badge/images-signed%20with%20cosign-6f42c1"></a>
