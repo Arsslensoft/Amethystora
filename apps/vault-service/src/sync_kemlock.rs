@@ -220,6 +220,21 @@ pub fn connection_from(connected: Connected, server: &Server, email: &str, devic
     (connection, access)
 }
 
+/// The `Kemlock` field the Kemlock app writes on a Login it makes (hidden, a JSON object with its entry's `id`): the cipher's own fields
+/// are read here, since `cipher::open` keeps only the fields the Vault writes itself
+fn kemlock_entry(raw: &Value, user: &amethystora_vault_core::sync::crypto::SymKey) -> Option<String> {
+    use amethystora_vault_core::sync::{crypto, json};
+    let key = cipher::key_of(raw, user).ok()?;
+    let open = |field: &Value, name: &str| match json::some(field, name)? {
+        Value::String(text) => crypto::open_text(text, &key).ok().map(|text| text.to_string()),
+        _ => None,
+    };
+    json::get(raw, "fields")?.as_array()?.iter().find(|field| open(field, "name").as_deref() == Some("Kemlock")).and_then(|field| open(field, "value")).and_then(|text| {
+        let entry = serde_json::from_str::<Value>(&text).ok()?;
+        entry.get("id").and_then(Value::as_str).filter(|id| !id.is_empty() && id.len() <= 64).map(str::to_string)
+    })
+}
+
 /// The vault items the Kemlock app wrote as Logins on the Bitwarden API that the Vault took in (a cipher it did not make, carrying the
 /// app's own hidden `Kemlock` field): Kemlock's own `kem1` item is the same login, and the move links it rather than write it twice
 /// (`spec-protocol.md` 10.4)
@@ -228,11 +243,8 @@ pub fn adoptions(old: &Connection, links: &[Link]) -> Vec<Adoption> {
     let mut found = Vec::new();
     for link in links.iter().filter(|link| !link.made && !link.deleted) {
         let [part] = link.parts.as_slice() else { continue };
-        let Ok(opened) = cipher::open(&link.raw, &user) else { continue };
-        let Some(field) = opened.content.fields.iter().find(|field| field.name == "Kemlock") else { continue };
-        let Ok(entry) = serde_json::from_str::<Value>(&field.value) else { continue };
-        if let Some(id) = entry.get("id").and_then(Value::as_str).filter(|id| !id.is_empty() && id.len() <= 64) {
-            found.push(Adoption { kind: part.kind.clone(), id: part.id.clone(), entry: id.to_string() });
+        if let Some(entry) = kemlock_entry(&link.raw, &user) {
+            found.push(Adoption { kind: part.kind.clone(), id: part.id.clone(), entry });
         }
     }
     found
