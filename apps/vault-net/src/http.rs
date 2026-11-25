@@ -257,10 +257,21 @@ fn is_slot(path: &str) -> bool {
         && slot.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+/// The first segments of the routes of Kemlock's API
+const KEMLOCK_ROUTES: [&str; 10] = ["config", "account", "accounts", "auth", "devices", "items", "items:batch", "manifests", "sync", "live"];
+
+/// The API's own root, `/kem/v1/` right after the server's base path (the first one in the path), followed by one of its routes: a
+/// Bitwarden server whose base path has `/kem/v1/` in it keeps its own routes after that, which are none of Kemlock's
+fn in_kemlock_root(path: &str) -> bool {
+    const ROOT: &str = "/kem/v1/";
+    let Some(at) = path.find(ROOT) else { return false };
+    KEMLOCK_ROUTES.contains(&path[at + ROOT.len()..].split('/').next().unwrap_or(""))
+}
+
 /// A path under Kemlock's API, written the way the server reads it: no dot segment, escape or empty segment for a server to resolve
 /// into some other route (a POST there must not turn into a Bitwarden `/delete`)
 fn is_kemlock(path: &str) -> bool {
-    path.contains("/kem/v1/") && !path.contains("..") && !path.contains("/./") && !path.contains('%') && !path.contains("//") && !path.contains('\\')
+    in_kemlock_root(path) && !path.contains("..") && !path.contains("/./") && !path.contains('%') && !path.contains("//") && !path.contains('\\')
 }
 
 fn is_uuid(text: &str) -> bool {
@@ -666,6 +677,26 @@ mod tests {
         // The other methods are as before
         assert_eq!(session.request("PATCH", "http://127.0.0.1:9/kem/v1/items", &[], b"").err(), Some(Failure::NotAllowed));
         assert_eq!(session.request("DELETE", "http://127.0.0.1:9/kem/v1/items/x", &[], b"").err(), Some(Failure::NotAllowed));
+    }
+
+    #[test]
+    fn a_bitwarden_server_with_kemlocks_root_in_its_base_path_is_still_a_bitwarden_server() {
+        let (item, file) = ("3f2504e0-4f89-11d3-9a0c-0305e82c3301", "7C9E6679-7425-40DE-944B-E07FC1F90AE7");
+        let mut session = session("http://127.0.0.1:9");
+        // Its permanent deletes stay refused, whatever the address says
+        for path in [
+            format!("/x/kem/v1/y/api/ciphers/{item}/delete"),
+            format!("/kem/v1/y/api/ciphers/{item}/delete"),
+            format!("/kem/v1/api/ciphers/{item}/delete"),
+        ] {
+            assert_eq!(session.request("POST", &format!("http://127.0.0.1:9{path}"), &[], b"").err(), Some(Failure::NotAllowed), "{path}");
+        }
+        let path = format!("/x/kem/v1/y/items/{item}/files/{file}");
+        assert_eq!(session.request("DELETE", &format!("http://127.0.0.1:9{path}"), &[], b"").err(), Some(Failure::NotAllowed), "{path}");
+        // A Kemlock Server under a base path of its own is still one
+        for path in ["/vault/kem/v1/items:batch", "/a/b/kem/v1/auth/token", "/kem/v1/manifests/x"] {
+            assert_ne!(session.request("POST", &format!("http://127.0.0.1:9{path}"), &[], b"").err(), Some(Failure::NotAllowed), "{path}");
+        }
     }
 
     #[test]
