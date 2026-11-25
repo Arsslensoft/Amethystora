@@ -143,6 +143,11 @@ impl Server {
             }
             (OwnedFd::from_raw_fd(pipe[0]), OwnedFd::from_raw_fd(pipe[1]))
         };
+        let wake_write = Arc::new(wake_write);
+        // The runs of sync that keep a refresh token wake this loop through the same pipe a finished job does
+        if let Ok(mut wake) = service.sync.persists.wake.lock() {
+            *wake = Some(wake_write.clone());
+        }
         Ok(Server {
             listener,
             ssh: None,
@@ -156,7 +161,7 @@ impl Server {
             last_worker: None,
             finished: Arc::new(Mutex::new(Vec::new())),
             wake_read,
-            wake_write: Arc::new(wake_write),
+            wake_write,
             next_id: 1,
             last_use: Instant::now(),
             idle_exit,
@@ -584,6 +589,7 @@ impl Server {
         let mut drained = [0u8; 16];
         // SAFETY: into a live buffer, from a non-blocking pipe
         while unsafe { libc::read(self.wake_read.as_raw_fd(), drained.as_mut_ptr().cast(), drained.len()) } > 0 {}
+        crate::sync_kemlock::serve_persists(&mut self.service);
         let finished = self.finished.lock().map(|mut finished| std::mem::take(&mut *finished)).unwrap_or_default();
         for (token, done) in finished {
             if self.slow.contains_key(&token) {
