@@ -96,6 +96,8 @@ struct Cached {
     held: bool,
     /// It was read but could not be taken yet (its file was not there, or did not open): decided again at the next run, whatever the cursor says
     retry: bool,
+    /// This client made the item on the server: only such an item is deleted there when it stops syncing here
+    made: bool,
 }
 
 impl Cached {
@@ -113,6 +115,7 @@ impl Cached {
             file: raw.get("file").and_then(|file| Some((file.get("sha256")?.as_str()?.to_string(), file.get("server")?.as_str()?.to_string()))),
             held: raw.get("held").and_then(Value::as_bool).unwrap_or(false),
             retry: raw.get("retry").and_then(Value::as_bool).unwrap_or(false),
+            made: link.made,
         })
     }
 
@@ -130,7 +133,7 @@ impl Cached {
         if self.retry {
             raw["retry"] = json!(true);
         }
-        Link { cipher: id.to_string(), revision: self.revision.to_string(), raw, deleted: self.deleted, sealed: false, seal: 0, atts: Vec::new(), file: None, made: false, parts: self.part.iter().cloned().collect() }
+        Link { cipher: id.to_string(), revision: self.revision.to_string(), raw, deleted: self.deleted, sealed: false, seal: 0, atts: Vec::new(), file: None, made: self.made, parts: self.part.iter().cloned().collect() }
     }
 
     fn entry(&self, id: &str) -> Option<Entry> {
@@ -165,14 +168,15 @@ impl Session<'_> {
     fn login(&mut self) -> Result<(), Problem> {
         let refresh = self.refresh.clone().ok_or(Problem::LoginExpired)?;
         let tokens = self.api.refresh(&refresh)?;
-        // The old token is spent: the new one is kept before anything uses it, or a crash would leave the old one to be used twice
+        // The old token is spent: the new one is what the run hands back, whatever happens next, and is kept before anything uses it, or a
+        // crash would leave the old one to be used twice
+        self.refresh = Some(tokens.refresh.clone());
         if !(self.persist)(&tokens.refresh) {
             return Err(Problem::Net(crate::sync::api::NetFailure::Cancelled));
         }
         if !tokens.user_id.eq_ignore_ascii_case(&self.connection.user_id) {
             return Err(Problem::IdentityChanged);
         }
-        self.refresh = Some(tokens.refresh);
         self.until_ms = self.now_ms + (tokens.expires_in.min(600) - 30) * 1000;
         self.api.access = Some(tokens.access);
         Ok(())
@@ -214,6 +218,8 @@ struct Run<'a> {
     planned: Vec<Planned>,
     report: Report,
     sent_hashes: BTreeMap<String, String>,
+    /// The revision each of them was written at
+    sent_revisions: BTreeMap<String, u64>,
     first_pull: bool,
     /// The vault items the links paired at the start of the run, with their items: only those can leave (an item this run paired is not a leaver)
     linked: Vec<((String, String), String)>,
@@ -311,7 +317,9 @@ impl<'a> Run<'a> {
             (None, old) => (old, Vec::new()),
         };
         let part = PartRef { kind: local.kind.clone(), id: local.id.clone(), hash: map::hash(local) };
-        let new = Cached { kind: mapped.kind.to_string(), format: "kem1".into(), revision, hash, deleted: false, key_version: self.account.key_version, plain: Some(mapped.plain.clone()), part: Some(part), file: file_rec, held: false, retry: false };
+        // An item written over one the server holds keeps who made it; one written new, or over a deletion, is this client's own
+        let made = live.is_none_or(|c| c.made);
+        let new = Cached { kind: mapped.kind.to_string(), format: "kem1".into(), revision, hash, deleted: false, key_version: self.account.key_version, plain: Some(mapped.plain.clone()), part: Some(part), file: file_rec, held: false, retry: false, made };
         self.planned.push(Planned { id: id.to_string(), item, expected: cached.map(|c| c.revision), cached: new, file: mapped.file, drop_files: drop });
         Ok(())
     }
@@ -320,7 +328,7 @@ impl<'a> Run<'a> {
         let Some(c) = self.cache.get(id).cloned().filter(|c| !c.deleted) else { return };
         let Ok(uuid) = Uuid::parse(id) else { return };
         let Ok(item) = Kem1Item::tombstone(uuid, self.owner, &c.kind, c.revision + 1, self.account.key_version) else { return };
-        let new = Cached { revision: c.revision + 1, hash: [0; 32], deleted: true, plain: None, part: None, file: None, held: false, retry: false, ..c.clone() };
+        let new = Cached { revision: c.revision + 1, hash: [0; 32], deleted: true, plain: None, part: None, file: None, held: false, retry: false, made: false, ..c.clone() };
         let drop = c.file.map(|(_, server)| server).into_iter().collect();
         self.planned.push(Planned { id: id.to_string(), item, expected: Some(c.revision), cached: new, file: None, drop_files: drop });
     }
@@ -349,12 +357,12 @@ fn classify(run: &Run<'_>, wire: &WireItem) -> Result<Seen, Problem> {
     if wire.format != "kem1" {
         let bytes = if wire.deleted { None } else { Some(wire.ciphertext.as_deref().and_then(|c| b64_decode(c).ok()).ok_or_else(bad)?) };
         let hash = bytes.as_deref().map_or([0; 32], sha256);
-        return Ok(Seen::Item { id, cached: Box::new(Cached { kind: wire.kind.clone(), format: wire.format.clone(), revision: wire.revision, hash, deleted: wire.deleted, key_version: wire.key_version, plain: None, part: None, file: None, held: false, retry: false }) });
+        return Ok(Seen::Item { id, cached: Box::new(Cached { kind: wire.kind.clone(), format: wire.format.clone(), revision: wire.revision, hash, deleted: wire.deleted, key_version: wire.key_version, plain: None, part: None, file: None, held: false, retry: false, made: false }) });
     }
     // A tombstone with ciphertext, a live item without, a bad length: the server is not honest
     let kem = wire.kem1().map_err(|_| bad())?;
     let hash = kem.ciphertext().map_or([0; 32], sha256);
-    let mut cached = Cached { kind: kem.kind.clone(), format: "kem1".into(), revision: kem.revision, hash, deleted: kem.deleted(), key_version: kem.key_version, plain: None, part: None, file: None, held: false, retry: false };
+    let mut cached = Cached { kind: kem.kind.clone(), format: "kem1".into(), revision: kem.revision, hash, deleted: kem.deleted(), key_version: kem.key_version, plain: None, part: None, file: None, held: false, retry: false, made: false };
     if !kem.deleted() && kem.key_version == run.account.key_version {
         // Opened and checked: the plaintext's own id has to be this item's, or it is not an item of this client's
         if let Ok((_, json)) = kem.open(&run.account.item_wrap)
@@ -397,9 +405,11 @@ fn read_pages(session: &mut Session<'_>, run: &mut Run<'_>, since: Option<String
             }
             let part = run.cache.get(&id).and_then(|old| old.part.clone());
             let file = run.cache.get(&id).and_then(|old| old.file.clone());
+            let made = run.cache.get(&id).is_some_and(|old| old.made);
             let mut cached = cached;
             cached.part = part;
             cached.file = file;
+            cached.made = made;
             run.cache.insert(id.clone(), cached);
             run.touched.insert(id.clone());
             fresh.insert(id);
@@ -801,7 +811,7 @@ fn take_theirs(run: &mut Run<'_>, id: &str, local: &Local, theirs: Local) {
 // --- Sending ------------------------------------------------------------------------------------------------------------------
 
 /// Plans what the vault has that the server lacks or has differently
-fn plan_local(run: &mut Run<'_>, connection: &Connection, fresh: &BTreeSet<String>, churn: &mut (usize, usize)) {
+fn plan_local(run: &mut Run<'_>, connection: &Connection, fresh: &BTreeSet<String>, redo: &BTreeSet<String>, churn: &mut (usize, usize)) {
     let mut locals: Vec<&Local> = run.locals.values().copied().collect();
     locals.sort_by(|a, b| (&a.kind, &a.id).cmp(&(&b.kind, &b.id)));
     for local in locals {
@@ -823,10 +833,12 @@ fn plan_local(run: &mut Run<'_>, connection: &Connection, fresh: &BTreeSet<Strin
                     continue;
                 }
                 // What was read this run was decided with the vault's item in front of it: a merge that had to be sent is planned already
-                if fresh.contains(&id) || run.planned.iter().any(|planned| planned.id == id) {
+                // (an item the move's check found different is sent again whatever was read: the server's copy is not what was sent)
+                let again = redo.contains(&id);
+                if (fresh.contains(&id) && !again) || run.planned.iter().any(|planned| planned.id == id) {
                     continue;
                 }
-                let moved = c.part.as_ref().is_none_or(|part| part.hash != map::hash(local));
+                let moved = again || c.part.as_ref().is_none_or(|part| part.hash != map::hash(local));
                 if moved {
                     match run.plan_write(local, &id) {
                         Ok(()) => run.report.sent += 1,
@@ -860,16 +872,23 @@ fn plan_local(run: &mut Run<'_>, connection: &Connection, fresh: &BTreeSet<Strin
             }
         }
     }
-    // Links whose vault item is no longer one that syncs (turned off, removed): the server's copy goes, the vault's stays
+    // Links whose vault item is no longer one that syncs (turned off, removed): a copy this client made leaves the server, the vault's stays.
+    // An item another app made, and the vault took in, is only let go: it stays on the server as it is, unlinked from the vault's item.
     let leaving: Vec<(String, String)> = run.linked.iter().filter(|(key, cipher)| !run.locals.contains_key(key) && run.by_part.get(key) == Some(cipher)).map(|(key, cipher)| (key.0.clone(), cipher.clone())).collect();
-    for (kind, cipher) in leaving {
-        let id = cipher.clone();
-        if run.cache.get(&id).is_some_and(|c| !c.deleted && c.format == "kem1") {
+    for (_, id) in leaving {
+        let Some(c) = run.cache.get(&id).filter(|c| !c.deleted && c.format == "kem1") else { continue };
+        if c.made {
             run.plan_tombstone(&id);
             churn.0 += 1;
             run.report.trashed_there += 1;
+        } else {
+            run.by_part.retain(|_, other| *other != id);
+            if let Some(c) = run.cache.get_mut(&id) {
+                c.part = None;
+                c.plain = None;
+            }
+            run.touched.insert(id);
         }
-        let _ = kind;
     }
 }
 
@@ -956,6 +975,7 @@ fn send(session: &mut Session<'_>, run: &mut Run<'_>) -> Result<bool, Problem> {
         }
         if let Some(hash) = plan.cached.plain.as_ref().map(items::canonical) {
             run.sent_hashes.insert(plan.id.clone(), hex32(&sha256(&hash)));
+            run.sent_revisions.insert(plan.id.clone(), plan.cached.revision);
         }
         run.cache.insert(plan.id.clone(), plan.cached);
         run.touched.insert(plan.id);
@@ -965,9 +985,17 @@ fn send(session: &mut Session<'_>, run: &mut Run<'_>) -> Result<bool, Problem> {
 
 /// Signs and sends a manifest of everything the cache holds that is not held (`spec-protocol.md` 6.4)
 fn sign_manifest(session: &mut Session<'_>, run: &Run<'_>, counter: &mut u64, sha: &mut Option<String>) -> Result<(), Problem> {
+    // What another device's manifest lists that this run's cache does not hold, or holds at an older revision: written after this run read, and
+    // kept in the one signed over it, or the app that wrote it would find its item unlisted
+    let mut theirs: BTreeMap<String, Entry> = BTreeMap::new();
     for _ in 0..ATTEMPTS {
-        let entries: Vec<Entry> = run.cache.iter().filter(|(_, cached)| !cached.held).filter_map(|(id, cached)| cached.entry(id)).collect();
-        let manifest = Manifest::new(run.owner, *counter + 1, entries).map_err(|_| Problem::Kemlock(word::MANIFEST_INVALID))?;
+        let mut entries: BTreeMap<String, Entry> = run.cache.iter().filter(|(_, cached)| !cached.held).filter_map(|(id, cached)| cached.entry(id).map(|entry| (id.clone(), entry))).collect();
+        for (id, entry) in &theirs {
+            if run.cache.get(id).is_none_or(|cached| cached.revision < entry.revision) {
+                entries.insert(id.clone(), entry.clone());
+            }
+        }
+        let manifest = Manifest::new(run.owner, *counter + 1, entries.into_values().collect()).map_err(|_| Problem::Kemlock(word::MANIFEST_INVALID))?;
         let bytes = manifest.to_bytes();
         let signature = manifest.sign(&run.account.sig_private).map_err(|_| Problem::Kemlock(word::MANIFEST_INVALID))?;
         match session.call(|api| api.put_manifest(&run.owner_text, &bytes, &signature))? {
@@ -980,6 +1008,7 @@ fn sign_manifest(session: &mut Session<'_>, run: &Run<'_>, counter: &mut u64, sh
                 // Another device signed first: its counter is the one to go above, once its manifest checks out
                 let checked = fetch_manifest(session, run, *counter, None)?;
                 *counter = checked.counter.max(held.unwrap_or(0));
+                theirs = checked.listed;
             }
         }
     }
@@ -989,19 +1018,22 @@ fn sign_manifest(session: &mut Session<'_>, run: &Run<'_>, counter: &mut u64, sh
 // --- The move's check ------------------------------------------------------------------------------------------------------
 
 /// Reads everything again from nothing and holds it to what the move sent (`spec-protocol.md` 10.2, step 4)
-fn check_move(session: &mut Session<'_>, run: &Run<'_>, record: &MoveRecord) -> Result<Vec<String>, Problem> {
-    let mut found: BTreeMap<String, Value> = BTreeMap::new();
+fn check_move(session: &mut Session<'_>, run: &Run<'_>, record: &mut MoveRecord) -> Result<Vec<String>, Problem> {
+    // Per item: its revision, and what it opens to unless it is deleted
+    let mut found: BTreeMap<String, (u64, Option<Value>)> = BTreeMap::new();
     let mut since: Option<String> = None;
     while let Ok(Some(page)) = session.call(|api| api.sync(since.as_deref()))? {
         for wire in &page.items {
             let Ok(kem) = wire.kem1() else { continue };
-            if kem.deleted() || kem.owner != run.owner {
+            if kem.owner != run.owner {
                 continue;
             }
-            if let Ok((_, json)) = kem.open(&run.account.item_wrap)
+            if kem.deleted() {
+                found.insert(wire.id.clone(), (kem.revision, None));
+            } else if let Ok((_, json)) = kem.open(&run.account.item_wrap)
                 && let Ok(plain) = serde_json::from_slice::<Value>(&json)
             {
-                found.insert(wire.id.clone(), plain);
+                found.insert(wire.id.clone(), (kem.revision, Some(plain)));
             }
         }
         if !page.more {
@@ -1010,11 +1042,18 @@ fn check_move(session: &mut Session<'_>, run: &Run<'_>, record: &MoveRecord) -> 
         since = Some(page.cursor);
     }
     let mut differs = Vec::new();
+    let mut edited = Vec::new();
     for (id, hash) in &record.sent {
-        let ok = found.get(id).is_some_and(|plain| hex32(&sha256(&items::canonical(plain))) == *hash);
-        if !ok {
-            differs.push(id.clone());
+        match found.get(id) {
+            Some((_, Some(plain))) if hex32(&sha256(&items::canonical(plain))) == *hash => {}
+            // Written at a later revision than the move's, or deleted since: someone changed it after the copy, which is no mismatch
+            Some((revision, _)) if record.revisions.get(id).is_some_and(|sent| revision > sent) => edited.push(id.clone()),
+            _ => differs.push(id.clone()),
         }
+    }
+    for id in edited {
+        record.sent.remove(&id);
+        record.revisions.remove(&id);
     }
     Ok(differs)
 }
@@ -1090,6 +1129,7 @@ fn attempts(session: &mut Session<'_>, convert: &dyn Convert, connection: &Conne
             planned: Vec::new(),
             report: Report::default(),
             sent_hashes: BTreeMap::new(),
+            sent_revisions: BTreeMap::new(),
             first_pull: links.is_empty(),
             linked: Vec::new(),
             trashed_now: BTreeSet::new(),
@@ -1151,9 +1191,20 @@ fn steps(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connection, 
             fresh.insert(id.clone());
         }
     }
-    let checked = fetch_manifest(session, run, state.manifest_counter, state.manifest_sha256.as_deref())?;
+    let mut checked = fetch_manifest(session, run, state.manifest_counter, state.manifest_sha256.as_deref())?;
     let mut held_since = state.held.clone();
-    compare(run, &checked, &mut fresh, &mut held_since, &deleted_before)?;
+    if let Err(Problem::Kemlock(why)) = compare(run, &checked, &mut fresh, &mut held_since, &deleted_before) {
+        // The manifest lists something this run's pages lack, or at a revision it did not read: another device may have written and signed between
+        // the two reads. Reading from where the pages left off settles it; only a manifest still ahead of the server's items is the server's doing.
+        if why != word::ITEM_ROLLED_BACK && why != word::ITEM_MISSING {
+            return Err(Problem::Kemlock(why));
+        }
+        if !read_pages(session, run, cursor.clone().or(from.clone()), &mut fresh, &mut cursor, &mut siblings)? {
+            return Err(Problem::Kemlock(word::BAD_ANSWER));
+        }
+        checked = fetch_manifest(session, run, state.manifest_counter, state.manifest_sha256.as_deref())?;
+        compare(run, &checked, &mut fresh, &mut held_since, &deleted_before)?;
+    }
     let mut counter = checked.counter.max(state.manifest_counter);
     let mut sha = checked.sha.clone().or_else(|| state.manifest_sha256.clone());
 
@@ -1161,7 +1212,8 @@ fn steps(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connection, 
     let mut churn = (0usize, 0usize);
     decide(session, run, &fresh, &mut churn)?;
     let links_total = run.cache.values().filter(|c| c.part.is_some()).count();
-    plan_local(run, connection, &fresh, &mut churn);
+    let redo: BTreeSet<String> = state.moved.as_ref().filter(|record| record.finished_ms.is_none()).map(|record| record.redo.iter().cloned().collect()).unwrap_or_default();
+    plan_local(run, connection, &fresh, &redo, &mut churn);
     if !accept && !run.first_pull {
         let (removed, arriving) = churn;
         let total = removed + arriving;
@@ -1185,11 +1237,14 @@ fn steps(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connection, 
     }
     if let Some(mut record) = moving {
         record.sent.extend(std::mem::take(&mut run.sent_hashes));
-        let differs = check_move(session, run, &record)?;
+        record.revisions.extend(std::mem::take(&mut run.sent_revisions));
+        let differs = check_move(session, run, &mut record)?;
         if differs.is_empty() {
             record.finished_ms = Some(now_ms);
+            record.redo.clear();
         } else {
             record.redone += 1;
+            record.redo = differs;
             news.moved = Some(record);
             return Err(Problem::Kemlock(word::MOVE_CHECK));
         }

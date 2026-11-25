@@ -129,3 +129,33 @@ fn every_kind_from(from: &Client, to: &mut Client) {
         }
     }
 }
+
+#[test]
+fn an_edit_made_elsewhere_after_a_failed_check_is_no_mismatch_and_what_differed_is_sent_again() {
+    let mut fake = server();
+    let mut client = moving_vault(&mut fake);
+    let tampered = sid(&fake, PASSWORD_ID);
+    fake.attack(Attack::Tamper { item: tampered.clone() });
+    assert_eq!(client.sync(&mut fake).problem, Some(Problem::Kemlock(word::MOVE_CHECK)));
+    let record = client.connection.kemlock.as_ref().unwrap().moved.clone().unwrap();
+    assert_eq!(record.redo, vec![tampered.clone()], "the check says which items it will send again");
+    // The server is honest again, and the Kemlock app edits another moved item meanwhile
+    fake.clear_attacks();
+    let edited = sid(&fake, ACCOUNT_ID);
+    let mut plain = fake.plain_of(EMAIL, &edited).unwrap();
+    plain["label"] = json!("renamed over there");
+    plain["updatedAt"] = json!(now_ms() + 60_000);
+    fake.plant_item(EMAIL, "otp", &plain);
+    fake.sign_manifest(EMAIL);
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    // The edit was taken, not held against the move; the item that differed was written again over the server's revision
+    assert_eq!(client.value("authenticator", ACCOUNT_ID)["label"], "renamed over there");
+    assert_eq!(fake.revision_of(EMAIL, &tampered), Some(2), "sent again");
+    assert_eq!(fake.plain_of(EMAIL, &tampered).unwrap()["id"], PASSWORD_ID);
+    let record = client.connection.kemlock.as_ref().unwrap().moved.clone().unwrap();
+    assert!(record.finished_ms.is_some() && record.redo.is_empty(), "{record:?}");
+    // An item the other device deleted for good does not hold the move either, and a later run goes on as usual
+    assert_clean(&client.sync(&mut fake).problem);
+    assert_eq!(client.links.len(), 10);
+}

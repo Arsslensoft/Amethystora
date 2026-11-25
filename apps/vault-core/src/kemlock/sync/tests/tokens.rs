@@ -257,3 +257,22 @@ fn signing_out_forgets_the_device_and_its_refresh_token_but_not_the_access_token
     assert_eq!(api.devices().ok().unwrap()["devices"].as_array().unwrap().len(), 0);
     assert_eq!(api.refresh(done.tokens.refresh.as_str()).err(), Some(Problem::LoginExpired));
 }
+
+#[test]
+fn a_refresh_token_the_service_could_not_keep_is_the_one_the_run_hands_back_not_the_spent_one() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    let spent = client.connection.refresh.clone().unwrap();
+    client.put("password", PASSWORD_ID, with_id(password("A", "u", "p", "https://a.example"), PASSWORD_ID));
+    // The vault closes between the server's answer and the keeping of it: the new token is all there is of the session
+    client.refuse_persist = true;
+    let outcome = client.sync(&mut fake);
+    assert_eq!(outcome.problem, Some(Problem::Net(NetFailure::Cancelled)));
+    let new = client.persisted.last().cloned().unwrap();
+    assert_ne!(new, spent);
+    assert_eq!(client.connection.refresh.as_deref(), Some(new.as_str()), "the connection ends up holding the new token, never the spent one");
+    // The next run goes on from it: the session is alive
+    client.refuse_persist = false;
+    assert_clean(&client.sync(&mut fake).problem);
+    assert_eq!(fake.session_count(EMAIL), 1);
+}

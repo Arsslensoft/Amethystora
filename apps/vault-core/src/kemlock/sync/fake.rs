@@ -151,6 +151,11 @@ pub enum Attack {
     SyncFails(u16),
     /// The next manifest written is refused as another device's signed first (409 `stale-manifest`), which it did, once, listing what the server holds
     StaleManifest,
+    /// The same, and that other device had written this login (a plaintext with an `id`, at the next revision if the server holds it) before it signed
+    StaleManifestAfterWrite(Value),
+    /// The next read of the changes is answered as it would be, and then another device writes this login and signs a manifest, once: the pages
+    /// the run read and the manifest it fetches next disagree, as they honestly can
+    WriteAfterSync(Value),
     /// A file is served with one byte changed
     FileTampered,
     /// Files are offered pre-signed, to a bucket
@@ -1351,6 +1356,16 @@ impl FakeKemlock {
     }
 
     fn sync(&mut self, at: usize, since: Option<String>, limit: Option<usize>) -> R<Reply> {
+        let reply = self.changes(at, since, limit);
+        if let Some(Attack::WriteAfterSync(plain)) = self.take_attack(|a| matches!(a, Attack::WriteAfterSync(_))) {
+            let email = self.accounts[at].email.clone();
+            self.plant_item(&email, "login", &plain);
+            self.sign_manifest_at(at);
+        }
+        reply
+    }
+
+    fn changes(&mut self, at: usize, since: Option<String>, limit: Option<usize>) -> R<Reply> {
         let account = &self.accounts[at];
         let since_seq = match since.as_deref() {
             None => 0,
@@ -1520,6 +1535,12 @@ impl FakeKemlock {
 
     fn put_manifest(&mut self, request: &Request, at: usize, owner: &str) -> R<Reply> {
         let body = body_of(request, &["manifest", "signature"])?;
+        if let Some(Attack::StaleManifestAfterWrite(plain)) = self.take_attack(|a| matches!(a, Attack::StaleManifestAfterWrite(_))) {
+            let email = self.accounts[at].email.clone();
+            self.plant_item(&email, "login", &plain);
+            let current = self.sign_manifest_at(at);
+            return Err(Reply::problem(409, "stale-manifest", "another device signed first").with(json!({"currentCounter": current})));
+        }
         if self.take_attack(|a| *a == Attack::StaleManifest).is_some() {
             let current = self.sign_manifest_at(at);
             return Err(Reply::problem(409, "stale-manifest", "another device signed first").with(json!({"currentCounter": current})));

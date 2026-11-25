@@ -827,3 +827,87 @@ fn local_password(id: &str, title: &str) -> crate::sync::map::Local {
     let value = with_id(password(title, "u", "p", &format!("{}.example", title.to_lowercase())), id);
     crate::sync::map::Local { kind: "password".into(), id: id.into(), name: title.into(), meta: serde_json::Value::Null, approval: crate::protocol::Approval::WhileOpen, value }
 }
+
+// --- What another device writes while this one runs, and what turning an item off leaves alone -----------------------------------
+
+const OTHER_ENTRY: &str = "1b712e6d-bbb9-4f9c-acf2-d3aad29f7257";
+
+fn another_apps_login() -> Value {
+    json!({"id": OTHER_ENTRY, "name": "GitHub", "username": "sam", "password": "hunter2-but-longer", "websites": ["github.com"], "addedAt": 1_762_000_000_000i64})
+}
+
+#[test]
+fn an_item_another_app_made_is_only_let_go_when_turned_off_and_one_the_vault_made_is_deleted() {
+    let mut fake = server();
+    // The Kemlock app's own login, which the vault takes in as its item
+    fake.plant_item(EMAIL, "login", &another_apps_login());
+    fake.sign_manifest(EMAIL);
+    let mut client = Client::connect(&mut fake, EMAIL);
+    client.put("password", PASSWORD_ID, with_id(password("Mail", "sam", "p1", "mail.example"), PASSWORD_ID));
+    assert_clean(&client.sync(&mut fake).problem);
+    let (theirs, ours) = (sid(&fake, OTHER_ENTRY), sid(&fake, PASSWORD_ID));
+    assert!(client.has("password", OTHER_ENTRY), "the vault took it in");
+    assert!(!client.links[&theirs].made && client.links[&ours].made);
+    // Both leave the items that sync (the kind is turned off): the one the vault made goes from the server, the other stays there
+    client.locals.clear();
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert_eq!(outcome.report.trashed_there, 1);
+    assert!(fake.wire_of(EMAIL, &ours).unwrap().deleted);
+    assert!(!fake.wire_of(EMAIL, &theirs).unwrap().deleted, "an item the Kemlock app made is not deleted for the vault's switch");
+    assert_eq!(fake.plain_of(EMAIL, &theirs).unwrap()["password"], "hunter2-but-longer");
+    // Still listed by the manifest, and no longer paired with a vault item
+    assert!(verified_manifest(&fake).entries.iter().any(|entry| entry.item_id.to_string() == theirs && !entry.deleted));
+    assert!(client.links[&theirs].parts.is_empty());
+    // The next run has nothing to say about it
+    assert_clean(&client.sync(&mut fake).problem);
+    assert!(!fake.wire_of(EMAIL, &theirs).unwrap().deleted);
+}
+
+#[test]
+fn a_manifest_re_signed_after_another_device_signed_keeps_what_that_device_wrote() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    client.put("password", PASSWORD_ID, with_id(password("Mail", "sam", "p1", "mail.example"), PASSWORD_ID));
+    // Another device writes a login and signs a manifest listing it, just before this one signs: this one is told so (409), reads it, and signs again
+    fake.attack(Attack::StaleManifestAfterWrite(another_apps_login()));
+    assert_clean(&client.sync(&mut fake).problem);
+    let manifest = verified_manifest(&fake);
+    assert_eq!(manifest.counter, 2);
+    let listed: Vec<String> = manifest.entries.iter().map(|entry| entry.item_id.to_string()).collect();
+    assert!(listed.contains(&sid(&fake, OTHER_ENTRY)), "the other device's item is in the manifest this one signed: {listed:?}");
+    assert!(listed.contains(&sid(&fake, PASSWORD_ID)));
+    // The next run reads that item as new, finds it listed, and takes it in: nothing is held as unlisted
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert!(client.has("password", OTHER_ENTRY));
+    assert!(client.connection.kemlock.as_ref().unwrap().held.is_empty());
+}
+
+#[test]
+fn another_device_writing_between_the_pages_and_the_manifest_is_read_again_and_stops_nothing() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    client.put("password", PASSWORD_ID, with_id(password("Mail", "sam", "p1", "mail.example"), PASSWORD_ID));
+    assert_clean(&client.sync(&mut fake).problem);
+    // The manifest lists an edit the pages the run read did not have: not a server handing back an old copy
+    let mut plain = fake.plain_of(EMAIL, &sid(&fake, PASSWORD_ID)).unwrap();
+    plain["password"] = json!("changed there");
+    fake.attack(Attack::WriteAfterSync(plain));
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert_eq!(client.value("password", PASSWORD_ID)["password"], "changed there");
+    // And one it did not know at all
+    fake.attack(Attack::WriteAfterSync(another_apps_login()));
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert!(client.has("password", OTHER_ENTRY));
+    // A manifest that really is ahead of the server's items still stops the run
+    fake.clear_attacks();
+    let id = sid(&fake, PASSWORD_ID);
+    let same = fake.plain_of(EMAIL, &id).unwrap();
+    fake.attack(Attack::RollBack { item: id });
+    fake.plant_item(EMAIL, "login", &same);
+    fake.sign_manifest(EMAIL);
+    assert_eq!(client.sync(&mut fake).problem, Some(Problem::Kemlock(word::ITEM_ROLLED_BACK)));
+}

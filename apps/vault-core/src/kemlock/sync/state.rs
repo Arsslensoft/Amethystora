@@ -31,6 +31,12 @@ pub struct MoveRecord {
     /// How many times the check sent what differed again
     #[serde(default)]
     pub redone: u32,
+    /// Item id -> the revision the move wrote it at: the check finding a higher one reads an edit made since, which is no difference
+    #[serde(default)]
+    pub revisions: BTreeMap<String, u64>,
+    /// The items the last check found different from what was sent: the next run writes them again
+    #[serde(default)]
+    pub redo: Vec<String>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
