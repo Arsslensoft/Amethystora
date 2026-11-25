@@ -76,7 +76,7 @@ impl Browser {
     }
 
     /// Step 1 with one: the address to give the extension, to copy
-    fn connected(&self, address: &str) {
+    fn connected(&self, address: &str, kemlock: bool) {
         ui::clear(&self.server);
         self.server.append(&widgets::h2(&t!("1. Your server's address")));
         self.server.append(&widgets::p(&t!("Sync is connected. This is the address the extension needs."), &["soft", "small"]));
@@ -91,6 +91,9 @@ impl Browser {
             vault.say(&t!("Copied."));
         }));
         self.server.append(&row);
+        if kemlock {
+            self.server.append(&widgets::p(&t!("This is a Kemlock Server, and the vault keeps its items there as Kemlock's own. Open them in the Kemlock app or its web vault. Bitwarden's extension shows only the copies it had before."), &["warn", "small"]));
+        }
     }
 }
 
@@ -107,7 +110,7 @@ impl Page for Browser {
             match status {
                 // The address is text somebody typed: shown as text, never as markup
                 Ok(status) if status["connected"] == json!(true) && status["address"].as_str().is_some_and(|address| address.starts_with("https://")) => {
-                    page.connected(&widgets::clean(status["address"].as_str().unwrap_or("")));
+                    page.connected(&widgets::clean(status["address"].as_str().unwrap_or("")), status["backend"] == json!("kemlock"));
                 }
                 _ => page.not_connected(),
             }

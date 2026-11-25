@@ -963,7 +963,7 @@ impl Vault {
         card
     }
 
-    /// What the item does in sync, shown only while a server is connected: Off or On (Bitwarden's apps open it), side by side. With no choice of its own the item follows its kind, and says so; choosing what its kind does takes
+    /// What the item does in sync, shown only while a server is connected: Off or On (the apps of the kind of server open it), side by side. With no choice of its own the item follows its kind, and says so; choosing what its kind does takes
     /// its own away. A change is asked for, as the service asks it.
     ///
     /// `only_itself` is for what no kind covers (this computer's own identity certificate): it is off until its own choice says otherwise.
@@ -978,6 +978,7 @@ impl Vault {
             if status["connected"] != json!(true) {
                 return;
             }
+            let kemlock = status["backend"] == json!("kemlock");
             let this_item = format!("{kind}.{id}");
             let own = status["choices"][&this_item].as_str().filter(|choice| matches!(*choice, "on" | "off")).map(str::to_string);
             // What it does with none of its own: its kind's, but an item that asks every time stays off until its kind was said for
@@ -996,7 +997,12 @@ impl Vault {
                     this.reload_current();
                 });
             }));
-            shown.append(&widgets::p(&t!("On: Bitwarden's apps open it. Only the server's encryption protects it. A key, a certificate or a file goes as a plain secure note."), &["soft", "small"]));
+            let on_words = if kemlock {
+                t!("On: the Kemlock apps open it as the item it is. Only the server's encryption protects it.")
+            } else {
+                t!("On: Bitwarden's apps open it. Only the server's encryption protects it. A key, a certificate or a file goes as a plain secure note.")
+            };
+            shown.append(&widgets::p(&on_words, &["soft", "small"]));
             let sentence = if only_itself {
                 t!("This is the identity of this computer, so the choice for all certificates never covers it: only this choice does.")
             } else if own.is_some() {
@@ -1014,6 +1020,11 @@ impl Vault {
                     "attachments-premium" => t!("It did not go: the account has no premium, which Bitwarden's server asks for files. It stays on this computer."),
                     "attachments-refused" => t!("It did not go: the server does not take files, or the account's room for them is spent. It stays on this computer."),
                     "attachments-elsewhere" => t!("It did not go: this server keeps files at another host, which the vault never contacts. It stays on this computer."),
+                    "files-refused" => t!("It did not go: the server does not take files, or the account's room for them is spent. It stays on this computer."),
+                    "files-bucket" => t!("It did not go: this server keeps files in a storage bucket, which the vault never contacts. It stays on this computer."),
+                    "too-large" => t!("It did not go: it is larger than the server takes for one item, so it stays on this computer only."),
+                    "kind-changed" => t!("It did not go: the server holds it as another kind of item than the vault does. The vault kept its own."),
+                    "unreadable" => t!("It did not go: something in it cannot be written the way the server holds it, so it stays on this computer only."),
                     "attachment-lost" => t!("The server no longer has its file. It stays as it is here, and goes again when it changes, or when you accept it in a terminal with `ame vault sync now accept`."),
                     "unreadable-note" => t!("Its note on the server changed so that it no longer reads as what it was. The vault kept its own."),
                     "too-long" => t!("It did not go: a field of it is longer than Bitwarden accepts, so it stays on this computer only."),

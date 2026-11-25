@@ -9214,12 +9214,17 @@ msgid "Without it, each account shows a letter on a colour, and nothing is asked
 msgstr ""
 
 #: usr/libexec/amethystora-sends
-msgid "Amethystora Vault's sync"
+#, sh-format
+msgid "While the vault is open, what it holds that syncs (every kind unless you turned one off: passwords, authenticator codes, backup codes, keys, certificates and protected files, which go as the item's own file up to 16 MiB) is sent to the Kemlock Server at ${SYNC_ADDRESS}, encrypted with the account's key, and the account's changes are fetched, on opening, after a change and every 15 minutes. The server sees how many items there are, of which kind, how long each is and when it changed."
 msgstr ""
 
 #: usr/libexec/amethystora-sends
 #, sh-format
 msgid "While the vault is open, what it holds that syncs (passwords, authenticator codes and backup codes, and keys, certificates and protected files where you chose it, with files for what is larger than a note) is sent to ${SYNC_ADDRESS}, encrypted with the account's key, and the account's changes are fetched, on opening, after a change and every 15 minutes. The server sees how many items there are, of which kind, how long each is and when it changed."
+msgstr ""
+
+#: usr/libexec/amethystora-sends
+msgid "Amethystora Vault's sync"
 msgstr ""
 
 #: usr/libexec/amethystora-sends
@@ -17371,6 +17376,22 @@ msgid "A program calling itself $(program) asks to stop syncing every one of you
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
+msgid "A program calling itself $(program) asks to send “$(item)” to the Kemlock Server Amethystora Vault syncs with, as an item the Kemlock apps open, encrypted on this computer with the account"
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "A program calling itself $(program) asks to stop syncing “$(item)”, which removes its copy from the Kemlock Server Amethystora Vault syncs with."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the Kemlock Server it syncs with, as items the Kemlock apps open, encrypted on this computer with the account"
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "A program calling itself $(program) asks to stop syncing every one of your $(item), which removes their copies from the Kemlock Server Amethystora Vault syncs with."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
 msgid "No prompt stops a program that reads your files, a copied backup and a Flatpak with access to your home. It does not stop a program of this account that asks."
 msgstr ""
 
@@ -17597,7 +17618,7 @@ msgid "${tool}: not installed"
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "What this vault holds that syncs becomes items in that account, encrypted with the account's own key, and the account's changes come back. Passwords, authenticator codes and backup codes go as plain items that Bitwarden's apps open; keys, certificates and protected files go only when you choose it, as a plain secure note or SSH key item where Bitwarden has no type for them. The server learns how many items there are, of which kind, how long each is and when it changed. The account's key is kept in this vault, so whoever opens this vault can reach that whole account. A dedicated account for the vault is the better choice. It works with Bitwarden and Vaultwarden accounts, and is not Bitwarden."
+msgid "What this vault holds that syncs becomes items in that account, encrypted with the account's own key, and the account's changes come back. On a Kemlock Server every kind goes as the Kemlock apps' own items, keys, certificates and protected files included, unless you turn a kind off. On a Vaultwarden or Bitwarden server, passwords, authenticator codes and backup codes go as plain items that Bitwarden's apps open, and keys, certificates and protected files only when you choose it, as a plain secure note or SSH key item where Bitwarden has no type for them. The server learns how many items there are, of which kind, how long each is and when it changed. The account's key is kept in this vault, so whoever opens this vault can reach that whole account. A dedicated account for the vault is the better choice. It works with Kemlock, Bitwarden and Vaultwarden accounts, and is not Bitwarden."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -17605,7 +17626,7 @@ msgid "Email address of the account: "
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "Log in with the personal API key (it asks for no code) or the master password? Type key or password: "
+msgid "Log in with the personal API key (Vaultwarden and Bitwarden only; it asks for no code) or the master password? Type key, or press Enter for the password: "
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -17655,7 +17676,28 @@ msgid "This account's key is made with only ${n} rounds, which is far fewer than
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "Which second step? Type authenticator, email or yubikey: "
+#, sh-format
+msgid "This account's key is made with ${m} MiB and ${n} passes, which is less than Kemlock's own 64 MiB and 3, and makes the master password easier to guess. Type yes to go on: "
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Which second step? Type authenticator, email, yubikey or recovery: "
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Recovery code (it turns off the account's second steps): "
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This is a Kemlock Server, and the vault synced with its own API: every kind of item goes, and the Kemlock apps open them."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This account was made through Bitwarden's API, so the Bitwarden hash of its master password was sent to the server once, to give the account its Kemlock keys. From now on the password signs in to both."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The vault's items were moved from their Bitwarden copies to Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -17834,11 +17876,108 @@ msgid "Items of the vault did not read: ${n}. Nothing is sent to the server whil
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
+msgid "The server did not answer like a Kemlock Server."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This Kemlock Server is too old for the vault: it lacks what signing in needs."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server is set up under another address than the one given, so it would refuse every request. Give it the address it was set up with."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server ended this sign-in. Connect again."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server refused the vault's proof of who is asking. Check this computer's clock, and that the address is the one the server is set up under."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server kept refusing the request's nonce. Try again later."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This account signs in with single sign-on, which the vault does not do."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server refused this account: it may be disabled, or being deleted."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The master password is wrong, or this is not the server the account was set up on."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This account was made through Bitwarden's API and its only second step is not an authenticator app. Sign in to its web vault once first."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The account's keys on the server do not check out. Nothing was kept."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server's signed list of items does not verify. Nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server's signed list of items is older than one the vault saw. A server giving an old copy back is what that is, so nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server's signed list names an item that the server no longer has. Nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server gave back an older copy of an item than the vault knew. Nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "An item that was deleted came back with no signed list naming it. Nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Items that no signed list names have waited for a day. If they are yours, accept them with: ame vault sync now accept"
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This server keeps files in a storage bucket, which the vault does not use."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "What was moved did not read back as it was sent. The vault will send what differs again."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The second step was refused. The code may be wrong or already used."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This vault was changed on two servers at once. Open it in the Kemlock app to settle it."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+#, sh-format
+msgid "This account's key is made with only ${m} MiB and ${n} passes, which is less than Kemlock's default."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
 msgid "What the vault keeps of its sync did not read. Turn sync off and connect again."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
 msgid "No server is connected."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Kind of server: Kemlock Server, through its own API"
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Kind of server: Vaultwarden or Bitwarden"
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -17886,7 +18025,7 @@ msgstr ""
 
 #: usr/share/amethystora/just/vault.just
 #, sh-format
-msgid "Sent plain, as Bitwarden's apps open it: ${what}"
+msgid "Sent: ${what}"
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
