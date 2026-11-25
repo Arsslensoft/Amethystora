@@ -296,10 +296,16 @@ fn login_by_password_by_api_key_and_by_refresh() {
     // A wrong password is the server's own message, as data
     let pending = merge::prepare(&mut net, &crypto::master_key, server(), &email, b"not the password", None, None, None, merge::new_device_id()).unwrap();
     assert!(matches!(merge::finish(&mut net, &pending, &Extra::default()), Err(Problem::ServerSaid(_))));
-    // A made-up address gets made-up settings that are within bounds, and the same each time
-    let kdf_a = api::prelogin(&mut net, &server(), "nobody-at-all@example.test").unwrap();
-    let kdf_b = api::prelogin(&mut net, &server(), "nobody-at-all@example.test").unwrap();
-    assert!(kdf_a.same(&kdf_b));
+    // A made-up address gets made-up settings, the same each time. Vaultwarden picks them from a list
+    // with a key it makes at start, and one entry is PBKDF2 at 5,000 iterations: below this client's
+    // floor, so on some servers the answer is refused as too weak, and that is the same each time too
+    let kdf_a = api::prelogin(&mut net, &server(), "nobody-at-all@example.test");
+    let kdf_b = api::prelogin(&mut net, &server(), "nobody-at-all@example.test");
+    match (&kdf_a, &kdf_b) {
+        (Ok(a), Ok(b)) => assert!(a.same(b)),
+        (Err(Problem::Kdf(crypto::KdfProblem::TooWeak)), Err(Problem::Kdf(crypto::KdfProblem::TooWeak))) => {}
+        other => panic!("the made-up settings changed, or were refused for another reason: {other:?}"),
+    }
     // And what the server says of itself is only for showing
     let (name, version) = api::config(&mut net, &server()).unwrap();
     println!("login: the server calls itself {name:?} {version:?}; the settings were {pinned:?}");
