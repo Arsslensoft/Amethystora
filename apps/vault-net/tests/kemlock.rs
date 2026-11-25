@@ -10,10 +10,10 @@
 //! docker network create kemlock-interop
 //! docker run -d --rm --name kemlock-test --network kemlock-interop -e DOMAIN=http://kemlock-test:8080 -e SIGNUPS_ALLOWED=true \
 //!   -e KEMLOCK_RATE_SIGN_IN_PER_MINUTE=600 -e KEMLOCK_RATE_REGISTER_PER_HOUR=1000 \
-//!   -e LOGIN_RATELIMIT_SECONDS=1 -e LOGIN_RATELIMIT_MAX_BURST=1000 -e UNAUTHENTICATED_RATELIMIT_SECONDS=1 -e UNAUTHENTICATED_RATELIMIT_MAX_BURST=1000 
+//!   -e LOGIN_RATELIMIT_SECONDS=1 -e LOGIN_RATELIMIT_MAX_BURST=1000 -e UNAUTHENTICATED_RATELIMIT_SECONDS=1 -e UNAUTHENTICATED_RATELIMIT_MAX_BURST=1000 \
 //!   ghcr.io/arsslensoft/kemlock-server@sha256:efd2f339fd8b3844174e1d8f8c4b2c19af19a696296d58d5ec78e8ae362c6e6d
 //! docker run --rm --network kemlock-interop -v amethystora-cargo:/root/.cargo/registry -v kemlock-engine-target:/target \
-//!   -e CARGO_TARGET_DIR=/target -e KEMLOCK_TEST_ADDRESS=http://kemlock-test:8080 -v D:/wt/amethyst-kemlock-engine/apps:/src -w /src \
+//!   -e CARGO_TARGET_DIR=/target -e KEMLOCK_TEST_ADDRESS=http://kemlock-test:8080 -v "$PWD/apps":/src -w /src \
 //!   amethystora-rust-f45 cargo test --release --locked -p amethystora-vault-net --features plain-http-for-tests --test kemlock \
 //!   -- --ignored --nocapture --test-threads=1
 //! ```

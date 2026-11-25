@@ -117,4 +117,3 @@ fn the_fake_wants_the_dpop_scheme_and_a_proof_that_names_the_token() {
     let request = Request { method: "GET", url, headers: vec![("DPoP", proof), ("Authorization", format!("DPoP {}", access.0))], body: Zeroizing::new(Vec::new()) };
     assert_eq!(slug_of(&mut fake, request), (401, "unauthorized".into()));
 }
-

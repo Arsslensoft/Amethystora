@@ -288,4 +288,3 @@ pub fn sign_out(http: &mut dyn Http, connection: &Connection) {
     api.access = Some(tokens.access);
     let _ = api.sign_out(&state.device_id);
 }
-
