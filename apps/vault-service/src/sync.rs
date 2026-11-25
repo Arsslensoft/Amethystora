@@ -269,7 +269,8 @@ impl Http for NetHttp {
         let answer = self.exchange(&json!({"v": 1, "op": "request", "method": request.method, "url": request.url, "headers": headers, "body": &*body}))?;
         let status = answer.get("status").and_then(Value::as_u64).and_then(|status| u16::try_from(status).ok()).ok_or(NetFailure::Unreachable)?;
         let body = base64::engine::general_purpose::STANDARD.decode(answer.get("body").and_then(Value::as_str).unwrap_or("")).map_err(|_| NetFailure::Unreachable)?;
-        Ok(Response { status, body: Zeroizing::new(body) })
+        let headers = answer.get("headers").and_then(Value::as_array).into_iter().flatten().filter_map(|pair| Some((pair.get(0)?.as_str()?.to_ascii_lowercase(), pair.get(1)?.as_str()?.to_string()))).take(16).collect();
+        Ok(Response { status, body: Zeroizing::new(body), headers })
     }
 }
 

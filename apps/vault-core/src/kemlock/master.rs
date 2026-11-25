@@ -18,30 +18,60 @@ pub struct KdfParams {
     pub parallelism: u32,
 }
 
-/// The bounds a server's settings must be within. The floor of memory is 19 MiB, the smallest cost OWASP calls enough
-/// for Argon2id; the roof is 1 GiB, which a phone survives.
-pub const MIN_MEMORY_KIB: u32 = 19_456;
-pub const MAX_MEMORY_KIB: u32 = 1_048_576;
-pub const MIN_ITERATIONS: u32 = 2;
-pub const MAX_ITERATIONS: u32 = 16;
-pub const MAX_PARALLELISM: u32 = 16;
+/// The bounds a server's settings must be within: the Bitwarden side's, in one place (`sync::bounds`), so that a server is held to
+/// the same numbers whichever API it answers on (plans/vault-kemlock, decision 8). Refused below 16 MiB or 2 passes and above 1 GiB,
+/// 10 passes or 16 lanes.
+pub const MIN_MEMORY_KIB: u32 = crate::sync::bounds::ARGON2_MIB.0 * 1024;
+pub const MAX_MEMORY_KIB: u32 = crate::sync::bounds::ARGON2_MIB.1 * 1024;
+pub const MIN_ITERATIONS: u32 = crate::sync::bounds::ARGON2_PASSES.0;
+pub const MAX_ITERATIONS: u32 = crate::sync::bounds::ARGON2_PASSES.1;
+pub const MAX_PARALLELISM: u32 = crate::sync::bounds::ARGON2_LANES.1;
 /// The server keeps a random 16-byte salt; a salt of another length is refused rather than guessed at
 pub const SALT_MIN: usize = 16;
 pub const SALT_MAX: usize = 64;
+
+/// What a person is shown, and has to agree to, before settings inside the bounds are used: below Kemlock's own default (64 MiB, 3
+/// passes) a master password is easier to guess; above 256 MiB the work is a lot of memory, made in a program of its own that a
+/// server asked for
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Confirm {
+    /// Under the default: the memory in MiB and the passes
+    Weak { memory_mib: u32, iterations: u32 },
+    /// Over 256 MiB: the memory in MiB
+    Heavy { memory_mib: u32 },
+}
 
 impl KdfParams {
     /// Refuses settings outside the bounds
     pub fn check(&self) -> Result<()> {
         if !(MIN_MEMORY_KIB..=MAX_MEMORY_KIB).contains(&self.memory_kib) {
-            return Err(Error::Refused("the Argon2id memory is outside 19 MiB to 1 GiB"));
+            return Err(Error::Refused("the Argon2id memory is outside 16 MiB to 1 GiB"));
         }
         if !(MIN_ITERATIONS..=MAX_ITERATIONS).contains(&self.iterations) {
-            return Err(Error::Refused("the Argon2id passes are outside 2 to 16"));
+            return Err(Error::Refused("the Argon2id passes are outside 2 to 10"));
         }
         if !(1..=MAX_PARALLELISM).contains(&self.parallelism) {
             return Err(Error::Refused("the Argon2id lanes are outside 1 to 16"));
         }
         Ok(())
+    }
+
+    /// Whether the person has to say yes to these settings first: none that is not within the bounds gets this far
+    pub fn confirm(&self) -> Option<Confirm> {
+        let memory_mib = self.memory_kib / 1024;
+        if self.memory_kib > crate::sync::bounds::ARGON2_CONFIRM_ABOVE_MIB * 1024 {
+            Some(Confirm::Heavy { memory_mib })
+        } else if self.memory_kib < DEFAULT_PARAMS.memory_kib || self.iterations < DEFAULT_PARAMS.iterations {
+            Some(Confirm::Weak { memory_mib, iterations: self.iterations })
+        } else {
+            None
+        }
+    }
+
+    /// Not lower than what an earlier sign-in saw (memory, passes and lanes each): a server that lowers them is making the
+    /// password cheaper to guess
+    pub fn below(&self, pinned: &KdfParams) -> bool {
+        self.memory_kib < pinned.memory_kib || self.iterations < pinned.iterations || self.parallelism < pinned.parallelism
     }
 }
 

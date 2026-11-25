@@ -24,6 +24,7 @@ pub mod phrase;
 pub mod sealedbox;
 pub mod secret;
 pub mod sig1;
+pub mod sync;
 
 #[cfg(test)]
 mod vectors;

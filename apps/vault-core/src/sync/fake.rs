@@ -371,7 +371,7 @@ impl Http for Fake {
             _ => "write",
         };
         if let Some(status) = self.status.get(route) {
-            return Ok(Response { status: *status, body: Zeroizing::new(Vec::new()) });
+            return Ok(Response { status: *status, body: Zeroizing::new(Vec::new()), headers: Vec::new() });
         }
         let (status, mut answer) = match route {
             "prelogin" => (200, self.prelogin()),
@@ -391,7 +391,7 @@ impl Http for Fake {
             }
             "slot" | "upload" | "info" | "bytes" | "drop" => {
                 let (status, body) = self.files(route, path.split('?').next().unwrap_or(""), &request.headers, &request.body);
-                return Ok(Response { status, body: Zeroizing::new(body) });
+                return Ok(Response { status, body: Zeroizing::new(body), headers: Vec::new() });
             }
             "destroy" => panic!("a permanent delete was asked for: {} {}", request.method, request.url),
             _ => {
@@ -404,7 +404,7 @@ impl Http for Fake {
             hook(&mut answer);
         }
         let body = if answer.is_null() { Vec::new() } else { serde_json::to_vec(&answer).unwrap_or_default() };
-        Ok(Response { status, body: Zeroizing::new(body) })
+        Ok(Response { status, body: Zeroizing::new(body), headers: Vec::new() })
     }
 }
 

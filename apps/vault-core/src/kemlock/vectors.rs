@@ -9,7 +9,7 @@ use super::item::{Kem1Body, Kem1Item, WireItem, item_aad, wrap_aad};
 use super::keys::{Child, PrivateKeys, child_key, password_wrap_key, root_wrap_aad, unwrap_root_key, user_key, wrap_root_key_with_nonce};
 use super::kx1::{Kx1PrivateKey, Kx1PublicKey};
 use super::manifest::{Entry, Manifest};
-use super::master::{DEFAULT_PARAMS, KdfParams, master_key};
+use super::master::{Confirm, DEFAULT_PARAMS, KdfParams, master_key};
 use super::sealedbox::{self, CONTEXT_DEVICE_APPROVAL, device_approval_aad};
 use super::sig1::{Sig1PrivateKey, Sig1PublicKey};
 use super::{Error, Key, RootKey, aead, kma1, opaque, phrase};
@@ -94,14 +94,14 @@ fn argon2id_master_key() {
 fn argon2id_settings_are_bounded() {
     let salt = [7u8; 16];
     let too = |p: KdfParams| matches!(master_key("pw", &salt, &p), Err(Error::Refused(_)));
-    assert!(too(KdfParams { memory_kib: 19_455, ..DEFAULT_PARAMS }));
+    assert!(too(KdfParams { memory_kib: 16_383, ..DEFAULT_PARAMS }));
     assert!(too(KdfParams { memory_kib: 1_048_577, ..DEFAULT_PARAMS }));
     assert!(too(KdfParams { iterations: 1, ..DEFAULT_PARAMS }));
-    assert!(too(KdfParams { iterations: 17, ..DEFAULT_PARAMS }));
+    assert!(too(KdfParams { iterations: 11, ..DEFAULT_PARAMS }));
     assert!(too(KdfParams { parallelism: 0, ..DEFAULT_PARAMS }));
     assert!(too(KdfParams { parallelism: 17, ..DEFAULT_PARAMS }));
     assert!(too(KdfParams { memory_kib: u32::MAX, iterations: u32::MAX, parallelism: u32::MAX }));
-    let small = KdfParams { memory_kib: 19_456, iterations: 2, parallelism: 1 };
+    let small = KdfParams { memory_kib: 16_384, iterations: 2, parallelism: 1 };
     assert!(master_key("pw", &salt, &small).is_ok());
     assert!(matches!(master_key("pw", &salt[..15], &small), Err(Error::Refused(_))));
     assert!(matches!(master_key("pw", &[0u8; 65], &small), Err(Error::Refused(_))));

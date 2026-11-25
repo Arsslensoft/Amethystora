@@ -117,6 +117,10 @@ pub struct Connection {
     /// the vault a few items at a time is stopped by the sum, which no one run shows
     #[serde(default)]
     pub recent: Vec<(i64, u32)>,
+    /// Present on a connection to Kemlock Server's own API (`kemlock::sync`): `user_key` is then the account's root key, `refresh` its
+    /// refresh token, and every kind is on until a person says otherwise
+    #[serde(default)]
+    pub kemlock: Option<crate::kemlock::sync::state::KemlockState>,
 }
 
 impl Drop for Connection {
@@ -128,6 +132,9 @@ impl Drop for Connection {
         }
         if let Some(key) = &mut self.api_key {
             key.secret.zeroize();
+        }
+        if let Some(state) = &mut self.kemlock {
+            state.dpop_key.zeroize();
         }
     }
 }
@@ -146,6 +153,7 @@ impl Connection {
         match self.kinds.get(kind).map(String::as_str) {
             Some("on" | "sealed") => "on",
             Some("off") => "off",
+            _ if self.kemlock.is_some() => "on",
             _ => kinds::default_choice(kind),
         }
     }
@@ -334,7 +342,7 @@ pub struct Report {
 }
 
 impl Report {
-    fn refuse(&mut self, what: &str, why: &str) {
+    pub fn refuse(&mut self, what: &str, why: &str) {
         self.refused_total += 1;
         if self.refused.len() < MOST_REFUSED {
             self.refused.push(json!({"item": what, "why": why}));
@@ -361,6 +369,8 @@ pub struct Outcome {
     pub files_read: bool,
     /// What is left to clean up on the server, for the connection to keep
     pub pending: Vec<Leftover>,
+    /// What a run on Kemlock's API keeps in the connection besides (`kemlock::sync`)
+    pub kemlock: Option<crate::kemlock::sync::state::News>,
 }
 
 // --- Logging in ------------------------------------------------------------------------------------------------------
@@ -507,6 +517,7 @@ pub fn finish(http: &mut dyn Http, pending: &Pending, extra: &Extra<'_>) -> Resu
         last: None,
         waiting_since_ms: None,
         recent: Vec::new(),
+        kemlock: None,
     };
     check_account(&sync, &connection)?;
     Ok((connection, access))
@@ -1294,7 +1305,7 @@ pub fn run(http: &mut dyn Http, convert: &dyn Convert, input: Input) -> Outcome 
             connection.choices.entry(format!("{}.{}", local.kind, local.id)).or_insert_with(|| "off".to_string());
         }
     }
-    let mut outcome = Outcome { problem: None, access: None, refresh: None, revision: None, groups: Vec::new(), report: Report::default(), churn: 0, accepted: accept, purge: Vec::new(), no_files: stored.clone(), files_read: connection.files_read, pending: connection.pending.clone() };
+    let mut outcome = Outcome { problem: None, access: None, refresh: None, revision: None, groups: Vec::new(), report: Report::default(), churn: 0, accepted: accept, purge: Vec::new(), no_files: stored.clone(), files_read: connection.files_read, pending: connection.pending.clone(), kemlock: None };
     // What is not known is not guessed: an item that did not read is not one that was removed, and links that did not read are
     // not an account never seen
     if links_unreadable {

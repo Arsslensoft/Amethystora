@@ -51,7 +51,7 @@ impl Http for Net {
         CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         URLS.lock().unwrap().push(request.url.clone());
         let headers: Vec<(String, String)> = request.headers.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
-        self.0.request(request.method, &request.url, &headers, &request.body).map(|(status, body)| Response { status, body }).map_err(|failure| NetFailure::from_name(failure.name()))
+        self.0.request(request.method, &request.url, &headers, &request.body).map(|(status, body)| Response { status, body, headers: Vec::new() }).map_err(|failure| NetFailure::from_name(failure.name()))
     }
 }
 
