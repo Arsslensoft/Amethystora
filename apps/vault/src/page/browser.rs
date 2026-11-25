@@ -53,7 +53,7 @@ impl Browser {
 
         let login = widgets::card();
         login.append(&widgets::h2(&t!("4. Sign in with the same account")));
-        login.append(&widgets::p(&t!("Use the email and password of the account Sync connected to. The extension then fills what syncs as Plain. Items that sync Sealed, and items that do not sync, stay on this computer and are not there. Sync says which kinds are which."), &["soft", "small"]));
+        login.append(&widgets::p(&t!("Use the email and password of the account Sync connected to. The extension then fills what syncs. Items that do not sync stay on this computer and are not there. Sync says which kinds are which."), &["soft", "small"]));
         page.append(&login);
 
         page.append(&widgets::callout(&t!("If your server's certificate comes from a certificate authority of your own, trust that authority in the browser as well, or the extension cannot reach the server.")));

@@ -242,8 +242,9 @@ fn choose(args: &Args) -> Result<(), u8> {
     Ok(())
 }
 
-/// `kind KIND off|on|sealed`: the one switch of a kind, in the words a person types (`passwords`, `codes`, `backup-codes`, `keys`, `certificates`, `files`)
+/// `kind KIND off|on`: the one switch of a kind, in the words a person types (`passwords`, `codes`, `backup-codes`, `keys`, `certificates`, `files`)
 fn kind(args: &Args) -> Result<(), u8> {
+    // `sealed` goes to the service all the same: it is the one that says, in a word of its own, that it is gone
     let (word, choice) = (args.word(2).ok_or(USAGE)?, args.word(3).ok_or(USAGE)?);
     if amethystora_vault_core::sync::kinds::ALL.iter().all(|(name, _)| *name != word) || !matches!(choice, "off" | "on" | "sealed") {
         return Err(USAGE);

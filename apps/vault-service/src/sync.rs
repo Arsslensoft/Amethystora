@@ -533,7 +533,12 @@ pub fn tick(service: &mut Service, now: Instant) {
 
 fn load_connection(store: &mut Store) -> Option<Connection> {
     let value = store.get(KIND_CONNECTION, CONNECTION_ID).ok()?;
-    serde_json::from_value(value).ok()
+    let mut connection: Connection = serde_json::from_value(value).ok()?;
+    // Sealed sync is gone: what an earlier version stored as `sealed` is `on`, and the next save says so
+    for choice in connection.kinds.values_mut().chain(connection.choices.values_mut()).filter(|choice| *choice == "sealed") {
+        *choice = "on".to_string();
+    }
+    Some(connection)
 }
 
 fn save_connection(store: &mut Store, connection: &Connection) -> Result<(), Trouble> {
@@ -1326,16 +1331,28 @@ fn off_next(service: &mut Service, peer: &Rc<Peer>, _body: &Value) -> Next {
     })())
 }
 
-/// What an item does in sync: `on` (its kind's default for the kinds that sync), `off`, or `sealed` (a secure note only this
-/// vault opens). Sending an item is a person's approved choice, and so is taking it off the server: the second moves its copy
-/// there to the trash.
+/// The word a person gave for what an item or a kind does: `on` or `off`. A request for `sealed` gets the refusal that says it is gone.
+fn choice_of(body: &Value) -> Result<String, Next> {
+    match text(body, "choice", 8) {
+        Some(choice @ ("on" | "off")) => Ok(choice.to_string()),
+        Some("sealed") => Err(Next::Answer(refused("sealed-gone"))),
+        _ => Err(Next::refuse(Refusal::BadRequest)),
+    }
+}
+
+/// What an item does in sync: `on` (its kind's default for the kinds that sync) or `off`. Sending an item is a person's approved
+/// choice, and so is taking it off the server: the second moves its copy there to the trash. `sealed` was a third choice once and is
+/// refused now, in a word of its own.
 fn choose_next(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Next {
     answer_or((|| {
         let uid = peer.uid;
         need_first(service, uid)?;
         let kind = text(body, "kind", 32).ok_or(Refusal::BadRequest)?.to_string();
         let id = text(body, "id", 64).ok_or(Refusal::BadRequest)?.to_string();
-        let choice = text(body, "choice", 8).filter(|choice| matches!(*choice, "on" | "off" | "sealed")).ok_or(Refusal::BadRequest)?.to_string();
+        let choice = match choice_of(body) {
+            Ok(choice) => choice,
+            Err(next) => return Ok(next),
+        };
         if !kinds::may_sync(&kind) || !amethystora_vault_core::protocol::valid_id(&id) {
             return Ok(Next::Answer(refused("not-syncable")));
         }
@@ -1371,25 +1388,24 @@ fn choose_next(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Next {
     })())
 }
 
-/// What a whole kind does in sync: `off`, `on` (plain: Bitwarden's own encryption alone, which every app of the account opens) or
-/// `sealed`. It covers every item of the kind, those set to ask every time and those added later included, and one question is asked for
-/// all of them: to send, an export of them; to stop, a use. An item's own choice still wins over it.
+/// What a whole kind does in sync: `off` or `on` (Bitwarden's own encryption alone, which every app of the account opens; a kind
+/// Bitwarden has no type for goes as a plain note). It covers every item of the kind, those set to ask every time and those added later
+/// included, and one question is asked for all of them: to send, an export of them; to stop, a use. An item's own choice still wins over it.
 fn kind_next(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Next {
     answer_or((|| {
         let uid = peer.uid;
         need_first(service, uid)?;
         let word = text(body, "kind", 32).ok_or(Refusal::BadRequest)?;
-        let choice = text(body, "choice", 8).filter(|choice| matches!(*choice, "on" | "off" | "sealed")).ok_or(Refusal::BadRequest)?.to_string();
+        let choice = match choice_of(body) {
+            Ok(choice) => choice,
+            Err(next) => return Ok(next),
+        };
         let Some((_, kind)) = kinds::ALL.iter().find(|(name, kind)| *name == word || *kind == word).copied() else { return Ok(Next::Answer(refused("not-syncable"))) };
         let Some(store) = service.first_open(uid) else { return Err(Refusal::Closed) };
         if load_connection(store).is_none() {
             return Ok(Next::Answer(refused("not-connected")));
         }
-        let message = match choice.as_str() {
-            "off" => say::SYNC_KIND_OFF,
-            "on" => say::SYNC_KIND_ON,
-            _ => say::SYNC_KIND_SEALED,
-        };
+        let message = if choice == "off" { say::SYNC_KIND_OFF } else { say::SYNC_KIND_ON };
         let off = choice == "off";
         let apply = move |service: &mut Service, peer: &Rc<Peer>| {
             let Some(store) = service.first_open(peer.uid) else { return Next::refuse(Refusal::Closed) };

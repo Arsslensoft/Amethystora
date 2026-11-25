@@ -71,15 +71,14 @@ impl SyncPage {
         goes.append(&widgets::h2(&t!("What goes there")));
         let kinds = ui::vbox(8, &[]);
         goes.append(&kinds);
-        goes.append(&widgets::p(&t!("Plain: Bitwarden's apps and browser extension on your other devices open it. The server's encryption is all that protects it."), &["soft", "small"]));
-        goes.append(&widgets::p(&t!("Sealed: a note only this vault opens, so even a broken server learns nothing of what it holds. Bitwarden's apps cannot read it, and another computer needs this vault restored with its recovery key."), &["soft", "small"]));
+        goes.append(&widgets::p(&t!("On: Bitwarden's apps and browser extension on your other devices open it. The server's encryption is all that protects it. What Bitwarden has no item type for, such as a key, a certificate or a file, goes as a plain secure note."), &["soft", "small"]));
         let caution = ui::vbox(6, &[]);
         goes.append(&caution);
         columns.append(&goes);
         page.append(&columns);
         let conflicts = ui::vbox(0, &[]);
         page.append(&conflicts);
-        page.append(&widgets::p(&t!("The server sees only encrypted items, but it can try to trick an app. Use a server you trust, and keep your most sensitive items set to Sealed."), &["soft", "small"]));
+        page.append(&widgets::p(&t!("The server sees only encrypted items, but it can try to trick an app. Use a server you trust, and keep your most sensitive items Off."), &["soft", "small"]));
         let root = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).hexpand(true).vexpand(true).child(&page).build();
         let this = Rc::new(SyncPage { vault: vault.clone(), root, head_chip, server, conflicts, columns, kinds, caution, me: std::cell::RefCell::new(std::rc::Weak::new()) });
         this.me.replace(Rc::downgrade(&this));
@@ -92,9 +91,9 @@ impl SyncPage {
         ui::clear(&self.kinds);
         ui::clear(&self.caution);
         for (name, state, tone) in [
-            (t!("Passwords"), t!("Plain"), "ok"),
-            (t!("Authenticator codes"), t!("Plain"), "ok"),
-            (t!("Backup codes"), t!("Plain"), "ok"),
+            (t!("Passwords"), t!("On"), "ok"),
+            (t!("Authenticator codes"), t!("On"), "ok"),
+            (t!("Backup codes"), t!("On"), "ok"),
             (t!("Keys"), t!("Off"), ""),
             (t!("Certificates"), t!("Off"), ""),
             (t!("Protected files"), t!("Off"), ""),
@@ -104,7 +103,7 @@ impl SyncPage {
         self.caution.append(&widgets::p(&t!("Bitwarden's own servers keep files at a storage host this vault does not use, so there only what fits one note or field syncs. Vaultwarden, or a server of your own, keeps everything."), &["soft", "small"]));
     }
 
-    /// With a server: one row a kind, Off, Plain and Sealed side by side, one click each. Each change is asked of the person by the
+    /// With a server: one row a kind, Off and On side by side, one click each. Each change is asked of the person by the
     /// service, once, and covers what is added later.
     fn connected_kinds(&self, status: &Value) {
         ui::clear(&self.kinds);
@@ -124,7 +123,7 @@ impl SyncPage {
             row.append(&words);
             let current = status["kinds"][word].as_str().unwrap_or("off").to_string();
             let vault = self.vault.clone();
-            row.append(&widgets::seg(&[("off", t!("Off")), ("on", t!("Plain")), ("sealed", t!("Sealed"))], &current, move |value| {
+            row.append(&widgets::seg(&[("off", t!("Off")), ("on", t!("On"))], &current, move |value| {
                 let (vault, value) = (vault.clone(), value.to_string());
                 glib::spawn_future_local(async move {
                     if let Err(trouble) = vault.call(json!({"op": "sync-kind", "kind": word, "choice": value})).await {

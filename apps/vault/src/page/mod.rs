@@ -963,8 +963,7 @@ impl Vault {
         card
     }
 
-    /// What the item does in sync, shown only while a server is connected: Off, Plain (Bitwarden's apps open it) or Sealed (a note only this
-    /// vault opens), side by side. With no choice of its own the item follows its kind, and says so; choosing what its kind does takes
+    /// What the item does in sync, shown only while a server is connected: Off or On (Bitwarden's apps open it), side by side. With no choice of its own the item follows its kind, and says so; choosing what its kind does takes
     /// its own away. A change is asked for, as the service asks it.
     ///
     /// `only_itself` is for what no kind covers (this computer's own identity certificate): it is off until its own choice says otherwise.
@@ -980,14 +979,14 @@ impl Vault {
                 return;
             }
             let this_item = format!("{kind}.{id}");
-            let own = status["choices"][&this_item].as_str().filter(|choice| matches!(*choice, "on" | "off" | "sealed")).map(str::to_string);
+            let own = status["choices"][&this_item].as_str().filter(|choice| matches!(*choice, "on" | "off")).map(str::to_string);
             // What it does with none of its own: its kind's, but an item that asks every time stays off until its kind was said for
             let word = amethystora_vault_core::sync::kinds::ALL.iter().find(|(_, of)| *of == kind).map_or("", |(word, _)| *word);
             let said = status["kinds_said"].as_array().is_some_and(|list| list.iter().any(|found| found == word));
             let inherited = if only_itself || (approval == "ask" && !said) { "off" } else { status["kinds"][word].as_str().unwrap_or("off") };
             let current = own.clone().unwrap_or_else(|| inherited.to_string());
             let weak = this.me.clone();
-            shown.append(&widgets::seg(&[("off", t!("Off")), ("on", t!("Plain")), ("sealed", t!("Sealed"))], &current, move |value| {
+            shown.append(&widgets::seg(&[("off", t!("Off")), ("on", t!("On"))], &current, move |value| {
                 let Some(this) = weak.upgrade() else { return };
                 let (value, id) = (value.to_string(), id.clone());
                 glib::spawn_future_local(async move {
@@ -997,7 +996,7 @@ impl Vault {
                     this.reload_current();
                 });
             }));
-            shown.append(&widgets::p(&t!("Plain: Bitwarden's apps open it. Only the server's encryption protects it. Sealed: encrypted once more with this vault's own key, so the account on the server cannot open it."), &["soft", "small"]));
+            shown.append(&widgets::p(&t!("On: Bitwarden's apps open it. Only the server's encryption protects it. A key, a certificate or a file goes as a plain secure note."), &["soft", "small"]));
             let sentence = if only_itself {
                 t!("This is the identity of this computer, so the choice for all certificates never covers it: only this choice does.")
             } else if own.is_some() {
@@ -1010,7 +1009,7 @@ impl Vault {
             let why = status["last"]["report"]["refused"].as_array().into_iter().flatten().find(|refused| refused["item"] == json!(this_item)).and_then(|refused| refused["why"].as_str());
             if let Some(why) = why {
                 let words = match why {
-                    "too-large-to-seal" | "file-too-large" => t!("It did not go: it is larger than this vault sends, so it stays on this computer only."),
+                    "file-too-large" => t!("It did not go: it is larger than this vault sends, so it stays on this computer only."),
                     "attachments-cloud" => t!("It did not go: Bitwarden's own servers keep files at a storage host this vault does not use, and this does not fit one note. It stays on this computer."),
                     "attachments-premium" => t!("It did not go: the account has no premium, which Bitwarden's server asks for files. It stays on this computer."),
                     "attachments-refused" => t!("It did not go: the server does not take files, or the account's room for them is spent. It stays on this computer."),

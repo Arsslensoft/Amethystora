@@ -1,6 +1,7 @@
 //! What each vault item becomes on the server, and back (plans/done/PLAN-vault.md's table): a password is a Login, an
-//! authenticator account the `totp` of its Login or a Login of its own, backup codes a secure note, and a key or certificate,
-//! when the person chooses it, a sealed secure note that only this vault opens. Nothing else ever goes.
+//! authenticator account the `totp` of its Login or a Login of its own, backup codes a secure note, and a key, certificate or file,
+//! when the person chooses it, a plain secure note or SSH key item (see `plain`). Nothing else ever goes. What an earlier version of this
+//! vault sealed into a note is only read here, for the one move of that note to its plain form.
 //!
 //! A cipher's fields belong to the vault items it carries. A field no item of the vault owns stays as the server has it, so
 //! that a Login's `totp` this vault cannot read, or its notes, are never wiped by an update.
@@ -145,24 +146,19 @@ pub struct Parts<'a> {
     pub password: Option<&'a Local>,
     pub account: Option<&'a Local>,
     pub codes: Option<&'a Local>,
-    pub sealed: Option<&'a Local>,
     /// Kinds the cipher carried and no longer does: their fields are cleared. A field no item ever owned is left alone.
     pub gone: Vec<&'a str>,
 }
 
-/// The name of every sealed note: it must not carry the item's own (spec 7)
-pub const SEALED_NAME: &str = "Amethystora sealed item";
 const SEALED_HEADER: &str = "amethystora-vault-sealed-1\n";
 /// The purpose of the vault's own key that sealed notes are under: another vault's never open here
 pub const SEALED_PURPOSE: &str = "sync-sealed";
 const SEALED_RECORD: &str = "item";
-/// The most a note's text may be: 10,000 characters of EncString (spec 7)
-pub const SEALED_MOST: usize = 7439;
+#[cfg(test)]
+const SEALED_MOST: usize = 7439;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unmapped {
-    /// Larger than a file of ours may be (the sealed blob of an item is at most what a note holds, or a file)
-    TooLargeToSeal,
     /// A file more than this client sends
     FileTooLarge,
     /// An authenticator account no link can say: an algorithm Bitwarden's apps do not read
@@ -173,18 +169,24 @@ pub enum Unmapped {
 /// What a sealed note says when its blob is the note's attachment: a blob of more than a note holds (spec 7) goes as a file
 pub const SEALED_ATTACHED: &str = "amethystora-vault-sealed-1\nattached";
 
-/// An item as the bytes a sealed note holds, under the vault's own sealing: its kind, id, name and value, so that a broken server
-/// learns its length and nothing more. `counter` is how many times this item has been sent: inside the seal, where a server cannot
-/// move it, so that an older copy of the note, which a server can keep, is told from a newer.
-pub fn sealed_bytes(local: &Local, key: &Key, vault: &str, counter: u64) -> Result<Vec<u8>, Unmapped> {
-    let inside = Zeroizing::new(serde_json::to_vec(&json!({"kind": local.kind, "id": local.id, "name": local.name, "meta": local.meta, "approval": local.approval, "value": local.value, "c": counter})).map_err(|_| Unmapped::Unreadable)?);
-    Ok(seal::seal_data(key, vault, SEALED_PURPOSE, SEALED_RECORD, &inside))
+/// An item as the bytes a sealed note held, under the vault's own sealing, as an earlier version wrote them: its kind, id, name and value.
+/// Nothing writes a note now, and a test makes one to have it read.
+#[cfg(test)]
+pub fn sealed_bytes(local: &Local, key: &Key, vault: &str, counter: u64) -> Vec<u8> {
+    let inside = Zeroizing::new(serde_json::to_vec(&json!({"kind": local.kind, "id": local.id, "name": local.name, "meta": local.meta, "approval": local.approval, "value": local.value, "c": counter})).unwrap());
+    seal::seal_data(key, vault, SEALED_PURPOSE, SEALED_RECORD, &inside)
 }
 
-/// The sealed note's text for an item, when it fits one note
-pub fn sealed_text(local: &Local, key: &Key, vault: &str, counter: u64) -> Result<Zeroizing<String>, Unmapped> {
-    let text = Zeroizing::new(format!("{SEALED_HEADER}{}", base64::engine::general_purpose::STANDARD.encode(sealed_bytes(local, key, vault, counter)?)));
-    if text.len() > SEALED_MOST { Err(Unmapped::TooLargeToSeal) } else { Ok(text) }
+/// What a note of an earlier version could not hold: its blob was a file of the note's own then
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct TooLarge;
+
+/// The sealed note's text for an item, when it fits one note (a test's)
+#[cfg(test)]
+pub fn sealed_text(local: &Local, key: &Key, vault: &str, counter: u64) -> Result<Zeroizing<String>, TooLarge> {
+    let text = Zeroizing::new(format!("{SEALED_HEADER}{}", base64::engine::general_purpose::STANDARD.encode(sealed_bytes(local, key, vault, counter))));
+    if text.len() > SEALED_MOST { Err(TooLarge) } else { Ok(text) }
 }
 
 /// A sealed note opened, if it is this vault's: anyone else's, or a changed one, does not open. And its counter, which is 0 for one
@@ -230,15 +232,8 @@ pub fn is_codes_note(content: &Content) -> bool {
 
 /// The content a cipher should have: what the server has, with the fields its vault items own replaced. A part that is gone
 /// clears its own fields, and leaves the rest.
-pub fn compose(old: Option<&Content>, parts: &Parts<'_>, sealed: Option<&str>) -> Result<Content, Unmapped> {
+pub fn compose(old: Option<&Content>, parts: &Parts<'_>) -> Result<Content, Unmapped> {
     let mut content = old.cloned().unwrap_or_default();
-    if let Some(sealed) = sealed {
-        content.kind = NOTE;
-        content.name = SEALED_NAME.to_string();
-        content.notes = Some(sealed.to_string());
-        content.marker = Some(MARKER_SEALED.to_string());
-        return Ok(content);
-    }
     if let Some(local) = parts.codes {
         let service = codes(local).ok_or(Unmapped::Unreadable)?;
         content.kind = NOTE;
@@ -465,12 +460,12 @@ mod tests {
     fn a_login_field_no_item_owns_is_left_as_it_is() {
         let old = Content { kind: LOGIN, name: "Site".into(), password: Some("p".into()), totp: Some("not a link at all !".into()), notes: Some("n".into()), ..Content::default() };
         let pw = local(KIND_PASSWORD, json!({"title": "Site", "password": "p2", "note": "n"}));
-        let new = compose(Some(&old), &Parts { password: Some(&pw), ..Parts::default() }, None).unwrap();
+        let new = compose(Some(&old), &Parts { password: Some(&pw), ..Parts::default() }).unwrap();
         // The password changed, the totp nobody here reads is untouched
         assert_eq!(new.password.as_deref(), Some("p2"));
         assert_eq!(new.totp.as_deref(), Some("not a link at all !"));
         // Once the vault removes the authenticator account the Login carried, its totp goes too
-        let gone = compose(Some(&old), &Parts { password: Some(&pw), gone: vec![KIND_ACCOUNT], ..Parts::default() }, None).unwrap();
+        let gone = compose(Some(&old), &Parts { password: Some(&pw), gone: vec![KIND_ACCOUNT], ..Parts::default() }).unwrap();
         assert_eq!(gone.totp, None);
     }
 
@@ -478,7 +473,7 @@ mod tests {
     fn an_authenticator_rides_in_its_login_and_a_counter_never_goes_back() {
         let account = Account { kind: Some(OtpKind::Hotp), issuer: "Example".into(), label: "me".into(), secret: Secret::new("JBSWY3DPEHPK3PXP"), counter: Some(7), ..Account::default() };
         let auth = local(KIND_ACCOUNT, serde_json::to_value(&account).unwrap());
-        let content = compose(None, &Parts { account: Some(&auth), ..Parts::default() }, None).unwrap();
+        let content = compose(None, &Parts { account: Some(&auth), ..Parts::default() }).unwrap();
         assert_eq!(content.name, "Example");
         assert!(content.totp.as_deref().unwrap().starts_with("otpauth://hotp/"));
         let mut behind = content.clone();
@@ -494,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sealed_note_opens_only_in_its_own_vault() {
+    fn an_old_sealed_note_opens_only_in_its_own_vault() {
         let key = Key::random();
         let item = local("key", json!({"private": "AAAA"}));
         let text = sealed_text(&item, &key, "v1", 3).unwrap();
@@ -504,7 +499,7 @@ mod tests {
         assert!(open_sealed(&text, &key, "v2").is_none());
         assert!(open_sealed(&text, &Key::random(), "v1").is_none());
         let big = local("certificate", json!({"pem": "x".repeat(6000)}));
-        assert_eq!(sealed_text(&big, &key, "v1", 1).err(), Some(Unmapped::TooLargeToSeal));
+        assert_eq!(sealed_text(&big, &key, "v1", 1).err(), Some(TooLarge));
         // Never a kind outside the sealed ones, whatever a sealed note says
         let sneaky = local("data-key", json!("00"));
         assert!(open_sealed(&sealed_text(&sneaky, &key, "v1", 1).unwrap(), &key, "v1").is_none());
