@@ -617,6 +617,12 @@ async function onMachine(m, names, results, journal, ready = false) {
       if (!result.passed && !process.env.VMLAB_NO_RETRY) {
         say(`${lane(m)}${name}: failed, once more`);
         const first = result;
+        // From a session that is up: a suite that failed may have left the shell stalled or the account signed out
+        try {
+          await agent(vm, { op: 'exec', timeout: 600, command: 'id -u tester >/dev/null 2>&1 || exit 0; systemctl restart gdm; for i in $(seq 100); do [ "$(loginctl show-user tester -p State --value 2>/dev/null)" = active ] && pgrep -u tester -x gnome-shell >/dev/null && break; sleep 5; done; sleep 30' }, 600);
+        } catch {
+          // The machine does not answer: the suite's own run says so
+        }
         result = await suite(m, name);
         result.retried = first.failures;
       }
