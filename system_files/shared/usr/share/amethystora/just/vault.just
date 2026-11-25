@@ -92,10 +92,10 @@ words := '''
 # N_ 'A program calling itself $(program) asks to let Amethystora Vault take, on its next sync, the items that went from the server or came from it.'
 # N_ 'A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the server it syncs with, as items that every Bitwarden app of that account opens, protected there by the encryption of the server alone. Those set to ask every time are included. A copy already there in another form is moved to the trash, or the fields the vault wrote are taken out of it.'
 # N_ 'A program calling itself $(program) asks to stop syncing every one of your $(item), which moves their copies on the server to the trash of the server, or takes the fields the vault wrote out of a copy that holds anything else.'
-# N_ 'A program calling itself $(program) asks to send “$(item)” to the Kemlock Server Amethystora Vault syncs with, as an item the Kemlock apps open, encrypted on this computer with the account's own keys.'
-# N_ 'A program calling itself $(program) asks to stop syncing “$(item)”, which removes its copy from the Kemlock Server Amethystora Vault syncs with.'
-# N_ 'A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the Kemlock Server it syncs with, as items the Kemlock apps open, encrypted on this computer with the account's own keys. Those set to ask every time are included.'
-# N_ 'A program calling itself $(program) asks to stop syncing every one of your $(item), which removes their copies from the Kemlock Server Amethystora Vault syncs with.'
+# N_ 'A program calling itself $(program) asks to send “$(item)” to the Kemlock Server Amethystora Vault syncs with, as an item the Kemlock apps open, encrypted on this computer with the keys of the account.'
+# N_ 'A program calling itself $(program) asks to stop syncing “$(item)”. Its copy on the Kemlock Server Amethystora Vault syncs with is removed if the vault made it, and stays there as it is if a Kemlock app made it.'
+# N_ 'A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the Kemlock Server it syncs with, as items the Kemlock apps open, encrypted on this computer with the keys of the account. Those set to ask every time are included.'
+# N_ 'A program calling itself $(program) asks to stop syncing every one of your $(item). Their copies on the Kemlock Server Amethystora Vault syncs with are removed where the vault made them, and stay there as they are where a Kemlock app made them.'
 
 # Set up a vault on this account: password, approval (fingerprint or account password) or no-prompt. It ends with a recovery key that you type back
 [positional-arguments]
@@ -562,6 +562,8 @@ sync *ARGS:
         --say-sync-kemlock="$(gettext 'This is a Kemlock Server, and the vault synced with its own API: every kind of item goes, and the Kemlock apps open them.')"
         --say-sync-enrolled="$(gettext "This account was made through Bitwarden's API, so the Bitwarden hash of its master password was sent to the server once, to give the account its Kemlock keys. From now on the password signs in to both.")"
         --say-sync-moved="$(gettext "The vault's items were moved from their Bitwarden copies to Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more.")"
+        --say-sync-move-first="$(gettext "This vault syncs with this server through Bitwarden's API. Moving to the Kemlock API writes the vault's items there as Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more, so Bitwarden's apps and browser extension will not see what changes from now on.")"
+        --say-sync-move-ask="$(gettext 'Type yes to move to the Kemlock API: ')"
         --say-sync-code-app="$(gettext 'Code from your authenticator app: ')"
         --say-sync-code-email="$(gettext 'Code sent to your email: ')"
         --say-sync-code-yubikey="$(gettext 'Touch your YubiKey: ')"
@@ -704,7 +706,7 @@ sync *ARGS:
             if [[ "$1" == off ]]; then gettext "Sync is off. The vault and the account keep what they have."; echo; fi
             ;;
         *)
-            echo "usage: ame vault sync connect ADDRESS | now [accept] | status | off | kind KIND off|on | choose KIND ID on|off (KIND of kind is passwords, codes, backup-codes, keys, certificates or files; on goes plain)"
+            echo "usage: ame vault sync connect ADDRESS [kemlock|bitwarden] | now [accept] | status | off | kind KIND off|on | choose KIND ID on|off (KIND of kind is passwords, codes, backup-codes, keys, certificates or files; on goes plain)"
             exit 64
             ;;
     esac

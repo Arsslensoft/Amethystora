@@ -277,6 +277,20 @@ fn connect(args: &Args) -> Result<(), u8> {
         Some(word @ ("kemlock" | "bitwarden")) => Some(word),
         Some(_) => return Err(USAGE),
     };
+    // Choosing the Kemlock API for a vault that syncs through Bitwarden's moves it, and the person is told what that does before anything is asked
+    let mut reconnect = false;
+    if backend == Some("kemlock") {
+        let status = ask(json!({"op": "sync-status"}))?;
+        if status["connected"] == json!(true) {
+            reconnect = true;
+            if status["backend"] != json!("kemlock") {
+                eprintln!("{}", said(args, "say-sync-move-first", "This vault syncs with this server through Bitwarden's API. Moving to the Kemlock API writes the vault's items there as Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more, so Bitwarden's apps and browser extension will not see what changes from now on.", &[]));
+                if plain(&said(args, "say-sync-move-ask", "Type yes to move to the Kemlock API: ", &[])).as_deref() != Some("yes") {
+                    return Err(1);
+                }
+            }
+        }
+    }
     eprintln!("{}", said(args, "say-sync-intro", "This sends what the vault holds that syncs to the server, encrypted, and keeps it in step. Whoever opens this vault can reach that whole account, so a dedicated account is the better choice.", &[]));
     let address = address.to_string();
     let email = plain(&said(args, "say-sync-email", "Email address of the account: ", &[])).ok_or(1u8)?;
@@ -285,6 +299,9 @@ fn connect(args: &Args) -> Result<(), u8> {
     let mut request = json!({"op": "sync-connect", "address": address, "email": email});
     if let Some(backend) = backend {
         request["backend"] = json!(backend);
+    }
+    if reconnect {
+        request["reconnect"] = json!(true);
     }
     if method == "key" {
         let id = plain(&said(args, "say-sync-api-id", "API key client_id: ", &[])).ok_or(1u8)?;

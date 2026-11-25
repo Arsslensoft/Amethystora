@@ -5,7 +5,7 @@
 //! Everything else is `sync.rs`'s: the hub that says when a run starts, the thread it runs on, the slices its result is put in
 //! place in. A Kemlock run is the same `Outcome`, with a little more for the connection to keep (`News`).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::Path;
@@ -82,26 +82,52 @@ pub struct PersistRequest {
 pub struct Persists {
     pub queue: Arc<Mutex<VecDeque<PersistRequest>>>,
     pub wake: Arc<Mutex<Option<Arc<OwnedFd>>>>,
+    /// The newest refresh token each account's connection could not take (the vault closed, or another opened, before the loop wrote it),
+    /// with the device it belongs to: the server spent the old one, so this one is all there is of the session. It stays in memory until the
+    /// vault is open and a run writes it into the connection, and is never written anywhere else.
+    kept: Arc<Mutex<HashMap<u32, (String, Zeroizing<String>)>>>,
 }
 
 impl Persists {
     /// What a run's thread calls with each new refresh token: true once the connection holds it. It waits, within reason, for the
     /// loop, which is woken through the same pipe a finished job uses.
-    pub fn persister(&self, uid: u32, closes: u64) -> Box<dyn Fn(&str) -> bool + Send> {
-        let (queue, wake) = (self.queue.clone(), self.wake.clone());
+    pub fn persister(&self, uid: u32, closes: u64, device: String) -> Box<dyn Fn(&str) -> bool + Send> {
+        let (queue, wake, held) = (self.queue.clone(), self.wake.clone(), self.clone());
         Box::new(move |refresh: &str| {
             let (ack, answer) = sync_channel(1);
-            let Ok(mut waiting) = queue.lock() else { return false };
-            waiting.push_back(PersistRequest { uid, closes, refresh: Zeroizing::new(refresh.to_string()), ack });
-            drop(waiting);
-            if let Ok(wake) = wake.lock()
-                && let Some(fd) = wake.as_ref()
-            {
+            let sent = queue.lock().is_ok_and(|mut waiting| {
+                waiting.push_back(PersistRequest { uid, closes, refresh: Zeroizing::new(refresh.to_string()), ack });
+                true
+            });
+            if sent && let Ok(wake) = wake.lock() && let Some(fd) = wake.as_ref() {
                 // SAFETY: one byte from a live buffer, to the loop's own pipe, which this holds a reference to
                 unsafe { libc::write(fd.as_raw_fd(), [1u8].as_ptr().cast(), 1) };
             }
-            answer.recv_timeout(Duration::from_secs(60)).unwrap_or(false)
+            let kept = sent && answer.recv_timeout(Duration::from_secs(60)).unwrap_or(false);
+            // The run stops when the connection did not take it, and the next one starts from it
+            if kept {
+                held.forget(uid);
+            } else {
+                held.keep(uid, &device, refresh);
+            }
+            kept
         })
+    }
+
+    pub(crate) fn keep(&self, uid: u32, device: &str, refresh: &str) {
+        if let Ok(mut kept) = self.kept.lock() {
+            kept.insert(uid, (device.to_string(), Zeroizing::new(refresh.to_string())));
+        }
+    }
+
+    pub(crate) fn forget(&self, uid: u32) {
+        if let Ok(mut kept) = self.kept.lock() {
+            kept.remove(&uid);
+        }
+    }
+
+    pub(crate) fn kept_for(&self, uid: u32) -> Option<(String, Zeroizing<String>)> {
+        self.kept.lock().ok().and_then(|kept| kept.get(&uid).cloned())
     }
 }
 
@@ -264,6 +290,11 @@ pub fn carry_over(connection: &mut Connection, old: &Connection, links: &[Link],
             state.moved = Some(MoveRecord { started_ms: now_ms, ..MoveRecord::default() });
         }
         connection.device = old.device.clone();
+        // A kind that was off only because Bitwarden's default is off stays off: the Kemlock API's default is On for every kind, which would send
+        // keys, certificates and protected files after the one question about moving, where Bitwarden asks for each kind
+        for kind in amethystora_vault_core::sync::kinds::OFF_BY_DEFAULT {
+            connection.kinds.entry((*kind).to_string()).or_insert_with(|| "off".to_string());
+        }
     } else if let (Some(state), Some(old_state)) = (connection.kemlock.as_mut(), old.kemlock.as_ref()) {
         state.opaque_seen |= old_state.opaque_seen;
         state.bitwarden_device = old_state.bitwarden_device.clone();

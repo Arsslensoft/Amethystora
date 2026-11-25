@@ -15,8 +15,9 @@ from then on the address is on *What this machine sends* (`ame security sends`).
 
 ### Kemlock Server
 
-The vault asks the server what it is: one that answers like a Kemlock Server is connected through its own API, with nothing to
-choose. A connection is one back end, a Kemlock Server or a Vaultwarden or Bitwarden one; `ame vault sync status` and **Sync** say which.
+For a new connection the vault asks the server what it is: one that answers like a Kemlock Server is connected through its own API, with nothing to
+choose. A connection stays on the API it has: one made through Bitwarden's API moves to Kemlock's only when you choose it, with
+`ame vault sync connect ADDRESS kemlock` or **Move to Kemlock's own items** on the **Sync** page, which say first what it does and ask. A connection is one back end, a Kemlock Server or a Vaultwarden or Bitwarden one; `ame vault sync status` and **Sync** say which.
 `ame vault sync connect ADDRESS bitwarden` uses the Bitwarden API of a Kemlock Server instead.
 
 - **What syncs.** Every kind, plain, as Kemlock's own items (a login, a code, backup codes, an SSH key, a key, a certificate, a note),
@@ -28,8 +29,10 @@ choose. A connection is one back end, a Kemlock Server or a Vaultwarden or Bitwa
   an authenticator code, an email code (sent when asked for) or a recovery code, which turns the account's second steps off, so it says
   so first. Passkeys and single sign-on are not done. An account made through Bitwarden's API is enrolled the first time: the Bitwarden
   hash of the password is sent once to give it Kemlock keys, and the terminal says so.
-- **The move.** Items the vault already holds in an account as Bitwarden copies move to Kemlock's own items when you connect. They keep
-  their ids; the Bitwarden copies are left on the server as they are and are not updated any more; nothing is deleted.
+- **The move.** Only when you choose it, items the vault already holds in an account as Bitwarden copies move to Kemlock's own items. They keep
+  their ids; the Bitwarden copies are left on the server as they are and are not updated any more, so Bitwarden's apps and browser extension no
+  longer see what changes; nothing is deleted. Keys, certificates and files that were Off stay Off until you turn them On. Turning a kind or an
+  item off later removes from the server only the copies the vault made; what a Kemlock app made stays there.
 - **Not done:** spaces, Sends, emergency access and live updates (the vault looks every 15 minutes, as it always does).
 - **Tried** against Kemlock Server's own image. Bitwarden's extension does not read these items: open them in the Kemlock app or web vault.
 

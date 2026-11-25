@@ -17376,19 +17376,19 @@ msgid "A program calling itself $(program) asks to stop syncing every one of you
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "A program calling itself $(program) asks to send “$(item)” to the Kemlock Server Amethystora Vault syncs with, as an item the Kemlock apps open, encrypted on this computer with the account"
+msgid "A program calling itself $(program) asks to send “$(item)” to the Kemlock Server Amethystora Vault syncs with, as an item the Kemlock apps open, encrypted on this computer with the keys of the account."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "A program calling itself $(program) asks to stop syncing “$(item)”, which removes its copy from the Kemlock Server Amethystora Vault syncs with."
+msgid "A program calling itself $(program) asks to stop syncing “$(item)”. Its copy on the Kemlock Server Amethystora Vault syncs with is removed if the vault made it, and stays there as it is if a Kemlock app made it."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the Kemlock Server it syncs with, as items the Kemlock apps open, encrypted on this computer with the account"
+msgid "A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the Kemlock Server it syncs with, as items the Kemlock apps open, encrypted on this computer with the keys of the account. Those set to ask every time are included."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "A program calling itself $(program) asks to stop syncing every one of your $(item), which removes their copies from the Kemlock Server Amethystora Vault syncs with."
+msgid "A program calling itself $(program) asks to stop syncing every one of your $(item). Their copies on the Kemlock Server Amethystora Vault syncs with are removed where the vault made them, and stay there as they are where a Kemlock app made them."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -17698,6 +17698,14 @@ msgstr ""
 
 #: usr/share/amethystora/just/vault.just
 msgid "The vault's items were moved from their Bitwarden copies to Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This vault syncs with this server through Bitwarden's API. Moving to the Kemlock API writes the vault's items there as Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more, so Bitwarden's apps and browser extension will not see what changes from now on."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Type yes to move to the Kemlock API: "
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just

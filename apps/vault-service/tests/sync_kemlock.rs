@@ -701,20 +701,15 @@ fn the_new_refresh_token_is_kept_before_it_is_used_and_a_token_that_was_not_kept
         assert_eq!(after.last().map(String::as_str), Some("POST /kem/v1/auth/token"), "the new token was used: {after:?}");
         assert!(after.iter().filter(|line| line.contains("/items") || line.contains("manifest")).all(|line| line.starts_with("GET")), "{after:?}");
     }
-    // The connection still holds what it held, which the server has spent: a refresh with it is a reuse and ends the session. The run
-    // that follows says so and tries once, never again with the same token.
+    // The connection still holds what it held, which the server has spent, but the service kept the new token in memory: the run that
+    // follows writes it into the connection first and goes on from it. A refresh with the spent one would be a reuse, which ends the session.
     assert_eq!(rig.connection()["refresh"].as_str().unwrap(), held);
     rig.idle();
-    let tokens = rig.token_requests();
-    let seen_before = rig.kem.lock().unwrap().seen.len();
     let answer = rig.sync_now();
-    assert_eq!(answer["ok"], json!(false), "{answer}");
-    assert_eq!(answer["problem"]["name"], json!("session-ended"), "{answer}");
-    let after: Vec<String> = rig.kem.lock().unwrap().seen[seen_before..].iter().map(|seen| format!("{} {} {}", seen.method, seen.path(), seen.body.chars().take(60).collect::<String>())).collect();
-    // The first request of a run has no nonce yet: the server asks for one (before it looks at the token), and the same request is made once more with it
-    assert!((tokens + 1..=tokens + 2).contains(&rig.token_requests()), "{after:?}");
-    assert_eq!(rig.sessions(), 0);
-    assert_eq!(rig.status()["problem"]["name"], json!("session-ended"));
+    assert_eq!(answer["ok"], json!(true), "{answer}");
+    assert_ne!(rig.connection()["refresh"].as_str().unwrap(), held, "the token the loop never heard of is the one the connection holds now");
+    assert_eq!(rig.sessions(), 1);
+    assert_eq!(rig.status()["problem"], Value::Null);
 }
 
 #[test]
@@ -904,6 +899,9 @@ fn a_vault_synced_with_bitwarden_moves_to_the_kemlock_server_of_the_same_account
     let rig = rig("kem-move", Settings::default());
     rig.set_up();
     rig.password("p1", "Example", "person", "pw one", "https://example.test/login");
+    // A key, which Bitwarden's connection leaves at home until it is chosen
+    let (key, _) = key_value();
+    rig.put("key", "k1", "A key", json!({"key_kind": "exchange", "exportable": true}), key);
     // The Kemlock app's own item, on the Kemlock Server, and its copy on the Bitwarden API, as that app writes both: a Login with the hidden
     // `Kemlock` field that names its entry
     let entry = "1b712e6d-bbb9-4f9c-acf2-d3aad29f7257";
@@ -953,8 +951,15 @@ fn a_vault_synced_with_bitwarden_moves_to_the_kemlock_server_of_the_same_account
     assert_eq!(rig.status()["backend"], json!("bitwarden"));
     assert_eq!(rig.items("sync-account").len(), 1);
 
+    // Without the Kemlock API chosen, a reconnection stays on Bitwarden's: the Kemlock server is not even asked, and nothing moves
     let mut request = rig.connection_request();
     request["reconnect"] = json!(true);
+    let answer = rig.talk().ask(request.clone());
+    assert_eq!(answer["ok"], json!(false), "{answer}");
+    assert_eq!(rig.kem.lock().unwrap().requests_to("/kem/v1/"), 0, "the Kemlock API was not asked");
+    assert_eq!(rig.status()["backend"], json!("bitwarden"));
+    // Chosen, it moves
+    request["backend"] = json!("kemlock");
     let answer = rig.talk().ask(request);
     assert_eq!((answer["ok"].clone(), answer["backend"].clone(), answer["moved"].clone()), (json!(true), json!("kemlock"), json!(true)), "{answer}");
     let status = until(|| {
@@ -962,6 +967,11 @@ fn a_vault_synced_with_bitwarden_moves_to_the_kemlock_server_of_the_same_account
         (status["backend"] == json!("kemlock") && status["moved"]["finished_ms"].is_number() && status["running"] != json!(true)).then_some(status)
     });
     assert_eq!(status["problem"], Value::Null, "{status}");
+    // A kind that was off on Bitwarden's connection only by default is still off: no key was sent after the one question about moving
+    for word in ["keys", "certificates", "files"] {
+        assert_eq!(status["kinds"][word], json!("off"), "{word}: {status}");
+    }
+    assert_eq!(status["kinds"]["passwords"], json!("on"));
     // The server holds the login of the Kemlock app once, as the app wrote it, and the vault's own login under its id
     let items = rig.server_items();
     assert_eq!(items.len(), 2, "{items:?}");
@@ -1029,4 +1039,28 @@ fn a_wrong_password_connects_nothing_and_a_closed_vault_syncs_nothing() {
     assert_eq!(rig.ask(json!({"op": "unlock", "method": "password", "secret": b64(VAULT_PASSWORD)}))["ok"], json!(true));
     until(|| (rig.kem.lock().unwrap().seen.len() > seen).then_some(()));
     rig.synced();
+}
+
+#[test]
+fn a_kemlock_connection_never_falls_back_to_bitwardens_login_when_the_server_does_not_answer_like_one() {
+    let rig = rig("kem-downgrade", Settings::default());
+    rig.set_up();
+    rig.password("p1", "Example", "person", "pw", "");
+    assert_eq!(rig.connect()["ok"], json!(true));
+    rig.synced();
+    // The question that finds a Kemlock Server fails on the next connection: a hostile or broken server, a proxy
+    rig.kem.lock().unwrap().config_override = Some((503, json!({})));
+    let seen = rig.kem.lock().unwrap().seen.len();
+    let mut request = rig.connection_request();
+    request["reconnect"] = json!(true);
+    let answer = rig.talk().ask(request);
+    assert_eq!(answer["ok"], json!(false), "{answer}");
+    // No Bitwarden prelogin or login went to the server, which is where the master password's Bitwarden hash would have gone
+    let after: Vec<String> = rig.kem.lock().unwrap().seen[seen..].iter().map(|seen| seen.path()).collect();
+    assert!(after.iter().all(|path| !path.contains("/identity/") && !path.contains("/api/")), "{after:?}");
+    // And the connection is what it was
+    rig.kem.lock().unwrap().config_override = None;
+    rig.idle();
+    let status = rig.status();
+    assert_eq!((status["backend"].clone(), status["connected"].clone()), (json!("kemlock"), json!(true)), "{status}");
 }

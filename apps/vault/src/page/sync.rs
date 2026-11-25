@@ -275,6 +275,14 @@ impl SyncPage {
         row.append(&btn(&t!("Sync now"), Some("refresh"), &["primary"], move || now.in_terminal(&["ame", "vault", "sync", "now"])));
         row.append(&btn(&t!("Disconnect"), None, &["danger"], move || off.in_terminal(&["ame", "vault", "sync", "off"])));
         server.append(&row);
+        // The move to Kemlock's own items is the person's choice, said here and again in the terminal, where it is asked: the Bitwarden copies stop being updated
+        if !is_kemlock(status) && let Some(address) = status["address"].as_str().filter(|address| address.starts_with("https://")) {
+            server.append(&widgets::p(&t!("If this is a Kemlock Server, the vault's items can move from their Bitwarden copies to Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more, so Bitwarden's apps and browser extension will not see what changes after that."), &["soft", "small"]));
+            let (vault, address) = (self.vault.clone(), address.to_string());
+            let button = btn(&t!("Move to Kemlock's own items"), None, &["small"], move || vault.in_terminal(&["ame", "vault", "sync", "connect", address.as_str(), "kemlock"]));
+            button.set_halign(gtk::Align::Start);
+            server.append(&button);
+        }
         ui::clear(&self.conflicts);
         // What the last run did to items changed in both places: both were kept
         let report = &status["last"]["report"];

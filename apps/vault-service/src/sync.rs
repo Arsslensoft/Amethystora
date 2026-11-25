@@ -659,11 +659,26 @@ fn prepare_run(service: &mut Service, uid: u32, manual: bool, accept: bool) -> R
     let closes = service.closes_so_far(uid);
     let full = service.sync.users.get(&uid).is_some_and(|user| user.full) || manual;
     let access = service.sync.users.get_mut(&uid).and_then(|user| user.access.take());
+    let kept = service.sync.persists.kept_for(uid);
     let Some(store) = service.first_open(uid) else { return Err(Refusal::Closed) };
-    let Some(connection) = load_connection(store) else { return Err(Refusal::Refused) };
+    let Some(mut connection) = load_connection(store) else { return Err(Refusal::Refused) };
+    // A refresh token the connection could not take when it was given (the vault closed on the run): written now that the vault is open, over the
+    // spent one it holds
+    let mut written = false;
+    let kept = match (kept, connection.kemlock.as_ref()) {
+        (Some((device, refresh)), Some(state)) if state.device_id == device && connection.api_key.is_none() => Some(refresh),
+        _ => None,
+    };
+    if let Some(refresh) = kept {
+        connection.refresh = Some(refresh.to_string());
+        written = save_connection(store, &connection).is_ok();
+    }
     let Gathered { links, locals, unreadable, links_unreadable } = gather(store, &connection);
     let sealing = Some((store.key().copy(), store.id().to_string()));
     let writer = store.batch_writer();
+    if written {
+        service.sync.persists.forget(uid);
+    }
     let Some(busy) = service.sync.take_busy(uid) else {
         // Put the token back: this run did not start
         if let Some(user) = service.sync.users.get_mut(&uid) {
@@ -677,7 +692,7 @@ fn prepare_run(service: &mut Service, uid: u32, manual: bool, accept: bool) -> R
     let cancel = service.sync.start_running(uid);
     let limit = service.sync.run_limit;
     let held = busy.clone();
-    let persist = connection.kemlock.is_some().then(|| service.sync.persists.persister(uid, closes));
+    let persist = connection.kemlock.as_ref().map(|state| service.sync.persists.persister(uid, closes, state.device_id.clone()));
     let job = move || -> Done {
         let _held = held;
         let now_ms = merge::now_ms();
@@ -1237,6 +1252,8 @@ fn start_connect(service: &mut Service, peer: &Rc<Peer>, attempt: Attempt) -> Ne
         };
         let (kem_email, kem_address) = (attempt.email.clone(), attempt.server.address.clone());
         let backend = attempt.backend;
+        // Which API the connection being replaced was on, if there is one: a connection stays on its own unless the person chooses the other
+        let was_kemlock = old.as_ref().map(|old| old.kemlock.is_some());
         let job = move || -> Step {
             let _busy = busy;
             let mut http = match NetHttp::open(&net, &server, keep_ca.as_deref(), keep_pin.as_deref(), cancel, Instant::now() + limit) {
@@ -1244,11 +1261,15 @@ fn start_connect(service: &mut Service, peer: &Rc<Peer>, attempt: Attempt) -> Ne
                 Err(failure) => return Step::Problem(Problem::Net(failure)),
             };
             let Attempt { server, email, password, api_key, confirmed, two_factor, new_device, email_code, resend_device, .. } = attempt;
-            // The server's own word decides which API: a Kemlock Server is signed in to on its own, a Vaultwarden or Bitwarden as ever
-            let kemlock = match backend {
-                Some("bitwarden") => false,
-                Some(_) => true,
-                None => api_key.is_none() && crate::sync_kemlock::discover(&mut http, &server).is_some(),
+            // A new connection goes by the server's own word: a Kemlock Server is signed in to on its own, a Vaultwarden or Bitwarden as ever. A
+            // connection that exists stays on its API: a Kemlock one never falls back to Bitwarden's login because a question failed (which would
+            // send the master password's Bitwarden hash, the one thing its no-downgrade record is there to stop), and a Bitwarden one moves to
+            // Kemlock's own items only when the person chose `kemlock`.
+            let kemlock = match (backend, was_kemlock) {
+                (Some("bitwarden"), _) => false,
+                (Some(_), _) | (None, Some(true)) => true,
+                (None, Some(false)) => false,
+                (None, None) => api_key.is_none() && crate::sync_kemlock::discover(&mut http, &server).is_some(),
             };
             if kemlock {
                 let Ok(text) = std::str::from_utf8(&password) else { return Step::Problem(Problem::BadResponse) };
