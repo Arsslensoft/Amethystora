@@ -701,13 +701,13 @@ fn the_new_refresh_token_is_kept_before_it_is_used_and_a_token_that_was_not_kept
         assert_eq!(after.last().map(String::as_str), Some("POST /kem/v1/auth/token"), "the new token was used: {after:?}");
         assert!(after.iter().filter(|line| line.contains("/items") || line.contains("manifest")).all(|line| line.starts_with("GET")), "{after:?}");
     }
-    // The connection still holds what it held, which the server has spent, but the service kept the new token in memory: the run that
-    // follows writes it into the connection first and goes on from it. A refresh with the spent one would be a reuse, which ends the session.
-    assert_eq!(rig.connection()["refresh"].as_str().unwrap(), held);
+    // The run hands back the new token, never the one the server has spent: with the vault open its end writes it into the connection
+    // (closed, the service keeps it in memory for the next run). A refresh with the spent one would be a reuse, which ends the session.
+    assert_ne!(rig.connection()["refresh"].as_str().unwrap(), held);
     rig.idle();
     let answer = rig.sync_now();
     assert_eq!(answer["ok"], json!(true), "{answer}");
-    assert_ne!(rig.connection()["refresh"].as_str().unwrap(), held, "the token the loop never heard of is the one the connection holds now");
+    assert_ne!(rig.connection()["refresh"].as_str().unwrap(), held, "the spent token never comes back");
     assert_eq!(rig.sessions(), 1);
     assert_eq!(rig.status()["problem"], Value::Null);
 }
@@ -946,6 +946,7 @@ fn a_vault_synced_with_bitwarden_moves_to_the_kemlock_server_of_the_same_account
     other["email"] = json!("someone@else.test");
     other["secret"] = json!(b64("another password"));
     other["reconnect"] = json!(true);
+    other["backend"] = json!("kemlock");
     let answer = rig.talk().ask(other);
     assert_eq!((answer["ok"].clone(), answer["problem"].clone()), (json!(false), json!("other-account")), "{answer}");
     assert_eq!(rig.status()["backend"], json!("bitwarden"));
@@ -954,9 +955,10 @@ fn a_vault_synced_with_bitwarden_moves_to_the_kemlock_server_of_the_same_account
     // Without the Kemlock API chosen, a reconnection stays on Bitwarden's: the Kemlock server is not even asked, and nothing moves
     let mut request = rig.connection_request();
     request["reconnect"] = json!(true);
+    let asked = rig.kem.lock().unwrap().requests_to("/kem/v1/");
     let answer = rig.talk().ask(request.clone());
     assert_eq!(answer["ok"], json!(false), "{answer}");
-    assert_eq!(rig.kem.lock().unwrap().requests_to("/kem/v1/"), 0, "the Kemlock API was not asked");
+    assert_eq!(rig.kem.lock().unwrap().requests_to("/kem/v1/"), asked, "the Kemlock API was not asked");
     assert_eq!(rig.status()["backend"], json!("bitwarden"));
     // Chosen, it moves
     request["backend"] = json!("kemlock");
