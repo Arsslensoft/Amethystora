@@ -1,17 +1,29 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/amethystora-wordmark-dark.png">
+    <img alt="Amethystora" src=".github/assets/amethystora-wordmark-light.png" width="360">
+  </picture>
+</p>
+
+<h3 align="center">The cloud-native desktop, built on Fedora</h3>
+
+<p align="center">
+  <a href="https://github.com/arsslensoft/amethystora/actions/workflows/build-image-stable.yml"><img alt="Stable Images" src="https://github.com/arsslensoft/amethystora/actions/workflows/build-image-stable.yml/badge.svg"></a>
+  <a href="https://github.com/arsslensoft/amethystora/actions/workflows/build-image-latest-main.yml"><img alt="Latest Images" src="https://github.com/arsslensoft/amethystora/actions/workflows/build-image-latest-main.yml/badge.svg"></a>
+  <a href="https://github.com/arsslensoft/amethystora/actions/workflows/checks.yml"><img alt="Checks" src="https://github.com/arsslensoft/amethystora/actions/workflows/checks.yml/badge.svg"></a>
+  <a href="https://github.com/arsslensoft/amethystora/actions/workflows/unit.yml"><img alt="Unit" src="https://github.com/arsslensoft/amethystora/actions/workflows/unit.yml/badge.svg"></a>
+  <a href="https://github.com/arsslensoft/amethystora/actions/workflows/integration.yml"><img alt="Integration" src="https://github.com/arsslensoft/amethystora/actions/workflows/integration.yml/badge.svg"></a>
+  <a href="https://github.com/arsslensoft/amethystora/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/arsslensoft/amethystora/actions/workflows/codeql.yml/badge.svg"></a>
+  <br>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/Arsslensoft/amethystora"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/Arsslensoft/amethystora/badge"></a>
+  <a href="LICENSE"><img alt="Licence: Apache-2.0" src="https://img.shields.io/badge/licence-Apache--2.0-blue"></a>
+  <a href="https://github.com/arsslensoft/amethystora/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/arsslensoft/amethystora?display_name=tag"></a>
+  <a href="cosign.pub"><img alt="Signed with cosign" src="https://img.shields.io/badge/images-signed%20with%20cosign-6f42c1"></a>
+  <a href="CONTRIBUTING.md#signing-off-dco"><img alt="DCO: signed off" src="https://img.shields.io/badge/DCO-signed--off-3fb950"></a>
+  <a href="https://www.conventionalcommits.org/en/v1.0.0/"><img alt="Conventional Commits" src="https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196?logo=conventionalcommits&logoColor=white"></a>
+</p>
+
 # Amethystora
-
-[![Stable Images](https://github.com/arsslensoft/amethystora/actions/workflows/build-image-stable.yml/badge.svg)](https://github.com/arsslensoft/amethystora/actions/workflows/build-image-stable.yml)
-[![Latest Images](https://github.com/arsslensoft/amethystora/actions/workflows/build-image-latest-main.yml/badge.svg)](https://github.com/arsslensoft/amethystora/actions/workflows/build-image-latest-main.yml)
-[![Checks](https://github.com/arsslensoft/amethystora/actions/workflows/checks.yml/badge.svg)](https://github.com/arsslensoft/amethystora/actions/workflows/checks.yml)
-[![Unit](https://github.com/arsslensoft/amethystora/actions/workflows/unit.yml/badge.svg)](https://github.com/arsslensoft/amethystora/actions/workflows/unit.yml)
-[![Integration](https://github.com/arsslensoft/amethystora/actions/workflows/integration.yml/badge.svg)](https://github.com/arsslensoft/amethystora/actions/workflows/integration.yml)
-
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Arsslensoft/amethystora/badge)](https://scorecard.dev/viewer/?uri=github.com/Arsslensoft/amethystora)
-[![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/arsslensoft/amethystora?display_name=tag)](https://github.com/arsslensoft/amethystora/releases/latest)
-[![Signed with cosign](https://img.shields.io/badge/images-signed%20with%20cosign-6f42c1)](cosign.pub)
-[![DCO: signed off](https://img.shields.io/badge/DCO-signed--off-3fb950)](CONTRIBUTING.md#signing-off-dco)
-[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/en/v1.0.0/)
 
 **Amethystora** is a cloud-native desktop operating system built on Fedora, using container technology and atomic updates. Its desktop is [GNOME](https://www.gnome.org).
 
