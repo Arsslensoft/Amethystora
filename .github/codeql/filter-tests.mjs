@@ -16,6 +16,8 @@ const TEST_PATH = [
   /(^|\/)test-[^/]*\.(sh|mjs|js)$/,
   /\.test\.m?js$/,
   /^apps\/vault-core\/src\/sync\/fake\.rs$/,
+  /^apps\/vault-core\/src\/kemlock\/sync\/fake\.rs$/,
+  /^apps\/vault-core\/src\/kemlock\/vectors\.rs$/,
 ];
 
 // The line of a Rust file from which on everything is its unit tests, or none
