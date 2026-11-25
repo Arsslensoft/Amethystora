@@ -49,6 +49,7 @@ integration	bash $CTX/build_files/shared/test-changes-uninstall.sh
 integration	bash $CTX/build_files/shared/test-changes.sh
 integration	bash $CTX/build_files/shared/test-clipboard.sh
 integration	bash $CTX/build_files/shared/test-control-list-separators.sh
+integration	bash $CTX/build_files/shared/test-clean-copy-kinds.sh
 integration	bash $CTX/build_files/shared/test-cover-private.sh
 integration	bash $CTX/build_files/shared/test-dev-services.sh
 integration	bash $CTX/build_files/shared/test-disk-health.sh
