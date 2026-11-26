@@ -9,7 +9,7 @@ use super::item::{Kem1Body, Kem1Item, WireItem, item_aad, wrap_aad};
 use super::keys::{Child, PrivateKeys, child_key, password_wrap_key, root_wrap_aad, unwrap_root_key, user_key, wrap_root_key_with_nonce};
 use super::kx1::{Kx1PrivateKey, Kx1PublicKey};
 use super::manifest::{Entry, Manifest};
-use super::master::{Confirm, DEFAULT_PARAMS, KdfParams, master_key};
+use super::master::{DEFAULT_PARAMS, KdfParams, master_key};
 use super::sealedbox::{self, CONTEXT_DEVICE_APPROVAL, device_approval_aad};
 use super::sig1::{Sig1PrivateKey, Sig1PublicKey};
 use super::{Error, Key, RootKey, aead, kma1, opaque, phrase};

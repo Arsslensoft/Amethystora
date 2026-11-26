@@ -41,8 +41,7 @@ pub struct Uuid(pub [u8; 16]);
 impl Uuid {
     /// A version 4 UUID, which is what a client chooses for a new item
     pub fn random_v4() -> Uuid {
-        let mut bytes = [0u8; 16];
-        crate::seal::random(&mut bytes);
+        let mut bytes: [u8; 16] = crate::seal::random_array();
         bytes[6] = bytes[6] & 0x0f | 0x40;
         bytes[8] = bytes[8] & 0x3f | 0x80;
         Uuid(bytes)
@@ -127,10 +126,7 @@ impl Owner {
     }
 
     pub fn to_bytes(&self) -> [u8; 17] {
-        let mut out = [0u8; 17];
-        out[0] = self.kind as u8;
-        out[1..].copy_from_slice(&self.id.0);
-        out
+        std::array::from_fn(|i| if i == 0 { self.kind as u8 } else { self.id.0[i - 1] })
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Owner> {
@@ -140,8 +136,7 @@ impl Owner {
             2 => OwnerKind::Space,
             _ => return Err(Error::Malformed("an owner's type is 1 or 2")),
         };
-        let mut id = [0u8; 16];
-        id.copy_from_slice(&bytes[1..]);
+        let id = <[u8; 16]>::try_from(&bytes[1..]).expect("16 bytes");
         Ok(Owner { kind, id: Uuid(id) })
     }
 
@@ -168,8 +163,7 @@ impl fmt::Display for Owner {
 
 /// RFC 9562 section 5.8: the first 16 bytes of a hash with the version nibble and the variant bits set
 fn uuidv8(hash: &[u8]) -> Uuid {
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&hash[..16]);
+    let mut bytes = <[u8; 16]>::try_from(&hash[..16]).expect("16 bytes");
     bytes[6] = bytes[6] & 0x0f | 0x80;
     bytes[8] = bytes[8] & 0x3f | 0x80;
     Uuid(bytes)

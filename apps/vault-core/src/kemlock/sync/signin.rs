@@ -292,8 +292,7 @@ fn enrol(api: &mut KemApi<'_>, attempt: &Attempt<'_>, derive: &Derive<'_>, bitwa
     let bw_master = bitwarden(password, attempt.email, &kdf).map_err(Problem::Kdf)?;
     let hash = crypto::master_hash(&bw_master, password);
     let stretched = crypto::stretch(&bw_master);
-    let mut salt = [0u8; 16];
-    crate::seal::random(&mut salt);
+    let salt: [u8; 16] = crate::seal::random_array();
     let master = derive(attempt.password, &salt, &DEFAULT_PARAMS)?;
     let (registration, request) = opaque::registration_start(&master).map_err(|_| Problem::BadResponse)?;
     let start = api.bitwarden_start(attempt.email, &hash, &request)?;

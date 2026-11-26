@@ -92,10 +92,8 @@ impl Manifest {
         }
         let mut entries = Vec::with_capacity(count);
         for chunk in bytes[HEADER..].as_chunks::<ENTRY>().0 {
-            let mut id = [0u8; 16];
-            id.copy_from_slice(&chunk[..16]);
-            let mut hash = [0u8; 32];
-            hash.copy_from_slice(&chunk[24..56]);
+            let id = <[u8; 16]>::try_from(&chunk[..16]).expect("16 bytes");
+            let hash = <[u8; 32]>::try_from(&chunk[24..56]).expect("32 bytes");
             let deleted = match chunk[56] {
                 0 => false,
                 1 => true,

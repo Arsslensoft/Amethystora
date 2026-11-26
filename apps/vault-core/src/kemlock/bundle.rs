@@ -47,8 +47,7 @@ impl Bundle {
         if &bytes[..17] != LABEL {
             return Err(Error::Malformed("a bundle starts with its label"));
         }
-        let mut id = [0u8; 16];
-        id.copy_from_slice(&bytes[17..33]);
+        let id = <[u8; 16]>::try_from(&bytes[17..33]).expect("16 bytes");
         let key_version = u32::from_be_bytes([bytes[33], bytes[34], bytes[35], bytes[36]]);
         let kx1 = Kx1PublicKey::from_bytes(&bytes[37..37 + kx1::PUBLIC_KEY])?;
         let sig1 = Sig1PublicKey::from_bytes(&bytes[37 + kx1::PUBLIC_KEY..])?;

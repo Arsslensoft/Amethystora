@@ -33,10 +33,7 @@ pub fn sealed_len(plain: usize) -> usize {
 
 /// Encrypts `plain`, which may not be longer than `max_plain`
 pub fn encrypt(key: &Key, plain: &[u8], max_plain: usize) -> Result<Vec<u8>> {
-    // Filled from uninitialised memory, so that no constant ever stands for the prefix
-    let mut prefix = [std::mem::MaybeUninit::<u8>::uninit(); 8];
-    let prefix: [u8; 8] =
-        getrandom::fill_uninit(&mut prefix).expect("the kernel gives random bytes").try_into().expect("8 bytes");
+    let prefix: [u8; 8] = crate::seal::random_array();
     encrypt_with_prefix(key, &prefix, plain, max_plain)
 }
 
@@ -87,14 +84,12 @@ pub fn decrypt(key: &Key, file: &[u8], max_plain: usize) -> Result<Zeroizing<Vec
     if u32::try_from(chunks).is_err() {
         return Err(Error::Refused("the file has more chunks than a counter counts"));
     }
-    let mut prefix = [0u8; 8];
-    prefix.copy_from_slice(&file[4..HEADER]);
+    let prefix = <[u8; 8]>::try_from(&file[4..HEADER]).expect("8 bytes");
     let mut out = Zeroizing::new(Vec::with_capacity(plain_len));
     for (counter, chunk) in file[HEADER..].chunks(SEALED_CHUNK).enumerate() {
         let last = counter + 1 == chunks;
-        let mut nonce = [0u8; 12];
-        nonce[..8].copy_from_slice(&prefix);
-        nonce[8..].copy_from_slice(&(counter as u32).to_be_bytes());
+        let (p, c) = (prefix, (counter as u32).to_be_bytes());
+        let nonce = [p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], c[0], c[1], c[2], c[3]];
         let mut sealed = Vec::with_capacity(12 + chunk.len());
         sealed.extend_from_slice(&nonce);
         sealed.extend_from_slice(chunk);

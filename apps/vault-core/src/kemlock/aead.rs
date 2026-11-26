@@ -16,10 +16,7 @@ pub const MIN_SEALED: usize = NONCE + TAG;
 
 /// A fresh random nonce, then the ciphertext and tag
 pub fn seal(key: &[u8; 32], plain: &[u8], aad: &[u8]) -> Vec<u8> {
-    // Filled from uninitialised memory, so that no constant ever stands for the nonce
-    let mut nonce = [std::mem::MaybeUninit::<u8>::uninit(); NONCE];
-    let nonce: [u8; NONCE] =
-        getrandom::fill_uninit(&mut nonce).expect("the kernel gives random bytes").try_into().expect("12 bytes");
+    let nonce: [u8; NONCE] = crate::seal::random_array();
     seal_with_nonce(key, &nonce, plain, aad)
 }
 

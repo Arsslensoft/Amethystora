@@ -35,8 +35,7 @@ impl Kx1PublicKey {
     }
 
     fn x25519(&self) -> [u8; 32] {
-        let mut pk = [0u8; 32];
-        pk.copy_from_slice(&self.0[MLKEM_PK..]);
+        let pk = <[u8; 32]>::try_from(&self.0[MLKEM_PK..]).expect("32 bytes");
         pk
     }
 
@@ -106,10 +105,10 @@ impl Kx1PrivateKey {
     /// The public key: the encapsulation key of the seed and the X25519 public key of the secret
     pub fn public_key(&self) -> Kx1PublicKey {
         let dk = self.decapsulation_key();
-        let mut out = Box::new([0u8; PUBLIC_KEY]);
-        out[..MLKEM_PK].copy_from_slice(dk.encapsulation_key().to_bytes().as_slice());
-        out[MLKEM_PK..].copy_from_slice(&x25519(*self.x25519_secret(), X25519_BASEPOINT_BYTES));
-        Kx1PublicKey(out)
+        let mut out = Vec::with_capacity(PUBLIC_KEY);
+        out.extend_from_slice(dk.encapsulation_key().to_bytes().as_slice());
+        out.extend_from_slice(&x25519(*self.x25519_secret(), X25519_BASEPOINT_BYTES));
+        Kx1PublicKey(out.into_boxed_slice().try_into().expect("a whole public key"))
     }
 
     /// Recomputes the shared secret. ML-KEM rejects implicitly, so a changed ciphertext gives another secret and no error;
@@ -117,8 +116,7 @@ impl Kx1PrivateKey {
     pub fn decapsulate(&self, ciphertext: &[u8]) -> Result<Key> {
         let ciphertext: &[u8; CIPHERTEXT] = ciphertext.try_into().map_err(|_| Error::Malformed("a kx1 ciphertext is 1600 bytes"))?;
         let ct_m = ml_kem_1024::Ciphertext::try_from(&ciphertext[..MLKEM_PK]).map_err(|_| Error::Unopened)?;
-        let mut ct_x = [0u8; 32];
-        ct_x.copy_from_slice(&ciphertext[MLKEM_PK..]);
+        let ct_x = <[u8; 32]>::try_from(&ciphertext[MLKEM_PK..]).expect("32 bytes");
         let ss_m = self.decapsulation_key().decapsulate(&ct_m);
         let sk_x = self.x25519_secret();
         let ss_x = Zeroizing::new(x25519(*sk_x, ct_x));

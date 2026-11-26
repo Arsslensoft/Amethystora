@@ -511,8 +511,7 @@ fn protected(object: &mut Map<String, Value>, local: &Local, now_ms: i64, file_h
         return Ok(None);
     }
     // A changed file is a new attachment: the old one goes once the new is named, never written over
-    let mut id = [0u8; 16];
-    crate::seal::random(&mut id);
+    let id: [u8; 16] = crate::seal::random_array();
     let id = crate::kemlock::conv::b64_encode(&id);
     let key = crate::kemlock::Key::random();
     let media = (what == "folder").then_some("application/x-tar");

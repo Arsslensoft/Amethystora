@@ -54,8 +54,7 @@ impl DpopKey {
     /// A proof for one request. `htu` is the URL as it will be sent, which this reduces to scheme, host, port and path; `ath` is the
     /// access token the request carries, if it carries one; `nonce` the server's last.
     pub fn proof(&self, method: &str, url: &str, access_token: Option<&str>, nonce: Option<&str>, iat: i64) -> String {
-        let mut jti = [0u8; 16];
-        crate::seal::random(&mut jti);
+        let jti: [u8; 16] = crate::seal::random_array();
         self.proof_with(method, url, access_token, nonce, iat, &b64_encode(&jti))
     }
 

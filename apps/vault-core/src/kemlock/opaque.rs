@@ -52,15 +52,11 @@ pub(crate) struct Kernel;
 
 impl RngCore for Kernel {
     fn next_u32(&mut self) -> u32 {
-        let mut b = [0u8; 4];
-        crate::seal::random(&mut b);
-        u32::from_le_bytes(b)
+        u32::from_le_bytes(crate::seal::random_array())
     }
 
     fn next_u64(&mut self) -> u64 {
-        let mut b = [0u8; 8];
-        crate::seal::random(&mut b);
-        u64::from_le_bytes(b)
+        u64::from_le_bytes(crate::seal::random_array())
     }
 
     fn fill_bytes(&mut self, dest: &mut [u8]) {

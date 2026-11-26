@@ -44,14 +44,12 @@ impl TryRng for Kernel {
     type Error = std::convert::Infallible;
 
     fn try_next_u32(&mut self) -> std::result::Result<u32, Self::Error> {
-        let mut b = [0u8; 4];
-        crate::seal::random(&mut b);
+        let b: [u8; 4] = crate::seal::random_array();
         Ok(u32::from_le_bytes(b))
     }
 
     fn try_next_u64(&mut self) -> std::result::Result<u64, Self::Error> {
-        let mut b = [0u8; 8];
-        crate::seal::random(&mut b);
+        let b: [u8; 8] = crate::seal::random_array();
         Ok(u64::from_le_bytes(b))
     }
 
@@ -70,8 +68,7 @@ pub struct Sig1PublicKey(Box<[u8; PUBLIC_KEY]>);
 impl Sig1PublicKey {
     pub fn from_bytes(bytes: &[u8]) -> Result<Sig1PublicKey> {
         let bytes: &[u8; PUBLIC_KEY] = bytes.try_into().map_err(|_| Error::Malformed("a sig1 public key is 1984 bytes"))?;
-        let mut ed = [0u8; 32];
-        ed.copy_from_slice(&bytes[MLDSA_PK..]);
+        let ed = <[u8; 32]>::try_from(&bytes[MLDSA_PK..]).expect("32 bytes");
         EdVerifyingKey::from_bytes(&ed).map_err(|_| Error::Malformed("an Ed25519 public key"))?;
         Ok(Sig1PublicKey(Box::new(*bytes)))
     }
@@ -86,11 +83,9 @@ impl Sig1PublicKey {
         let m = signed_message(context, message);
         let encoded = ml_dsa::EncodedVerifyingKey::<MlDsa65>::try_from(&self.0[..MLDSA_PK]).map_err(|_| Error::Unopened);
         let ml_sig = MlSignature::try_from(&signature[..MLDSA_SIG]).map_err(|_| Error::Unopened);
-        let mut ed_pk = [0u8; 32];
-        ed_pk.copy_from_slice(&self.0[MLDSA_PK..]);
+        let ed_pk = <[u8; 32]>::try_from(&self.0[MLDSA_PK..]).expect("32 bytes");
         let ed_pk = EdVerifyingKey::from_bytes(&ed_pk).map_err(|_| Error::Unopened);
-        let mut ed_bytes = [0u8; 64];
-        ed_bytes.copy_from_slice(&signature[MLDSA_SIG..]);
+        let ed_bytes = <[u8; 64]>::try_from(&signature[MLDSA_SIG..]).expect("64 bytes");
         let ed_sig = EdSignature::from_bytes(&ed_bytes);
         // Both halves always run, so that the time says nothing about which failed
         let ml_ok = match (encoded, ml_sig) {
@@ -144,10 +139,10 @@ impl Sig1PrivateKey {
     }
 
     pub fn public_key(&self) -> Sig1PublicKey {
-        let mut out = Box::new([0u8; PUBLIC_KEY]);
-        out[..MLDSA_PK].copy_from_slice(ml_dsa::Keypair::verifying_key(&self.ml_key()).to_bytes().as_slice());
-        out[MLDSA_PK..].copy_from_slice(self.ed_key().verifying_key().as_bytes());
-        Sig1PublicKey(out)
+        let mut out = Vec::with_capacity(PUBLIC_KEY);
+        out.extend_from_slice(ml_dsa::Keypair::verifying_key(&self.ml_key()).to_bytes().as_slice());
+        out.extend_from_slice(self.ed_key().verifying_key().as_bytes());
+        Sig1PublicKey(out.into_boxed_slice().try_into().expect("a whole public key"))
     }
 
     /// A signature under `context`, with ML-DSA hedged by fresh randomness (verifiers accept hedged and deterministic)
