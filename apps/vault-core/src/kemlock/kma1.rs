@@ -33,8 +33,10 @@ pub fn sealed_len(plain: usize) -> usize {
 
 /// Encrypts `plain`, which may not be longer than `max_plain`
 pub fn encrypt(key: &Key, plain: &[u8], max_plain: usize) -> Result<Vec<u8>> {
-    let mut prefix = [0u8; 8];
-    crate::seal::random(&mut prefix);
+    // Filled from uninitialised memory, so that no constant ever stands for the prefix
+    let mut prefix = [std::mem::MaybeUninit::<u8>::uninit(); 8];
+    let prefix: [u8; 8] =
+        getrandom::fill_uninit(&mut prefix).expect("the kernel gives random bytes").try_into().expect("8 bytes");
     encrypt_with_prefix(key, &prefix, plain, max_plain)
 }
 
