@@ -1038,7 +1038,7 @@ struct VwHttp(amethystora_vault_net::http::Session);
 impl amethystora_vault_core::sync::api::Http for VwHttp {
     fn call(&mut self, request: amethystora_vault_core::sync::api::Request) -> Result<amethystora_vault_core::sync::api::Response, amethystora_vault_core::sync::api::NetFailure> {
         let headers: Vec<(String, String)> = request.headers.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
-        self.0.request(request.method, &request.url, &headers, &request.body).map(|(status, body)| amethystora_vault_core::sync::api::Response { status, body }).map_err(|failure| amethystora_vault_core::sync::api::NetFailure::from_name(failure.name()))
+        self.0.request(request.method, &request.url, &headers, &request.body).map(|(status, body)| amethystora_vault_core::sync::api::Response { status, body, headers: Vec::new() }).map_err(|failure| amethystora_vault_core::sync::api::NetFailure::from_name(failure.name()))
     }
 }
 

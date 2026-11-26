@@ -91,8 +91,11 @@ words := '''
 # N_ 'A program calling itself $(program) asks to stop syncing “$(item)”, which moves its copy on the server to the trash of the server, or takes the fields the vault wrote out of it if the copy holds anything else.'
 # N_ 'A program calling itself $(program) asks to let Amethystora Vault take, on its next sync, the items that went from the server or came from it.'
 # N_ 'A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the server it syncs with, as items that every Bitwarden app of that account opens, protected there by the encryption of the server alone. Those set to ask every time are included. A copy already there in another form is moved to the trash, or the fields the vault wrote are taken out of it.'
-# N_ 'A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the server it syncs with, sealed so that only this vault opens them. Those set to ask every time are included. A copy already there in another form is moved to the trash, or the fields the vault wrote are taken out of it.'
 # N_ 'A program calling itself $(program) asks to stop syncing every one of your $(item), which moves their copies on the server to the trash of the server, or takes the fields the vault wrote out of a copy that holds anything else.'
+# N_ 'A program calling itself $(program) asks to send “$(item)” to the Kemlock Server Amethystora Vault syncs with, as an item the Kemlock apps open, encrypted on this computer with the keys of the account.'
+# N_ 'A program calling itself $(program) asks to stop syncing “$(item)”. Its copy on the Kemlock Server Amethystora Vault syncs with is removed if the vault made it, and stays there as it is if a Kemlock app made it.'
+# N_ 'A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the Kemlock Server it syncs with, as items the Kemlock apps open, encrypted on this computer with the keys of the account. Those set to ask every time are included.'
+# N_ 'A program calling itself $(program) asks to stop syncing every one of your $(item). Their copies on the Kemlock Server Amethystora Vault syncs with are removed where the vault made them, and stay there as they are where a Kemlock app made them.'
 
 # Set up a vault on this account: password, approval (fingerprint or account password) or no-prompt. It ends with a recovery key that you type back
 [positional-arguments]
@@ -530,7 +533,7 @@ helpers *ARGS:
         fi
     done <<<"$output"
 
-# Sync with a Vaultwarden or Bitwarden server. connect ADDRESS, now [accept], status, off, kind KIND off|on|sealed (KIND: passwords, codes, backup-codes, keys, certificates, files; on is plain, which every Bitwarden app opens), choose KIND ID on|off|sealed (one item)
+# Sync with a Kemlock Server (its own API, every kind of item) or a Vaultwarden or Bitwarden server. connect ADDRESS [kemlock|bitwarden], now [accept], status, off, kind KIND off|on (KIND: passwords, codes, backup-codes, keys, certificates, files; on goes plain, which every Bitwarden app opens), choose KIND ID on|off (one item)
 [positional-arguments]
 sync *ARGS:
     #!/usr/bin/bash
@@ -539,9 +542,9 @@ sync *ARGS:
     source gettext.sh
     {{ words }}
     options=(
-        --say-sync-intro="$(gettext "What this vault holds that syncs becomes items in that account, encrypted with the account's own key, and the account's changes come back. Passwords, authenticator codes and backup codes go as plain items that Bitwarden's apps open; keys, certificates and protected files go only when you choose it, plain or sealed (a note only this vault opens). The server learns how many items there are, of which kind, how long each is and when it changed. The account's key is kept in this vault, so whoever opens this vault can reach that whole account. A dedicated account for the vault is the better choice. It works with Bitwarden and Vaultwarden accounts, and is not Bitwarden.")"
+        --say-sync-intro="$(gettext "What this vault holds that syncs becomes items in that account, encrypted with the account's own key, and the account's changes come back. On a Kemlock Server every kind goes as the Kemlock apps' own items, keys, certificates and protected files included, unless you turn a kind off. On a Vaultwarden or Bitwarden server, passwords, authenticator codes and backup codes go as plain items that Bitwarden's apps open, and keys, certificates and protected files only when you choose it, as a plain secure note or SSH key item where Bitwarden has no type for them. The server learns how many items there are, of which kind, how long each is and when it changed. The account's key is kept in this vault, so whoever opens this vault can reach that whole account. A dedicated account for the vault is the better choice. It works with Kemlock, Bitwarden and Vaultwarden accounts, and is not Bitwarden.")"
         --say-sync-email="$(gettext 'Email address of the account: ')"
-        --say-sync-method="$(gettext 'Log in with the personal API key (it asks for no code) or the master password? Type key or password: ')"
+        --say-sync-method="$(gettext 'Log in with the personal API key (Vaultwarden and Bitwarden only; it asks for no code) or the master password? Type key, or press Enter for the password: ')"
         --say-sync-api-id="$(gettext 'API key client_id: ')"
         --say-sync-api-secret="$(gettext 'API key client_secret: ')"
         --say-sync-password="$(gettext "Master password (it opens the account's key here and is not kept): ")"
@@ -553,7 +556,14 @@ sync *ARGS:
         --say-sync-trust-mismatch="$(gettext "That is not this certificate's fingerprint. Nothing was trusted.")"
         --say-sync-kdf-memory="$(n='{n}' eval_gettext "This account's key takes \${n} MiB of memory to make, which is a lot, and it is made in a program of its own that is gone afterwards. Type yes to go on: ")"
         --say-sync-kdf="$(n='{n}' eval_gettext "This account's key is made with only \${n} rounds, which is far fewer than Bitwarden's default, and makes the master password easier to guess. Type yes to go on: ")"
-        --say-sync-provider="$(gettext 'Which second step? Type authenticator, email or yubikey: ')"
+        --say-sync-kdf-weak="$(m='{m}' n='{n}' eval_gettext "This account's key is made with \${m} MiB and \${n} passes, which is less than Kemlock's own 64 MiB and 3, and makes the master password easier to guess. Type yes to go on: ")"
+        --say-sync-provider="$(gettext 'Which second step? Type authenticator, email, yubikey or recovery: ')"
+        --say-sync-code-recovery="$(gettext "Recovery code (it turns off the account's second steps): ")"
+        --say-sync-kemlock="$(gettext 'This is a Kemlock Server, and the vault synced with its own API: every kind of item goes, and the Kemlock apps open them.')"
+        --say-sync-enrolled="$(gettext "This account was made through Bitwarden's API, so the Bitwarden hash of its master password was sent to the server once, to give the account its Kemlock keys. From now on the password signs in to both.")"
+        --say-sync-moved="$(gettext "The vault's items were moved from their Bitwarden copies to Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more.")"
+        --say-sync-move-first="$(gettext "This vault syncs with this server through Bitwarden's API. Moving to the Kemlock API writes the vault's items there as Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more, so Bitwarden's apps and browser extension will not see what changes from now on.")"
+        --say-sync-move-ask="$(gettext 'Type yes to move to the Kemlock API: ')"
         --say-sync-code-app="$(gettext 'Code from your authenticator app: ')"
         --say-sync-code-email="$(gettext 'Code sent to your email: ')"
         --say-sync-code-yubikey="$(gettext 'Touch your YubiKey: ')"
@@ -567,6 +577,7 @@ sync *ARGS:
         --say-problem-not-connected="$(gettext 'No server is connected. Connect one with: ame vault sync connect ADDRESS')"
         --say-problem-not-syncable="$(gettext 'That kind of item does not sync.')"
         --say-problem-not-exportable="$(gettext 'That key was made so that it cannot leave the vault.')"
+        --say-problem-sealed-gone="$(gettext 'Sealed sync is gone: an item syncs plain or not at all. Choose on or off.')"
         --say-problem-bad-request="$(gettext 'That was not understood.')"
         --say-problem-unreachable="$(gettext 'The server could not be reached.')"
         --say-problem-untrusted="$(gettext "The server's certificate is not trusted.")"
@@ -596,6 +607,29 @@ sync *ARGS:
         --say-problem-many-gone="$(n='{n}' eval_gettext 'Items have gone from the server, or been put in its trash, at once or over the last days: ${n}. If you removed them there, accept it with: ame vault sync now accept')"
         --say-problem-many-new="$(n='{n}' eval_gettext 'Items have come from the server at once or over the last days: ${n}. If you added them there, accept it with: ame vault sync now accept')"
         --say-problem-local-unreadable="$(n='{n}' eval_gettext 'Items of the vault did not read: ${n}. Nothing is sent to the server while that is so, since an item that is not there looks removed. Restore the vault from a backup, or remove the damaged items.')"
+        --say-problem-not-kemlock="$(gettext "The server did not answer like a Kemlock Server.")"
+        --say-problem-server-too-old="$(gettext "This Kemlock Server is too old for the vault: it lacks what signing in needs.")"
+        --say-problem-domain-differs="$(gettext "The server is set up under another address than the one given, so it would refuse every request. Give it the address it was set up with.")"
+        --say-problem-session-ended="$(gettext "The server ended this sign-in. Connect again.")"
+        --say-problem-dpop-refused="$(gettext "The server refused the vault's proof of who is asking. Check this computer's clock, and that the address is the one the server is set up under.")"
+        --say-problem-dpop-nonce="$(gettext "The server kept refusing the request's nonce. Try again later.")"
+        --say-problem-sso-only="$(gettext "This account signs in with single sign-on, which the vault does not do.")"
+        --say-problem-account-refused="$(gettext "The server refused this account: it may be disabled, or being deleted.")"
+        --say-problem-wrong-password-or-server="$(gettext "The master password is wrong, or this is not the server the account was set up on.")"
+        --say-problem-enrol-needs-totp="$(gettext "This account was made through Bitwarden's API and its only second step is not an authenticator app. Sign in to its web vault once first.")"
+        --say-problem-keys-invalid="$(gettext "The account's keys on the server do not check out. Nothing was kept.")"
+        --say-problem-manifest-invalid="$(gettext "The server's signed list of items does not verify. Nothing was changed.")"
+        --say-problem-manifest-rolled-back="$(gettext "The server's signed list of items is older than one the vault saw. A server giving an old copy back is what that is, so nothing was changed.")"
+        --say-problem-item-missing="$(gettext "The server's signed list names an item that the server no longer has. Nothing was changed.")"
+        --say-problem-item-rolled-back="$(gettext "The server gave back an older copy of an item than the vault knew. Nothing was changed.")"
+        --say-problem-item-resurrected="$(gettext "An item that was deleted came back with no signed list naming it. Nothing was changed.")"
+        --say-problem-items-unlisted="$(gettext "Items that no signed list names have waited for a day. If they are yours, accept them with: ame vault sync now accept")"
+        --say-problem-files-bucket="$(gettext "This server keeps files in a storage bucket, which the vault does not use.")"
+        --say-problem-move-check="$(gettext "What was moved did not read back as it was sent. The vault will send what differs again.")"
+        --say-problem-second-step-refused="$(gettext "The second step was refused. The code may be wrong or already used.")"
+        --say-problem-bad-answer="$(gettext "The server answered in a way the protocol does not allow.")"
+        --say-problem-siblings="$(gettext "This vault was changed on two servers at once. Open it in the Kemlock app to settle it.")"
+        --say-problem-kdf-weak-confirm="$(m='{m}' n='{n}' eval_gettext "This account's key is made with only \${m} MiB and \${n} passes, which is less than Kemlock's default.")"
         --say-problem-links-unreadable="$(gettext 'What the vault keeps of its sync did not read. Turn sync off and connect again.')"
     )
     case "${1:-}" in
@@ -604,6 +638,7 @@ sync *ARGS:
             while IFS=$'\t' read -r what a; do
                 case "$what" in
                     connected) [[ "$a" == yes ]] || { gettext "No server is connected."; echo; } ;;
+                    backend) case "$a" in kemlock) gettext 'Kind of server: Kemlock Server, through its own API'; echo ;; *) gettext 'Kind of server: Vaultwarden or Bitwarden'; echo ;; esac ;;
                     address) eval_gettext 'Server: ${a}'; echo ;;
                     email) eval_gettext 'Account: ${a}'; echo ;;
                     linked) eval_gettext 'Items linked with the server: ${a}'; echo ;;
@@ -618,8 +653,7 @@ sync *ARGS:
                             files) what=$(gettext 'protected files') ;;
                         esac
                         case "$how" in
-                            on) eval_gettext "Sent plain, as Bitwarden's apps open it: \${what}"; echo ;;
-                            sealed) eval_gettext "Sent sealed, a note only this vault opens: \${what}"; echo ;;
+                            on) eval_gettext "Sent: \${what}"; echo ;;
                             *) eval_gettext "Not sent: \${what}"; echo ;;
                         esac
                         ;;
@@ -640,7 +674,7 @@ sync *ARGS:
                     organization) [[ "$a" == 0 ]] || { eval_gettext 'Items of an organization, left alone: ${a}'; echo; } ;;
                     refused)
                         case "$a" in
-                            too-large-to-seal | file-too-large) gettext "Not synced: an item is larger than the vault sends."; echo ;;
+                            file-too-large) gettext "Not synced: an item is larger than the vault sends."; echo ;;
                             attachments-cloud) gettext "Not synced: Bitwarden's own servers keep files at a storage host that the vault does not use. This item stays on this computer. Vaultwarden or a server of your own can hold it."; echo ;;
                             attachments-premium) gettext "Not synced: the account has no premium, which Bitwarden's server asks for files. This item stays on this computer."; echo ;;
                             attachments-refused) gettext "Not synced: the server does not take files, or the account's room for them is spent. This item stays on this computer."; echo ;;
@@ -672,7 +706,7 @@ sync *ARGS:
             if [[ "$1" == off ]]; then gettext "Sync is off. The vault and the account keep what they have."; echo; fi
             ;;
         *)
-            echo "usage: ame vault sync connect ADDRESS | now [accept] | status | off | kind KIND off|on|sealed | choose KIND ID on|off|sealed (KIND of kind is passwords, codes, backup-codes, keys, certificates or files; on is plain)"
+            echo "usage: ame vault sync connect ADDRESS [kemlock|bitwarden] | now [accept] | status | off | kind KIND off|on | choose KIND ID on|off (KIND of kind is passwords, codes, backup-codes, keys, certificates or files; on goes plain)"
             exit 64
             ;;
     esac

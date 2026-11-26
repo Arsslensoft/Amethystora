@@ -398,45 +398,16 @@ fn an_authenticator_joins_its_login() {
 }
 
 #[test]
-fn a_sealed_item_is_a_note_only_this_vault_opens() {
-    let mut fake = Fake::default();
-    let mut connection = connect(&mut fake).unwrap();
-    let mut vault = Vault { sealing: Some((Key::random(), "vault-1".into())), ..Vault::default() };
-    vault.put("key", "k1", json!({"private": "PRIVATE-KEY-MATERIAL"}));
-    vault.put("certificate", "c1", json!({"pem": "x".repeat(6000)}));
-    vault.put("key", "k2", json!({"private": "never"}));
-    // Keys and certificates are off until chosen; the large one cannot fit a note and goes as the note's file
-    connection.choices.insert("key.k1".into(), "sealed".into());
-    connection.choices.insert("certificate.c1".into(), "sealed".into());
-    let outcome = vault.sync(&mut fake, &connection);
-    assert_eq!(fake.ciphers.len(), 2);
-    assert_eq!(outcome.report.refused_total, 0, "{:?}", outcome.report.refused);
-    let small = fake.ciphers.iter().find(|raw| raw["attachments"].is_null()).unwrap()["id"].as_str().unwrap().to_string();
-    let content = open_on_server(&fake, &small);
-    assert_eq!(content.name, map::SEALED_NAME);
-    assert!(!content.notes.as_deref().unwrap().contains("PRIVATE"));
-    assert_nothing_leaked(&fake, &["PRIVATE-KEY-MATERIAL", "never"]);
-    // Another machine with this vault restored opens it; another vault does not
-    let mut restored = Vault { sealing: vault.sealing.as_ref().map(|(k, v)| (k.copy(), v.clone())), ..Vault::default() };
-    restored.sync(&mut fake, &connection);
-    assert_eq!(restored.value("key", "k1"), json!({"private": "PRIVATE-KEY-MATERIAL"}));
-    let mut other = Vault { sealing: Some((Key::random(), "vault-2".into())), ..Vault::default() };
-    let outcome = other.sync(&mut fake, &connection);
-    assert_eq!(outcome.report.sealed_elsewhere, 2);
-    assert!(other.locals.is_empty());
-}
-
-#[test]
 fn the_never_list_never_goes() {
     let mut fake = Fake::default();
     let mut connection = connect(&mut fake).unwrap();
     let mut vault = Vault { sealing: Some((Key::random(), "vault-1".into())), ..Vault::default() };
     for kind in ["data-key", "account-ca", "sync-account", "sync-cipher", "recovery"] {
         vault.put(kind, "x1", json!("00112233"));
-        connection.choices.insert(format!("{kind}.x1"), "sealed".into());
+        connection.choices.insert(format!("{kind}.x1"), "on".into());
     }
     let mut locked = Local { kind: "key".into(), id: "k9".into(), name: "k".into(), meta: json!({"exportable": false}), approval: Approval::Ask, value: json!({"private": "NOT-EXPORTABLE"}) };
-    connection.choices.insert("key.k9".into(), "sealed".into());
+    connection.choices.insert("key.k9".into(), "on".into());
     vault.locals.insert(("key".into(), "k9".into()), locked.clone());
     vault.sync(&mut fake, &connection);
     assert!(fake.ciphers.is_empty());
@@ -1023,63 +994,6 @@ fn h3_a_key_that_changes_is_a_conflict_that_keeps_both() {
     assert_eq!(own.len(), 1);
     assert_eq!((own[0].value["title"].as_str(), own[0].value.get("syncConflict").is_none()), (Some("t0"), true));
     assert!(vault.locals.values().any(|local| local.value["password"] == "secret1" && local.value.get("syncConflict").is_some()));
-}
-
-#[test]
-fn h4_an_older_sealed_note_is_never_taken() {
-    let mut fake = Fake::default();
-    let mut connection = connect(&mut fake).unwrap();
-    let mut vault = Vault { sealing: Some((Key::random(), "vault-1".into())), ..Vault::default() };
-    vault.put("key", "k1", json!({"private": "OLD-KEY"}));
-    connection.choices.insert("key.k1".into(), "sealed".into());
-    vault.sync(&mut fake, &connection);
-    let id = ids(&fake)[0].clone();
-    let old = fake.find(&id).unwrap()["notes"].clone();
-    vault.put("key", "k1", json!({"private": "NEW-KEY"}));
-    let outcome = vault.sync(&mut fake, &connection);
-    assert_eq!(outcome.report.sent, 1);
-    assert_eq!(vault.links[&id].seal, 2);
-    // The server serves the note it kept, dated later
-    bump(&mut fake, &id, |raw| raw["notes"] = old);
-    let outcome = vault.sync(&mut fake, &connection);
-    assert!(outcome.report.refused.iter().any(|r| r["why"] == "rolled-back"), "{:?}", outcome.report.refused);
-    assert_eq!(vault.value("key", "k1"), json!({"private": "NEW-KEY"}));
-}
-
-#[test]
-fn a_sealed_push_whose_answer_a_lock_dropped_is_the_same_item_next_time() {
-    let mut fake = Fake::default();
-    let mut connection = connect(&mut fake).unwrap();
-    let mut vault = Vault { sealing: Some((Key::random(), "vault-1".into())), ..Vault::default() };
-    vault.put("key", "k1", json!({"private": "OLD-KEY"}));
-    connection.choices.insert("key.k1".into(), "sealed".into());
-    vault.sync(&mut fake, &connection);
-    let links_before = vault.links.clone();
-    vault.put("key", "k1", json!({"private": "NEW-KEY"}));
-    vault.sync(&mut fake, &connection);
-    // The vault closed before the run's result was written
-    vault.links = links_before;
-    let outcome = vault.sync(&mut fake, &connection);
-    assert!(outcome.problem.is_none() && outcome.report.refused.is_empty() && outcome.report.conflicts == 0, "{:?}", outcome.report.refused);
-    assert_eq!(vault.value("key", "k1"), json!({"private": "NEW-KEY"}));
-    let id = ids(&fake)[0].clone();
-    assert_eq!(vault.links[&id].seal, 2);
-    // And two machines that both sent keep both: the other's copy is a second item
-    let key = vault.sealing.as_ref().unwrap().0.copy();
-    let mut changed = Local { kind: "key".into(), id: "k1".into(), name: "x".into(), meta: Value::Null, approval: Approval::WhileOpen, value: json!({"private": "THEIRS"}) };
-    changed.name = "k1".into();
-    let theirs = map::sealed_text(&changed, &key, "vault-1", 3).unwrap();
-    let raw = fake.find(&id).unwrap().clone();
-    let body = cipher::update_body(&raw, &open_on_server(&fake, &id), &Content { notes: Some(theirs.to_string()), ..open_on_server(&fake, &id) }, USER_ID, &fake.user).unwrap();
-    let mut body = body;
-    body["id"] = json!(id);
-    *fake.find_mut(&id).unwrap() = body;
-    fake.touch(&id);
-    vault.put("key", "k1", json!({"private": "MINE"}));
-    let outcome = vault.sync(&mut fake, &connection);
-    assert_eq!(outcome.report.conflicts, 1, "{:?}", outcome.report.refused);
-    let values: Vec<Value> = vault.locals.values().filter(|local| local.kind == "key").map(|local| local.value.clone()).collect();
-    assert!(values.contains(&json!({"private": "THEIRS"})) && values.contains(&json!({"private": "MINE"})), "{values:?}");
 }
 
 #[test]

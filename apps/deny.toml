@@ -43,3 +43,8 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # crypto-bigint 0.5 comes in through opaque-ke 4 and voprf 0.5 (elliptic-curve 0.13) for the Vault's Kemlock sign-in, which runs on
+    # ristretto255 through curve25519-dalek and never reaches crypto-bigint's arithmetic. Drop this when opaque-ke 5 is released.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint via opaque-ke 4, unused arithmetic (ristretto255 is dalek's)" },
+]

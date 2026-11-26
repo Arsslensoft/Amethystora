@@ -14,6 +14,7 @@ use super::lengths;
 /// The custom field that says a secure note is one of ours, and which: plain to anyone who opens the item, and honest
 pub const MARKER: &str = "amethystora-vault";
 pub const MARKER_CODES: &str = "backup-codes";
+/// The marker of a note an earlier version sealed: read, to move the note to its plain form, and never written
 pub const MARKER_SEALED: &str = "sealed";
 /// What a plain key, certificate or protected file is, in the marker's place (the item's kind says which, in words)
 pub const MARKER_KEY: &str = "key";

@@ -88,10 +88,11 @@ pub struct Connection {
     pub ca: Option<String>,
     #[serde(default)]
     pub pin: Option<String>,
-    /// `kind.id` -> `on`, `off` or `sealed`; absent is the kind's default
+    /// `kind.id` -> `on` or `off`; absent is the kind's default. A connection written before sealed sync was taken out may hold `sealed`,
+    /// which reads as `on`.
     #[serde(default)]
     pub choices: BTreeMap<String, String>,
-    /// `kind` -> `on`, `off` or `sealed`: what the person said for a whole kind, which each item without a choice of its own follows
+    /// `kind` -> `on` or `off`: what the person said for a whole kind, which each item without a choice of its own follows
     #[serde(default)]
     pub kinds: BTreeMap<String, String>,
     /// Why files are not tried on this server (a word, `Fail::word`), until the person asks for a run themselves
@@ -116,6 +117,10 @@ pub struct Connection {
     /// the vault a few items at a time is stopped by the sum, which no one run shows
     #[serde(default)]
     pub recent: Vec<(i64, u32)>,
+    /// Present on a connection to Kemlock Server's own API (`kemlock::sync`): `user_key` is then the account's root key, `refresh` its
+    /// refresh token, and every kind is on until a person says otherwise
+    #[serde(default)]
+    pub kemlock: Option<crate::kemlock::sync::state::KemlockState>,
 }
 
 impl Drop for Connection {
@@ -127,6 +132,9 @@ impl Drop for Connection {
         }
         if let Some(key) = &mut self.api_key {
             key.secret.zeroize();
+        }
+        if let Some(state) = &mut self.kemlock {
+            state.dpop_key.zeroize();
         }
     }
 }
@@ -140,18 +148,21 @@ impl Connection {
         SymKey::from_slice(&Zeroizing::new(seal::unhex(&self.user_key)?))
     }
 
-    /// What the person chose for a kind: `on` (plain), `sealed` or `off`; the kind's default until then
+    /// What the person chose for a kind: `on` or `off`; the kind's default until then. A `sealed` an earlier version kept is `on`.
     pub fn kind_choice(&self, kind: &str) -> &str {
         match self.kinds.get(kind).map(String::as_str) {
-            Some(choice @ ("on" | "off" | "sealed")) => choice,
+            Some("on" | "sealed") => "on",
+            Some("off") => "off",
+            _ if self.kemlock.is_some() => "on",
             _ => kinds::default_choice(kind),
         }
     }
 
-    /// What the person chose for an item, which wins, or what its kind does: `on`, `sealed` or `off`
+    /// What the person chose for an item, which wins, or what its kind does: `on` or `off`
     pub fn choice(&self, kind: &str, id: &str) -> &str {
         match self.choices.get(&format!("{kind}.{id}")).map(String::as_str) {
-            Some(choice @ ("on" | "off" | "sealed")) => choice,
+            Some("on" | "sealed") => "on",
+            Some("off") => "off",
             _ => self.kind_choice(kind),
         }
     }
@@ -199,9 +210,11 @@ pub struct Link {
     pub raw: Value,
     #[serde(default)]
     pub deleted: bool,
+    /// The cipher is a sealed note an earlier version of this vault wrote, which the next run replaces by the item's plain cipher (the
+    /// plain one first, then the note to the server's trash). Nothing is ever made sealed now.
     #[serde(default)]
     pub sealed: bool,
-    /// How many times a sealed note has been sent or taken: a note older than this is a copy the server kept, and never taken
+    /// How many times such a note was sent or taken: a copy of it older than this, which a server can keep, is never taken
     #[serde(default)]
     pub seal: u64,
     /// Every attachment the server listed on this cipher at the last sync: a change in the list is a change of the cipher, which
@@ -329,7 +342,7 @@ pub struct Report {
 }
 
 impl Report {
-    fn refuse(&mut self, what: &str, why: &str) {
+    pub fn refuse(&mut self, what: &str, why: &str) {
         self.refused_total += 1;
         if self.refused.len() < MOST_REFUSED {
             self.refused.push(json!({"item": what, "why": why}));
@@ -356,6 +369,8 @@ pub struct Outcome {
     pub files_read: bool,
     /// What is left to clean up on the server, for the connection to keep
     pub pending: Vec<Leftover>,
+    /// What a run on Kemlock's API keeps in the connection besides (`kemlock::sync`)
+    pub kemlock: Option<crate::kemlock::sync::state::News>,
 }
 
 // --- Logging in ------------------------------------------------------------------------------------------------------
@@ -502,6 +517,7 @@ pub fn finish(http: &mut dyn Http, pending: &Pending, extra: &Extra<'_>) -> Resu
         last: None,
         waiting_since_ms: None,
         recent: Vec::new(),
+        kemlock: None,
     };
     check_account(&sync, &connection)?;
     Ok((connection, access))
@@ -689,27 +705,9 @@ impl Run<'_> {
         i128::from(self.now_ms) * 1_000_000
     }
 
-    /// The content this link's live parts make, over the server's, and the file that goes with it if it needs one. `seal` is the
-    /// counter a sealed note carries, if it is one.
-    fn compose(&self, old: Option<&Content>, parts: &[PartRef], seal: Option<u64>) -> Result<Made, map::Unmapped> {
+    /// The content this link's live parts make, over the server's, and the file that goes with it if it needs one
+    fn compose(&self, old: Option<&Content>, parts: &[PartRef]) -> Result<Made, map::Unmapped> {
         let live: Vec<&Local> = parts.iter().filter_map(|part| self.local(part)).filter(|local| !map::deleted(local) && !self.leaving.contains(&key_of(local))).collect();
-        if let Some(counter) = seal {
-            let local = live.first().ok_or(map::Unmapped::Unreadable)?;
-            let (key, vault) = self.sealing.as_ref().ok_or(map::Unmapped::Unreadable)?;
-            // A blob that does not fit one note is the note's attachment, which says so
-            let (text, file) = match map::sealed_text(local, key, vault, counter) {
-                Ok(text) => (text.to_string(), None),
-                Err(map::Unmapped::TooLargeToSeal) => {
-                    let bytes = map::sealed_bytes(local, key, vault, counter)?;
-                    if bytes.len() > attach::MOST_FILE {
-                        return Err(map::Unmapped::FileTooLarge);
-                    }
-                    (map::SEALED_ATTACHED.to_string(), Some(File { name: attach::SEALED_NAME.to_string(), bytes: Zeroizing::new(bytes) }))
-                }
-                Err(other) => return Err(other),
-            };
-            return Ok(Made { content: map::compose(old, &Parts::default(), Some(&text))?, file });
-        }
         if let Some(local) = live.first().filter(|local| plain::is_plain_kind(&local.kind)) {
             // A cipher keeps the form it was made in: an SSH key item stays one, a note stays a note. If it cannot be written in that form
             // (the worker gave no answer, or the key is of a kind an SSH item does not hold) it is left as it is and the reason said.
@@ -745,7 +743,7 @@ impl Run<'_> {
         }
         let find = |kind: &str| live.iter().copied().find(|local| local.kind == kind);
         let gone: Vec<&str> = parts.iter().map(|part| part.kind.as_str()).filter(|kind| find(kind).is_none()).collect();
-        let content = map::compose(old, &Parts { password: find(KIND_PASSWORD), account: find(KIND_ACCOUNT), codes: find(KIND_BACKUP_CODES), sealed: None, gone }, None)?;
+        let content = map::compose(old, &Parts { password: find(KIND_PASSWORD), account: find(KIND_ACCOUNT), codes: find(KIND_BACKUP_CODES), gone })?;
         Ok(Made { content, file: None })
     }
 
@@ -753,12 +751,12 @@ impl Run<'_> {
         parts.iter().filter_map(|part| self.local(part).filter(|local| !map::deleted(local) && !self.leaving.contains(&key_of(local))).map(|local| PartRef { kind: part.kind.clone(), id: part.id.clone(), hash: map::hash(local) })).collect()
     }
 
-    fn link_from(&self, raw: Value, parts: Vec<PartRef>, sealed: bool, seal: u64) -> Option<Link> {
+    fn link_from(&self, raw: Value, parts: Vec<PartRef>) -> Option<Link> {
         let cipher = json::text(&raw, "id")?.to_string();
         let revision = json::text(&raw, "revisionDate")?.to_string();
         let deleted = json::some(&raw, "deletedDate").is_some();
         let atts = cipher::attachments(&raw);
-        Some(Link { cipher, revision, raw, deleted, sealed, seal, atts, file: None, made: false, parts })
+        Some(Link { cipher, revision, raw, deleted, sealed: false, seal: 0, atts, file: None, made: false, parts })
     }
 
     fn done(&mut self, cipher: &str, link: Option<Link>, writes: Vec<Write>, basis: Vec<Basis>) {
@@ -868,7 +866,7 @@ impl Run<'_> {
     /// A new cipher for these parts, with its file where it has one. Nothing a refusal or a failure leaves behind: a cipher made and then
     /// not filled goes to the server's trash, with its slot dropped; what cannot be cleaned now is kept to be cleaned by the next run. The
     /// word of the reason comes back, and a server that refuses files is remembered when it has refused for two items.
-    fn make(&mut self, session: &mut Session<'_>, made: Made, parts: Vec<PartRef>, sealed: bool, counter: u64) -> Result<Result<Link, &'static str>, Problem> {
+    fn make(&mut self, session: &mut Session<'_>, made: Made, parts: Vec<PartRef>) -> Result<Result<Link, &'static str>, Problem> {
         let Made { content, file } = made;
         if let Some(file) = &file
             && let Err(fail) = self.may_attach(file.bytes.len())
@@ -880,7 +878,7 @@ impl Run<'_> {
             Err(_) => return Ok(Err("too-long")),
         };
         let raw = session.call(|api| api.create(&body))?;
-        let Some(link) = self.link_from(raw, parts, sealed, counter).filter(|link| api::is_uuid(&link.cipher) && !self.links.contains_key(&link.cipher)) else {
+        let Some(link) = self.link_from(raw, parts).filter(|link| api::is_uuid(&link.cipher) && !self.links.contains_key(&link.cipher)) else {
             self.report.refuse("created", "bad-response");
             return Ok(Err("bad-response"));
         };
@@ -946,8 +944,7 @@ impl Run<'_> {
     /// The vault's version over the server's, starting from its last raw JSON. A stale copy turns into a conflict. A file that changed
     /// is a cipher of its own, since an attachment never changes, and the old cipher goes to the trash.
     fn push(&mut self, session: &mut Session<'_>, link: &Link, opened: &Opened) -> Result<(), Problem> {
-        let seal = link.sealed.then_some(link.seal + 1);
-        let made = match self.compose(Some(&opened.content), &link.parts, seal) {
+        let made = match self.compose(Some(&opened.content), &link.parts) {
             Ok(made) => made,
             Err(why) => {
                 self.report.refuse(&item_of(link), unmapped_word(why));
@@ -964,7 +961,7 @@ impl Run<'_> {
                 _ => true,
             };
         if replace {
-            return self.replace(session, link, opened, made, parts, seal);
+            return self.replace(session, link, opened, made, parts);
         }
         let new = made.content;
         if new == opened.content {
@@ -986,7 +983,7 @@ impl Run<'_> {
         match session.call(|api| api.update(&link.cipher, &body))? {
             Ok(raw) => {
                 self.report.sent += 1;
-                match self.link_from(raw, parts, link.sealed, seal.unwrap_or(0)) {
+                match self.link_from(raw, parts) {
                     Some(new_link) if new_link.cipher == link.cipher => self.done(&link.cipher, Some(Link { file: link.file.clone(), made: link.made, ..new_link }), Vec::new(), Vec::new()),
                     _ => self.report.refuse(&item_of(link), "bad-response"),
                 }
@@ -1007,27 +1004,32 @@ impl Run<'_> {
 
     /// A new cipher for the same items, and the old one to the trash once the new one stands: what a changed file costs (an
     /// attachment is written once and never changes, so nothing is destroyed here), or a form that changed
-    fn replace(&mut self, session: &mut Session<'_>, link: &Link, opened: &Opened, made: Made, parts: Vec<PartRef>, seal: Option<u64>) -> Result<(), Problem> {
-        match self.make(session, made, parts, link.sealed, seal.unwrap_or(0))? {
+    fn replace(&mut self, session: &mut Session<'_>, link: &Link, opened: &Opened, made: Made, parts: Vec<PartRef>) -> Result<(), Problem> {
+        match self.make(session, made, parts)? {
             Err(word) => self.report.refuse(&item_of(link), word),
             Ok(new_link) => {
                 self.report.sent += 1;
-                // The new cipher stands, whatever happens to the old one: it is linked first, so that a failure to put the old one in the
-                // trash does not make a third copy next run; the old one is kept listed, and the next run trashes it
-                let trashed = if opened.deleted { Ok(()) } else { session.call(|api| api.trash(&link.cipher)) };
-                self.done(&link.cipher.clone(), None, Vec::new(), Vec::new());
-                self.done(&new_link.cipher.clone(), Some(new_link), Vec::new(), Vec::new());
-                match trashed {
-                    Ok(()) => {
-                        if !opened.deleted {
-                            self.report.trashed_there += 1;
-                        }
-                    }
-                    Err(problem) => {
-                        self.pending.push(Leftover { cipher: link.cipher.clone(), slot: None });
-                        return Err(problem);
-                    }
+                self.swap(session, link, opened, new_link)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A cipher that stands in the place of another. The new cipher stands, whatever happens to the old one: it is linked first, so that a
+    /// failure to put the old one in the trash does not make a third copy next run; the old one is kept listed, and the next run trashes it.
+    fn swap(&mut self, session: &mut Session<'_>, link: &Link, opened: &Opened, new_link: Link) -> Result<(), Problem> {
+        let trashed = if opened.deleted { Ok(()) } else { session.call(|api| api.trash(&link.cipher)) };
+        self.done(&link.cipher.clone(), None, Vec::new(), Vec::new());
+        self.done(&new_link.cipher.clone(), Some(new_link), Vec::new(), Vec::new());
+        match trashed {
+            Ok(()) => {
+                if !opened.deleted {
+                    self.report.trashed_there += 1;
                 }
+            }
+            Err(problem) => {
+                self.pending.push(Leftover { cipher: link.cipher.clone(), slot: None });
+                return Err(problem);
             }
         }
         Ok(())
@@ -1052,7 +1054,7 @@ impl Run<'_> {
         self.done(&link.cipher.clone(), Some(link), writes, basis);
     }
 
-    /// New vault items from a cipher's content: a password, an authenticator account, backup codes, the item a sealed note holds
+    /// New vault items from a cipher's content: a password, an authenticator account, backup codes, the item an old sealed note holds
     /// (`blob` is its attachment, when the note says its blob is one), or a key. `conflict` marks them as the server's version, and
     /// gives a sealed one an id of its own. The sealed counter comes back.
     fn items_from(&mut self, content: &Content, uri_unproven: bool, conflict: bool, blob: Option<&[u8]>) -> (Vec<Write>, Vec<PartRef>, u64) {
@@ -1116,44 +1118,7 @@ impl Run<'_> {
         let mut writes = Vec::new();
         let mut parts = Vec::new();
         let mut basis = Vec::new();
-        let mut counter = link.seal;
-        if link.sealed && link.file.is_some() {
-            // The blob is a file, which never changes: what could have changed is the note around it, and nothing of that is taken. The
-            // vault's own item stays as it is, and the file has to be there still.
-            if !link.file.as_ref().is_some_and(|held| opened.attachments.iter().any(|att| att.id == held.id)) {
-                self.report.refuse(&item_of(link), "attachment-lost");
-                return;
-            }
-            parts = link.parts.clone();
-        } else if link.sealed {
-            let opened_item = match (&self.sealing, &content.notes) {
-                (Some((key, vault)), Some(notes)) => map::open_sealed(notes, key, vault),
-                _ => None,
-            };
-            let Some((item, found)) = opened_item.filter(|(item, _)| link.parts.first().is_some_and(|part| part.kind == item.kind && part.id == item.id)) else {
-                self.report.refuse(&item_of(link), "unreadable");
-                return;
-            };
-            // A note older than the one this vault sent last is a copy the server kept, and one with no counter replaces nothing
-            if found < link.seal || found == 0 {
-                self.report.refuse(&item_of(link), "rolled-back");
-                return;
-            }
-            counter = found;
-            for part in &link.parts {
-                basis.push(self.basis(part));
-            }
-            let mut write = Write { kind: item.kind.clone(), id: item.id.clone(), name: item.name.clone(), meta: item.meta.clone(), approval: item.approval, value: item.value.clone() };
-            if let Some(local) = link.parts.first().and_then(|part| self.local(part)) {
-                // The person's setting for how often it asks is never lowered by a server
-                write.approval = stricter(local.approval, item.approval);
-            }
-            parts.push(PartRef { kind: write.kind.clone(), id: write.id.clone(), hash: hash_of_write(&write) });
-            // The same note again, only dated later: nothing to write
-            if found != link.seal || self.local(&parts[0]).is_none_or(|local| map::hash(local) != parts[0].hash) {
-                writes.push(write);
-            }
-        } else if let Some(part) = link.parts.first().filter(|part| plain::is_plain_kind(&part.kind)) {
+        if let Some(part) = link.parts.first().filter(|part| plain::is_plain_kind(&part.kind)) {
             let Some(local) = self.local(part) else {
                 self.report.refuse(&item_of(link), "unreadable");
                 return;
@@ -1254,15 +1219,15 @@ impl Run<'_> {
             }
         }
         self.report.received += 1;
-        let link = Link { cipher: link.cipher.clone(), revision: opened.revision.clone(), raw, deleted: opened.deleted, sealed: link.sealed, seal: counter, atts: opened.attachments.clone(), file: link.file.clone(), made: link.made, parts };
+        let link = Link { cipher: link.cipher.clone(), revision: opened.revision.clone(), raw, deleted: opened.deleted, sealed: link.sealed, seal: link.seal, atts: opened.attachments.clone(), file: link.file.clone(), made: link.made, parts };
         self.done(&link.cipher.clone(), Some(link), writes, basis);
     }
 
-    fn create(&mut self, session: &mut Session<'_>, locals: Vec<&Local>, sealed: bool) -> Result<(), Problem> {
+    fn create(&mut self, session: &mut Session<'_>, locals: Vec<&Local>) -> Result<(), Problem> {
         let parts: Vec<PartRef> = locals.iter().map(|local| PartRef { kind: local.kind.clone(), id: local.id.clone(), hash: map::hash(local) }).collect();
         // Twice at most: a server that does not keep an SSH key item is found out by making one, and the key goes as a note
         for _ in 0..2 {
-            let made = match self.compose(None, &parts, sealed.then_some(1)) {
+            let made = match self.compose(None, &parts) {
                 Ok(made) => made,
                 Err(why) => {
                     for local in &locals {
@@ -1271,7 +1236,7 @@ impl Run<'_> {
                     return Ok(());
                 }
             };
-            match self.make(session, made, parts.clone(), sealed, u64::from(sealed))? {
+            match self.make(session, made, parts.clone())? {
                 Ok(link) => {
                     self.done(&link.cipher.clone(), Some(link), Vec::new(), Vec::new());
                     return Ok(());
@@ -1312,18 +1277,8 @@ impl Run<'_> {
     }
 }
 
-fn stricter(a: Approval, b: Approval) -> Approval {
-    let rank = |approval: Approval| match approval {
-        Approval::Never => 0,
-        Approval::WhileOpen => 1,
-        Approval::Ask => 2,
-    };
-    if rank(a) >= rank(b) { a } else { b }
-}
-
 fn unmapped_word(why: map::Unmapped) -> &'static str {
     match why {
-        map::Unmapped::TooLargeToSeal => "too-large-to-seal",
         map::Unmapped::FileTooLarge => "file-too-large",
         map::Unmapped::NoLink => "no-link",
         map::Unmapped::Unreadable => "unreadable",
@@ -1350,7 +1305,7 @@ pub fn run(http: &mut dyn Http, convert: &dyn Convert, input: Input) -> Outcome 
             connection.choices.entry(format!("{}.{}", local.kind, local.id)).or_insert_with(|| "off".to_string());
         }
     }
-    let mut outcome = Outcome { problem: None, access: None, refresh: None, revision: None, groups: Vec::new(), report: Report::default(), churn: 0, accepted: accept, purge: Vec::new(), no_files: stored.clone(), files_read: connection.files_read, pending: connection.pending.clone() };
+    let mut outcome = Outcome { problem: None, access: None, refresh: None, revision: None, groups: Vec::new(), report: Report::default(), churn: 0, accepted: accept, purge: Vec::new(), no_files: stored.clone(), files_read: connection.files_read, pending: connection.pending.clone(), kemlock: None };
     // What is not known is not guessed: an item that did not read is not one that was removed, and links that did not read are
     // not an account never seen
     if links_unreadable {
@@ -1538,7 +1493,7 @@ fn steps(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connection, 
         if local.kind == KIND_ACCOUNT && choice == "on" && attach(session, run, local)? {
             continue;
         }
-        run.create(session, vec![local], choice == "sealed")?;
+        run.create(session, vec![local])?;
     }
     // Tombstones past their days go, once the server's copy is in its trash too (or never was)
     let mut tombstones: Vec<&Local> = run.locals.values().copied().filter(|local| map::deleted(local)).collect();
@@ -1652,16 +1607,8 @@ fn one_link(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connectio
     };
     // Vaultwarden does not move a cipher's date when an attachment comes or goes: the list is looked at as well, for the files of ours
     let server_changed = now > then || (link.file.is_some() && link.atts != opened.attachments);
-    // The person's choice moved an item of it off, or into the other form (a Login or a sealed note): it leaves the cipher
-    let leaving: Vec<PartRef> = link
-        .parts
-        .iter()
-        .filter(|part| {
-            let choice = connection.choice(&part.kind, &part.id);
-            choice == "off" || (choice == "sealed") != link.sealed
-        })
-        .cloned()
-        .collect();
+    // The person's choice moved an item of it off: it leaves the cipher
+    let leaving: Vec<PartRef> = link.parts.iter().filter(|part| connection.choice(&part.kind, &part.id) == "off").cloned().collect();
     if !leaving.is_empty() {
         return retire(session, run, link, &leaving, &opened, raw);
     }
@@ -1671,10 +1618,14 @@ fn one_link(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connectio
         run.conflict(link, &opened, raw);
         return Ok(());
     }
+    // A sealed note of an earlier version: the item goes as the plain cipher it would be, and the note goes to the trash after it
+    if link.sealed {
+        return migrate(session, run, link, &opened, raw, server_changed);
+    }
     // A cipher with no key of its own could be handed another's password or address, and nothing here could tell (the review's H2):
     // a change to either is a conflict, never taken. Every cipher is given a key when it is first linked, so this is the old ones that
     // could not be, an attachment's or a passkey's.
-    if server_changed && !opened.has_key && !link.sealed {
+    if server_changed && !opened.has_key {
         let before = open_canon(&link.raw, &run.user).ok();
         if before.is_some_and(|before| before.content.password != opened.content.password || before.content.uri != opened.content.uri) {
             run.conflict(link, &opened, raw);
@@ -1744,17 +1695,12 @@ fn one_link(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connectio
             let same = if link.file.is_some() {
                 // A file is written once: what the server holds of it is what was sent, and only a note around it can differ
                 false
-            } else if link.sealed {
-                sealed_same(run, link, &opened)
             } else {
-                run.compose(Some(&opened.content), &link.parts, None).is_ok_and(|mine| mine.content == opened.content)
+                run.compose(Some(&opened.content), &link.parts).is_ok_and(|mine| mine.content == opened.content)
             };
             if same {
                 let parts = run.part_refs(&link.parts);
-                let counter = if link.sealed { sealed_counter(run, &opened).unwrap_or(link.seal) } else { link.seal };
-                run.done(&cipher, Some(Link { revision: opened.revision.clone(), raw, deleted: false, parts, seal: counter, atts: opened.attachments.clone(), ..link.clone() }), Vec::new(), Vec::new());
-            } else if link.sealed && link.file.is_none() && sealed_counter(run, &opened).is_some_and(|found| found < link.seal) {
-                run.report.refuse(&item_of(link), "rolled-back");
+                run.done(&cipher, Some(Link { revision: opened.revision.clone(), raw, deleted: false, parts, atts: opened.attachments.clone(), ..link.clone() }), Vec::new(), Vec::new());
             } else if link.file.is_some() || link.parts.first().is_some_and(|part| matches!(part.kind.as_str(), kinds::CERTIFICATE | kinds::PROTECTED)) {
                 // A file never changes, and a certificate or a protected file has nothing a note could say that this vault would take:
                 // the vault's version goes, from what the server holds now, and the person is told
@@ -1820,14 +1766,63 @@ fn sealed_item(run: &Run<'_>, opened: &Opened) -> Option<(Local, u64)> {
     map::open_sealed(opened.content.notes.as_deref()?, key, vault)
 }
 
-fn sealed_counter(run: &Run<'_>, opened: &Opened) -> Option<u64> {
-    sealed_item(run, opened).map(|(_, counter)| counter)
-}
-
 /// The note on the server holds the same item as the vault does now
 fn sealed_same(run: &Run<'_>, link: &Link, opened: &Opened) -> bool {
     let Some((theirs, _)) = sealed_item(run, opened) else { return false };
     link.parts.first().and_then(|part| run.local(part)).is_some_and(|mine| mine.kind == theirs.kind && mine.id == theirs.id && mine.name == theirs.name && mine.value == theirs.value)
+}
+
+/// A sealed note an earlier version of this vault wrote: sealed sync is gone, and the item goes as what `on` makes of it (a Login, a
+/// secure note or an SSH key item that Bitwarden's apps open). The plain cipher is written first and the note goes to the server's trash
+/// after it, never deleted; if the plain one cannot be written the note stays as it is, and the next run tries again. An item the vault no
+/// longer holds, or no longer syncs, only has the note trashed. If the note changed on the server since it was written, what it says is
+/// kept as an item of its own (a conflict, as any change on both sides is), and goes plain the next run.
+fn migrate(session: &mut Session<'_>, run: &mut Run<'_>, link: &Link, opened: &Opened, raw: Value, server_changed: bool) -> Result<(), Problem> {
+    if server_changed {
+        if link.file.is_some() {
+            // The blob is a file, which never changes: only the note around it can have, and nothing of that is taken. The file has to be there.
+            if !link.file.as_ref().is_some_and(|held| opened.attachments.iter().any(|att| att.id == held.id)) {
+                return stop(run, &item_of(link), "attachment-lost");
+            }
+        } else if let Some((_, found)) = sealed_item(run, opened) {
+            // A note older than the one this vault sent last is a copy the server kept
+            if found < link.seal {
+                return stop(run, &item_of(link), "rolled-back");
+            }
+            if !sealed_same(run, link, opened) {
+                run.conflict(link, opened, raw);
+                return Ok(());
+            }
+        } else {
+            return stop(run, &item_of(link), "unreadable");
+        }
+    }
+    let parts = run.part_refs(&link.parts);
+    if parts.is_empty() {
+        return retire(session, run, link, &link.parts, opened, raw);
+    }
+    // Twice at most: a server that does not keep an SSH key item is found out by making one, and the key goes as a note
+    for _ in 0..2 {
+        let made = match run.compose(None, &parts) {
+            Ok(made) => made,
+            Err(why) => {
+                run.report.refuse(&item_of(link), unmapped_word(why));
+                return Ok(());
+            }
+        };
+        match run.make(session, made, parts.clone())? {
+            Ok(new_link) => {
+                run.report.sent += 1;
+                return run.swap(session, link, opened, new_link);
+            }
+            Err("ssh-missing") => {}
+            Err(word) => {
+                run.report.refuse(&item_of(link), word);
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A cipher the vault has not seen: the account's own Logins, backup codes and this vault's sealed notes come in; everything
@@ -1898,7 +1893,7 @@ fn new_cipher(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connect
         let unlinked: Vec<&Local> = run.locals.values().copied().filter(|local| !run.linked.contains(&key_of(local)) && !map::deleted(local) && connection.choice(&local.kind, &local.id) == "on").collect();
         for local in unlinked {
             let parts = [PartRef { kind: local.kind.clone(), id: local.id.clone(), hash: map::hash(local) }];
-            if run.compose(None, &parts, None).is_ok_and(|mine| mine.file.is_none() && mine.content == *content) {
+            if run.compose(None, &parts).is_ok_and(|mine| mine.file.is_none() && mine.content == *content) {
                 let (raw, revision) = match run.rekey(session, raw, &opened)? {
                     Some(new) => {
                         let revision = json::text(&new, "revisionDate").unwrap_or(&opened.revision).to_string();

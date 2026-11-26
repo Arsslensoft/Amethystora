@@ -825,7 +825,7 @@ if command -v podman >/dev/null && wait_for 60 sh -c 'getent hosts docker.io >/d
         if ((rc != 0)); then ok "connecting to a server with no such account fails, and says so"; else not_ok "sync connected to an account that does not exist"; fi
         echo "# the network service after a connection attempt: $(systemctl is-active amethystora-vault-net.service)"
         same "sync's address is not a row of what the machine sends: nothing is connected" "$(tester_session 'ame security sends' 2>&1 | grep -c vault-sync || true)" 0
-        skip "every kind both ways, a conflict keeping both, a sealed item unreadable on the server, a stopped server and nothing failing: they need an account the server knows (cargo's vaultwarden.rs does them against this same image)"
+        skip "every kind both ways, a conflict keeping both, an old sealed note moved to its plain form, a stopped server and nothing failing: they need an account the server knows (cargo's vaultwarden.rs does them against this same image)"
         podman rm -f vmlab-vaultwarden >/dev/null 2>&1
     else
         skip "Vaultwarden could not be pulled here (no registry reachable from the lab): sync against it is cargo's, apps/vault-net/tests/vaultwarden.rs"

@@ -77,8 +77,10 @@ your server's address ready to copy once Sync is connected.
 
 ### What fills there
 
-- **Only what syncs as Plain.** Items that sync **Sealed**, or not at all, stay on this computer. The Sync page says which
+- **Only what syncs.** Items that do not sync stay on this computer. The Sync page says which
   kinds are which.
+- **Not on a Kemlock Server.** There the Vault's items are Kemlock's own ([Sync](vault-sync.md#kemlock-server)), which Bitwarden's
+  extension does not read: open them in the Kemlock app or web vault.
 - **A server with its own certificate authority** must be trusted by the browser too.
 - **A Flatpak browser works too**, since it talks to your server, not this computer.
 - **The extension is Bitwarden's**, a trademark of its owner. The Vault works with it and is not made by or connected with it;

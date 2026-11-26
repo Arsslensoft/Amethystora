@@ -27,6 +27,12 @@ pub fn random(out: &mut [u8]) {
     getrandom::fill(out).expect("the kernel gives random bytes");
 }
 
+/// `N` random bytes, written by the kernel into uninitialised memory, so that no constant ever stands for them
+pub fn random_array<const N: usize>() -> [u8; N] {
+    let mut out = [std::mem::MaybeUninit::<u8>::uninit(); N];
+    getrandom::fill_uninit(&mut out).expect("the kernel gives random bytes").try_into().expect("N bytes")
+}
+
 /// `count` random bytes in lowercase hex: what ids are made of
 pub fn random_hex(count: usize) -> String {
     let mut bytes = vec![0u8; count];

@@ -53,7 +53,7 @@ impl Browser {
 
         let login = widgets::card();
         login.append(&widgets::h2(&t!("4. Sign in with the same account")));
-        login.append(&widgets::p(&t!("Use the email and password of the account Sync connected to. The extension then fills what syncs as Plain. Items that sync Sealed, and items that do not sync, stay on this computer and are not there. Sync says which kinds are which."), &["soft", "small"]));
+        login.append(&widgets::p(&t!("Use the email and password of the account Sync connected to. The extension then fills what syncs. Items that do not sync stay on this computer and are not there. Sync says which kinds are which."), &["soft", "small"]));
         page.append(&login);
 
         page.append(&widgets::callout(&t!("If your server's certificate comes from a certificate authority of your own, trust that authority in the browser as well, or the extension cannot reach the server.")));
@@ -76,7 +76,7 @@ impl Browser {
     }
 
     /// Step 1 with one: the address to give the extension, to copy
-    fn connected(&self, address: &str) {
+    fn connected(&self, address: &str, kemlock: bool) {
         ui::clear(&self.server);
         self.server.append(&widgets::h2(&t!("1. Your server's address")));
         self.server.append(&widgets::p(&t!("Sync is connected. This is the address the extension needs."), &["soft", "small"]));
@@ -91,6 +91,9 @@ impl Browser {
             vault.say(&t!("Copied."));
         }));
         self.server.append(&row);
+        if kemlock {
+            self.server.append(&widgets::p(&t!("This is a Kemlock Server, and the vault keeps its items there as Kemlock's own. Open them in the Kemlock app or its web vault. Bitwarden's extension shows only the copies it had before."), &["warn", "small"]));
+        }
     }
 }
 
@@ -107,7 +110,7 @@ impl Page for Browser {
             match status {
                 // The address is text somebody typed: shown as text, never as markup
                 Ok(status) if status["connected"] == json!(true) && status["address"].as_str().is_some_and(|address| address.starts_with("https://")) => {
-                    page.connected(&widgets::clean(status["address"].as_str().unwrap_or("")));
+                    page.connected(&widgets::clean(status["address"].as_str().unwrap_or("")), status["backend"] == json!("kemlock"));
                 }
                 _ => page.not_connected(),
             }

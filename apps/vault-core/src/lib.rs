@@ -17,3 +17,4 @@ pub mod codes;
 pub mod keys;
 pub mod pki;
 pub mod sync;
+pub mod kemlock;

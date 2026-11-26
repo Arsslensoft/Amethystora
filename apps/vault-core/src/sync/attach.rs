@@ -17,8 +17,6 @@ pub const MOST_FILE: usize = 64 * 1024 * 1024;
 const ALLOWANCE: usize = 1024 * 1024;
 /// A file name's most bytes as plaintext, so that its EncString stays within the 1,000 characters Bitwarden gives `attachments2` (3.3)
 const MOST_NAME: usize = 687;
-/// The name every sealed blob goes by: it must say nothing of its kind (3.3)
-pub const SEALED_NAME: &str = "amethystora-sealed.bin";
 /// A token's most characters, whichever shape (2.2)
 const MOST_TOKEN: usize = 4096;
 

@@ -80,14 +80,14 @@ fn has_foreign_field(fake: &Fake, id: &str) -> bool {
 // --- F2: a kind switch never destroys what the vault did not write ----------------------------------------------------------------
 
 #[test]
-fn f2_a_login_of_the_persons_is_cleared_of_what_the_vault_wrote_and_never_trashed_when_its_kind_goes_sealed() {
+fn f2_a_login_of_the_persons_is_cleared_of_what_the_vault_wrote_and_never_trashed_when_its_kind_goes_off() {
     let mut fake = Fake::default();
     let mut connection = connect(&mut fake).unwrap();
     let mut vault = sealed_vault();
     let id = app_login(&mut fake, "From the app", "app-secret-pw");
     vault.sync(&mut fake, &connection);
     assert_eq!(vault.of_kind("password").len(), 1, "linked as a password");
-    on(&mut connection, "password", "sealed");
+    on(&mut connection, "password", "off");
     let outcome = vault.sync(&mut fake, &connection);
     assert!(outcome.problem.is_none(), "{:?}", outcome.report.refused);
     // Still there, not in the trash, with the person's folder and field; what the vault wrote is out of it
@@ -96,14 +96,14 @@ fn f2_a_login_of_the_persons_is_cleared_of_what_the_vault_wrote_and_never_trashe
     assert_eq!((content.password, content.username, content.uri), (None, None, None));
     assert_eq!(fake.find(&id).unwrap()["folderId"], json!("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"));
     assert!(has_foreign_field(&fake, &id));
-    // The sealed note stands beside it, and the vault's item is whole
-    assert_eq!(live_ids(&fake).len(), 2);
+    // Nothing else stands beside it, and the vault's item is whole
+    assert_eq!(live_ids(&fake).len(), 1);
     assert_eq!(vault.of_kind("password").len(), 1);
     assert_eq!(vault.of_kind("password")[0].value["password"], json!("app-secret-pw"));
     // What is left is not brought in again as an item
     vault.sync(&mut fake, &connection);
     assert_eq!(vault.of_kind("password").len(), 1);
-    assert_eq!(live_ids(&fake).len(), 2);
+    assert_eq!(live_ids(&fake).len(), 1);
 }
 
 #[test]
@@ -140,12 +140,12 @@ fn f2_a_login_the_vault_made_is_not_trashed_once_the_person_put_something_in_it(
     vault.sync(&mut fake, &connection);
     let id = live_ids(&fake)[0].clone();
     add_foreign_field(&mut fake, &id);
-    on(&mut connection, "password", "sealed");
+    on(&mut connection, "password", "off");
     vault.sync(&mut fake, &connection);
     assert!(fake.find(&id).unwrap()["deletedDate"].is_null());
     assert!(has_foreign_field(&fake, &id));
     assert_eq!(opened(&fake, &id).content.password, None);
-    assert_eq!(live_ids(&fake).len(), 2, "and the sealed note beside it");
+    assert_eq!(live_ids(&fake).len(), 1, "and nothing beside it");
 }
 
 // --- F3: nothing is left half made on the server ---------------------------------------------------------------------------------
@@ -433,7 +433,7 @@ fn f11_a_copy_trashed_on_the_server_is_not_a_thing_trashed_here() {
 // --- Found with Vaultwarden: the mark that the vault made a cipher outlives an edit of it ----------------------------------------------
 
 #[test]
-fn a_note_the_vault_made_is_still_known_as_made_after_an_edit_and_goes_to_the_trash_whole_when_its_kind_goes_sealed() {
+fn a_note_the_vault_made_is_still_known_as_made_after_an_edit_and_goes_to_the_trash_whole_when_its_kind_goes_off() {
     let mut fake = Fake::default();
     let mut connection = connect(&mut fake).unwrap();
     on(&mut connection, "key", "on");
@@ -451,9 +451,9 @@ fn a_note_the_vault_made_is_still_known_as_made_after_an_edit_and_goes_to_the_tr
     assert!(vault.links.get(&id).unwrap().made, "the edit forgot that this client made the note");
     // The other app's field on it, so that it holds more than the vault wrote
     add_foreign_field(&mut fake, &id);
-    on(&mut connection, "key", "sealed");
+    on(&mut connection, "key", "off");
     let outcome = vault.sync(&mut fake, &connection);
     assert!(outcome.problem.is_none(), "{:?}", outcome.report.refused);
     assert!(!fake.find(&id).unwrap()["deletedDate"].is_null(), "a plain key stayed on the server");
-    assert_eq!(live_ids(&fake).len(), 1, "and one sealed note stands");
+    assert_eq!(live_ids(&fake).len(), 0, "and nothing of it stands");
 }

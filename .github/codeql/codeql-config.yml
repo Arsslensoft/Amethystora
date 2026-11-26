@@ -11,3 +11,5 @@ paths-ignore:
   - '**/test_*.py'
   - 'build_files/shared/test-*'
   - 'apps/vault-core/src/sync/fake.rs'
+  - 'apps/vault-core/src/kemlock/sync/fake.rs'
+  - 'apps/vault-core/src/kemlock/vectors.rs'
