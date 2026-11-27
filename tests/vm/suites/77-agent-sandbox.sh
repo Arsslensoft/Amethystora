@@ -164,6 +164,22 @@ EOF
 )"
 expect later no "sandboxed: a script its settings name but that is not there cannot be made"
 expect left no "sandboxed: the empty file that held its place is taken back"
+
+# What it writes in a build cache lands on disk in the launch's own folder, not in memory, and that folder goes when it ends
+out="$(user_script ondisk <<EOF
+set +e
+mkdir -p ~/vmlab-code/site ~/.cargo/registry
+cd ~/vmlab-code/site && ${TOOLS} agent-run --agent claude --sandbox open --quiet -- bash -c 'head -c 8M /dev/zero >~/.cargo/registry/vmlab-big
+if ls ~/.cache/amethystora/agent-sandbox/*/layers/*/upper/vmlab-big >/dev/null 2>&1; then echo disk=yes; else echo disk=no; fi
+if mount | grep -q "^tmpfs on .*/.cargo/registry"; then echo memory=yes; else echo memory=no; fi'
+if ls ~/.cache/amethystora/agent-sandbox/*/layers >/dev/null 2>&1; then echo gone=no; else echo gone=yes; fi
+test -e ~/.cargo/registry/vmlab-big && echo leaked=yes || echo leaked=no
+EOF
+)"
+expect disk yes "sandboxed: what it writes in a build cache is on disk, in the launch's folder"
+expect memory no "sandboxed: a build cache's layer takes no memory"
+expect gone yes "sandboxed: the layer's folder goes when the launch ends"
+expect leaked no "sandboxed: nothing of the layer reaches the cache"
 expect aftersnapshot before "sandboxed: a shell snapshot the next session sources is unchanged"
 expect ide no "sandboxed: the editor's connection and its key are not there"
 expect status no "sandboxed: the status line's script is read-only"

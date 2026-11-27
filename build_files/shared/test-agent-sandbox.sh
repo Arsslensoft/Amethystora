@@ -24,8 +24,8 @@ grep -q '/usr/share/amethystora/credential-files' /usr/libexec/amethystora-audit
 grep -q 'agent-profiles/\*/' /usr/libexec/amethystora-audit-home-rules || fail "the watcher's rules do not read each profile's logins"
 test -s /usr/share/amethystora/agent-sandbox.bpf || fail "the sandbox's seccomp filter is missing"
 test -x /usr/bin/bwrap || fail "bubblewrap is missing"
-# The build caches and the agent's memory are each a layer of the launch's own (--overlay-src, --tmp-overlay: bubblewrap 0.10)
-[[ "$(/usr/bin/bwrap --help 2>&1)" == *--tmp-overlay* ]] || fail "bubblewrap has no --tmp-overlay, which the sandbox's layers need"
+# The build caches and the agent's memory are each a layer of the launch's own, on disk (--overlay-src, --overlay: bubblewrap 0.10)
+[[ "$(/usr/bin/bwrap --help 2>&1)" == *"--overlay RWSRC"* ]] || fail "bubblewrap has no --overlay, which the sandbox's layers need"
 
 # A stand-in home, outside /tmp (which a sandbox has its own of, and never takes a project from). The image's build has no
 # /var/lib yet: what this makes there is taken away again, /var/lib with it, so that nothing is left in /var
@@ -98,7 +98,9 @@ command="$(jq -r .command <<<"${shown}")"
 mkdir -p "${H}/.cargo/registry"
 shown="$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site/src" --json)"
 command="$(jq -r .command <<<"${shown}")"
-[[ ${command} == *"--overlay-src ${H}/.cargo/registry --tmp-overlay ${H}/.cargo/registry "* ]] || fail "the cache a layer: ${command}"
+[[ ${command} == *"--overlay-src ${H}/.cargo/registry --overlay ${H}/.cache/amethystora/agent-sandbox/"*"/upper ${H}/.cache/amethystora/agent-sandbox/"*"/work ${H}/.cargo/registry "* ]] ||
+    fail "the cache a layer on disk: ${command}"
+[[ ${command} != *"--tmp-overlay"* ]] || fail "a layer in memory: ${command}"
 [[ ${command} != *"--bind ${H}/.cargo/registry "* ]] || fail "the cache bound writable"
 jq -e --arg h "${H}" '.writable | index("\($h)/.cargo/registry") | not' <<<"${shown}" >/dev/null || fail "the cache said writable"
 # Claude Code's projects a layer, this project's folder in it (and the launch's) the real one, its memory a layer again, the
@@ -108,10 +110,10 @@ name="${name//[^a-zA-Z0-9]/-}"
 below="${H}/code/site/src"
 below="${below//[^a-zA-Z0-9]/-}"
 P="${H}/.claude/projects"
-[[ ${command} == *"--overlay-src ${P} --tmp-overlay ${P} "*"--bind ${P}/${name} ${P}/${name} "*"--overlay-src ${P}/${name}/memory --tmp-overlay ${P}/${name}/memory "* ]] ||
+[[ ${command} == *"--overlay-src ${P} --overlay "*"/work ${P} "*"--bind ${P}/${name} ${P}/${name} "*"--overlay-src ${P}/${name}/memory --overlay "*"/work ${P}/${name}/memory "* ]] ||
     fail "Claude Code's memory: ${command}"
 [[ ${command} == *"--bind ${P}/${below} ${P}/${below} "* ]] || fail "the launch's own folder of projects"
-[[ ${command} == *"--overlay-src ${H}/.claude/shell-snapshots --tmp-overlay ${H}/.claude/shell-snapshots "* ]] || fail "the shell's snapshots"
+[[ ${command} == *"--overlay-src ${H}/.claude/shell-snapshots --overlay "*"/work ${H}/.claude/shell-snapshots "* ]] || fail "the shell's snapshots"
 [[ ${command} == *"--tmpfs ${H}/.claude/ide "* && ${command} == *"--tmpfs ${H}/.claude/sessions "* ]] || fail "the editor's connection and the other sessions"
 # What its settings run and what its instructions bring in, read-only, the folder on the way a mount of its own first
 mkdir -p "${H}/.claude/scripts"

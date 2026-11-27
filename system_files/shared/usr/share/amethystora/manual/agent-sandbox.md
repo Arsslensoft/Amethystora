@@ -27,9 +27,10 @@ hidden from it, and that the network is open. **A project never picks its own sa
 - A `/tmp` and `/var/tmp` of its own, removed when it ends.
 
 **The build caches** that exist (Cargo's, npm's, Go's, pip's, uv's, Maven's, Gradle's, Playwright's browsers) it reads and
-writes through a layer of its own, kept in memory and thrown away when it ends. Nothing it writes there reaches your cache,
-since a build script or a package changed there would run at your next `cargo build`, `npx` or test, with no diff to read.
-The cost: what it downloads is downloaded again at each launch, and a large download takes memory while it runs.
+writes through a layer of its own, kept on disk in `~/.cache/amethystora/agent-sandbox` and removed when it ends. Nothing it
+writes there reaches your cache, since a build script or a package changed there would run at your next `cargo build`,
+`npx` or test, with no diff to read. The cost: what it downloads is downloaded again at each launch, and takes disk space
+while it runs.
 
 **In its own folder**, what a session started later outside the sandbox would run or read stays as it is:
 

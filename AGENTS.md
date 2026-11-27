@@ -477,7 +477,7 @@ secret file gets a `hidden` line, a `credential-files` pattern and a place in th
   credentials, the other agents' and profiles' folders and `/var/home/.snapshots` hidden, the repository's hooks and settings, the
   agents' settings in the project and their own read-only, a private copy of each file the table's `copy` lines name, `/run`
   and `/tmp` its own, a PID namespace, and the seccomp filter `gen.c --agent` writes (`agent-sandbox.bpf`). It fails closed.
-  **The build caches are never writable**: each is read-only under a throwaway in-memory layer (`--overlay-src C --tmp-overlay C`),
+  **The build caches are never writable**: each is read-only under a throwaway layer on disk in the launch's folder (`--overlay-src C --overlay UPPER WORK C`, removed with it; never `--tmp-overlay`, which would put a build's downloads in memory),
   since a package or build script changed there runs at the next plain build with no diff; a launch that cannot make the layer is
   refused, never given the cache (maintainer, 2026-11-26). In the agent's folder, every script its settings run (status line, hooks,
   MCP servers, key helpers) and every file its instructions import (`@file`) is read-only with the `ro` lines; `layer` places are

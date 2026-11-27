@@ -594,7 +594,7 @@ pub fn recipe(table: &Table, request: &Request) -> Result<Recipe, String> {
     })).collect();
     recipe.writable = writable;
 
-    // The build caches that are there, behind a layer of the launch's own (bubblewrap's --tmp-overlay, in memory): the agent
+    // The build caches that are there, behind a layer of the launch's own (layer(), on disk in the launch's folder): the agent
     // reads what is cached and writes what it fetches, and none of it is seen outside, since a build script, a package or a
     // browser changed in a cache would run at the developer's next plain build or test, with no diff to read. What it fetches
     // is fetched again at each launch. A layer that cannot be made stops the launch, which never makes a cache writable instead
@@ -619,8 +619,7 @@ pub fn recipe(table: &Table, request: &Request) -> Result<Recipe, String> {
                 path.display()
             ));
         }
-        recipe.args.extend(["--overlay-src".into(), s(&path), "--tmp-overlay".into(), s(&path)]);
-        recipe.layers.push(path);
+        layer(&mut recipe, &request.run, &path, &path);
     }
 
     // Closed: the toolchains, read-only
@@ -899,8 +898,7 @@ pub fn recipe(table: &Table, request: &Request) -> Result<Recipe, String> {
                 if std::fs::symlink_metadata(source).is_err() {
                     recipe.make.push(Make::Placeholder(source.clone()));
                 }
-                recipe.args.extend(["--overlay-src".into(), s(source), "--tmp-overlay".into(), s(place)]);
-                recipe.layers.push(place.clone());
+                layer(&mut recipe, &request.run, source, place);
             }
             "keep" => {
                 recipe.make.push(Make::Dir(source.clone()));
@@ -1118,9 +1116,41 @@ fn sweep(home: &Path) {
         let pid = name.split('-').next().unwrap_or("");
         if pid.bytes().all(|b| b.is_ascii_digit()) && !Path::new("/proc").join(pid).exists() {
             take_back(&entry.path());
-            let _ = std::fs::remove_dir_all(entry.path());
+            remove_run(&entry.path());
         }
     }
+}
+
+/// A layer of the launch's own over PLACE, read from SOURCE (bubblewrap's --overlay, 0.10): what the agent writes there goes
+/// to the launch's own folder on disk, never to memory (a build fetches gigabytes), and is removed with that folder when the
+/// launch ends. The upper and work folders are made first, on one filesystem as overlayfs needs, and empty. (unverified: that
+/// bubblewrap mounts it with userxattr in the user namespace on the home's filesystem, as it does --tmp-overlay; the lab says)
+fn layer(recipe: &mut Recipe, run: &Path, source: &Path, place: &Path) {
+    let at = run.join("layers").join(recipe.layers.len().to_string());
+    let (upper, work) = (at.join("upper"), at.join("work"));
+    recipe.make.push(Make::Dir(upper.clone()));
+    recipe.make.push(Make::Dir(work.clone()));
+    recipe.args.extend(["--overlay-src".into(), s(source), "--overlay".into(), s(&upper), s(&work), s(place)]);
+    recipe.layers.push(place.to_path_buf());
+}
+
+/// The launch's folder taken away whole: overlayfs leaves a folder of mode 0 in each work folder, which remove_dir_all cannot
+/// read, so every folder in it is made the account's to open first (all of it is the account's own, never a link followed)
+fn remove_run(run: &Path) {
+    let mut stack = vec![run.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if !std::fs::symlink_metadata(&dir).is_ok_and(|meta| meta.is_dir()) {
+            continue;
+        }
+        let _ = std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700));
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                stack.push(entry.path());
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(run);
 }
 
 /// The empty folders and files a launch made, as it noted them, taken away while still empty
@@ -1229,7 +1259,7 @@ pub fn run(recipe: &Recipe, request: &Request, command: &[String]) -> Result<i32
     };
     prepare(recipe, &request.run).inspect_err(|_| {
         take_back(&request.run);
-        let _ = std::fs::remove_dir_all(&request.run);
+        remove_run(&request.run);
     })?;
     let session = (request.mode != Mode::Profile).then(|| {
         session_file(&json!({"pid": crate::history::host_pid(), "started": crate::history::now(), "agent": request.agent, "profile": request.profile,
@@ -1246,7 +1276,7 @@ pub fn run(recipe: &Recipe, request: &Request, command: &[String]) -> Result<i32
         let _ = std::fs::remove_file(&socket);
         let listener = std::os::unix::net::UnixListener::bind(&socket).map_err(|error| {
             take_back(&request.run);
-            let _ = std::fs::remove_dir_all(&request.run);
+            remove_run(&request.run);
             format!("the sandbox's proxy could not listen ({error}), so nothing starts")
         })?;
         let hosts = hosts.clone();
@@ -1296,7 +1326,7 @@ pub fn run(recipe: &Recipe, request: &Request, command: &[String]) -> Result<i32
         }
         Err(error) => {
             take_back(&request.run);
-            let _ = std::fs::remove_dir_all(&request.run);
+            remove_run(&request.run);
             if let Some(path) = &session {
                 let _ = std::fs::remove_file(path);
             }
@@ -1304,7 +1334,7 @@ pub fn run(recipe: &Recipe, request: &Request, command: &[String]) -> Result<i32
         }
     };
     take_back(&request.run);
-    let _ = std::fs::remove_dir_all(&request.run);
+    remove_run(&request.run);
     if request.hosts.is_some() {
         let _ = std::fs::remove_file(proxy_socket(request));
     }
@@ -1751,7 +1781,7 @@ mod tests {
     /// The position of a layer over PATH, read from PATH itself, in the recipe
     fn layer_at(recipe: &Recipe, path: &Path) -> Option<usize> {
         let path = s(path);
-        recipe.args.windows(4).position(|w| w[0] == "--overlay-src" && w[1] == path && w[2] == "--tmp-overlay" && w[3] == path)
+        recipe.args.windows(6).position(|w| w[0] == "--overlay-src" && w[1] == path && w[2] == "--overlay" && w[5] == path)
     }
 
     #[test]
@@ -1993,6 +2023,29 @@ mod tests {
             let path = s(&home.join(file));
             assert!(!recipe.args.windows(3).any(|w| w[0] == "--ro-bind" && w[1] == path && w[2] == path), "{file}");
         }
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn a_layer_is_written_on_disk_in_the_launchs_folder_and_goes_with_it() {
+        let home = temp("layer-disk");
+        for dir in ["code/a", ".cargo/registry"] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+        let request = request(&home, &home.join("code/a"), Mode::Open, DEFAULT, "claude");
+        let recipe = recipe(&table(), &request).unwrap();
+        let cache = s(&home.join(".cargo/registry"));
+        let at = recipe.args.windows(6).find(|w| w[0] == "--overlay-src" && w[1] == cache && w[2] == "--overlay").expect("the cache's layer");
+        // Its upper and work folders in the launch's own folder, made first, and never a layer in memory
+        assert!(at[3].starts_with(&s(&request.run)) && at[4].starts_with(&s(&request.run)) && at[3] != at[4], "{at:?}");
+        assert!(recipe.make.contains(&Make::Dir(PathBuf::from(&at[3]))) && recipe.make.contains(&Make::Dir(PathBuf::from(&at[4]))));
+        assert!(!recipe.args.iter().any(|arg| arg == "--tmp-overlay"));
+        // The folder overlayfs leaves in a work folder has mode 0: the launch's folder goes all the same
+        let stuck = request.run.join("layers/0/work/work");
+        std::fs::create_dir_all(stuck.join("inside")).unwrap();
+        std::fs::set_permissions(&stuck, std::os::unix::fs::PermissionsExt::from_mode(0o000)).unwrap();
+        remove_run(&request.run);
+        assert!(!request.run.exists());
         std::fs::remove_dir_all(&home).unwrap();
     }
 
