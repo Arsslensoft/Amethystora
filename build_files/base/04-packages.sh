@@ -17,10 +17,6 @@ source /ctx/build_files/shared/copr-helpers.sh
 
 # Base packages from Fedora repos - common to all versions
 FEDORA_PACKAGES=(
-    # The zstd command, upgraded with its library: a -devel package below takes libzstd to the version in updates, and the
-    # base image's zstd, which nothing else here asks for, stays behind. Then dracut's zstd stops with "incorrect library
-    # version" and the initramfs is never made (19-initramfs.sh).
-    zstd
     # The interface and monospace fonts of the themes that Fedora packages (each theme's font.theme and mono.theme,
     # ame desktop font and mono-font): Comfortaa, Rubik, IBM Plex Mono and Sans, Geist and Geist Mono, Fira Code,
     # Nunito and Work Sans here, Inter and JetBrains Mono below. The others come from Google Fonts, pinned, in
