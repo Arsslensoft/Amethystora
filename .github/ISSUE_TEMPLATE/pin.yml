@@ -1,5 +1,6 @@
 name: Pin Request
 description: Ask to pin a package to a specific version in order to avoid regressions
+labels: ["needs-triage"]
 body:
   - type: markdown
     attributes:

@@ -460,7 +460,14 @@ agent cleaned and marked as data. Off costs nothing: no daemon, timer or service
   the duress feature, a security command that loosens protection or sends something away (only reads and
   turning protection on pass), deleting from a backup or a snapshot, erasing disks, the AUR, sudoers, polkit,
   PAM, the agent's own lock and root mode, the update boot guard and the lost-computer line, the Notes data, the Vault, and shells or wrappers that would run commands out
-  of sight. The tools that change things refuse while the agent runs with its own checks off (a flag from
+  of sight. It judges `ame`'s old names (`00-entry.just`'s aliases, read from the image) as the recipes they run, a path in
+  any spelling (relative from `/`, `//`, `/./`, `..`, after an `=`), and options of just it does not know as refused. The root
+  helper also runs only programs under `/usr`, by the name they resolve to, judges each path word by where its links lead,
+  and refuses programs that run a command in a container or on another machine. A list of words cannot see a link the
+  account swaps after the check, nor what a file the agent wrote does: for root, the person's yes is the lock, and the list
+  a rail. Root through an approval already given (`session`, `minutes`) is refused when the agent hands the tool server a pipe
+  for its requests (Codex does), which any program of the account can open through `/proc/PID/fd/0` and write to; a socket
+  cannot be opened so (`act::root_refusal`). `each` and `terminal` show the person every command and stay open to it. The tools that change things refuse while the agent runs with its own checks off (a flag from
   `agent-cli-flags` on the agent above the server, or a setting the security reader reports: besides a mode that never
   asks, an allow rule on one of the tools that change things in Claude Code's, Codex's, Opencode's, Copilot CLI's,
   Cursor CLI's or Antigravity CLI's own settings, which the reader says as Defense Evasion). They, and the root helper,
@@ -1180,7 +1187,7 @@ approval**: those two halves are the whole design, and every rule below serves o
   the vault is open, and only through `amethystora-vault-net` (own user, the network, **no key, no state, no home**; a socket only the Vault's user opens). The
   connection and its links are items of the first vault (`SERVICE_ONLY`); the address is in `amethystora-sends` and never in `setup.json`, the manifest or an image's
   `policy/`. **Each kind is one switch** (`kinds` in the connection item, `ame vault sync kind KIND off|on`, the Sync page; `sync-kind`, approved once, `Export` to send and `Use` to stop, the two
-  sentences in `outside.rs` with their `# N_` lines): Off or On (a Login, or for a kind Bitwarden has no type for a plain secure note or SSH key item that Bitwarden's apps open). There is no sealed choice (removed 2026-11-25): a stored `sealed` reads as `on`, `sealed` as a new value is refused (`sealed-gone`), and an old sealed note on a server is replaced at the next sync by the item's plain cipher, written first, the note then moved to the server's trash (`Link.sealed`, `migrate` in `sync/merge.rs`; the code that reads such a note stays, the code that wrote it is gone). An item's own
+  sentences in `outside.rs` with their `# N_` lines): Off or On (a Login, or for a kind Bitwarden has no type for a plain secure note or SSH key item that Bitwarden's apps open). There is no sealed choice (removed 2026-11-25): a stored `sealed` waits for the person (`Connection::waiting`): it reads as `off` for what is new, its old sealed note is left as it is (`sealed_waiting` in the report, `waiting` in `sync-status`), and nothing goes plain until the person turns it on (the Export question) or off; `sealed` as a new value is refused (`sealed-gone`), and once turned on the old sealed note on a server is replaced at the next sync by the item's plain cipher, written first, the note then moved to the server's trash (`Link.sealed`, `migrate` in `sync/merge.rs`; the code that reads such a note stays, the code that wrote it is gone). An item's own
   choice wins and choosing its kind's takes it away; a kind covers items set to Ask every time and those added later, but a kind never said for leaves an Ask item off; a non-exportable key never goes. What needs
   libcrypto (an OpenSSH key written, a key or certificate read back) is `sync/convert.rs` and runs in `amethystora-vault-work` (`sync-ssh`, `sync-key`, `sync-certs`), never in this service. **Files** are
   attachments of the item's own note (`sync/attach.rs`, spec-attachments.md): made once, never changed (a changed file is a new cipher and the old one goes to the server's trash), built from the connected address and
@@ -1191,7 +1198,8 @@ approval**: those two halves are the whole design, and every rule below serves o
   Server, and a connection stays on the API it has: a Kemlock one never falls back to Bitwarden's login, and a Bitwarden one moves only when `kemlock` is chosen, after the CLI or the Sync page says that the copies stop being updated). The client is its author's own work, written from the server's documented byte formats and held to its CC0 test vectors, Apache-2.0, **nothing ported**
   (NOTICE says so): the formats and sign-in (OPAQUE, DPoP) and the engine (items under If-Match, the signed manifest, files, the move) are
   `apps/vault-core/src/kemlock` and `.../kemlock/sync`, the service's half `apps/vault-service/src/sync_kemlock.rs`, the network calls `apps/vault-net`. **Every kind is on by
-  default there** (Bitwarden's defaults stay), each as Kemlock's own item that its app and web vault open, files up to 16 MiB; connecting an account that holds the vault's Bitwarden
+  default there but keys, certificates and files** (`kinds::OFF_BY_DEFAULT`, off until chosen, as on Bitwarden: the connect
+  approval names the account, not a private key; Bitwarden's defaults stay), each as Kemlock's own item that its app and web vault open, files up to 16 MiB; connecting an account that holds the vault's Bitwarden
   copies, **chosen** as above, **moves** the items (same ids; the copies are left as they are, never updated and never deleted; kinds that were off stay off; turning a kind off deletes from the server only what the vault made, `made` on the link), and an account made through Bitwarden's API is enrolled once with
   the Bitwarden hash. Spaces, Sends, emergency access and live nudges are not done. `never.rs` needs nothing new (all `ame vault` is refused already); the Sync page and `amethystora-sends` read `backend`.
 - **There is no browser extension of its own** (the maintainer's choice of 2026-11-03): Bitwarden's works with the same Vaultwarden or Bitwarden account sync uses (not with a Kemlock Server's own items), so the Vault gives instructions instead, on the window's **In your browser** page, in `vault.md` and in the agents' knowledge. No native host, no recipe for one, no manifest and no ID of ours in the browser policy; Bitwarden's own IDs stay in its allowlist. `user-setup.hooks.d/29-retire-vault-browser.sh` takes away the manifest an earlier image wrote, only where it is exactly ours. Keep the page a fact and no more: it shows no Bitwarden logo and never claims to be Bitwarden.
@@ -1297,7 +1305,9 @@ report's `backup-runs` check reads `status`. Never work out a point, a path or a
   (`ame security ransomware exclude`, `/usr/libexec/amethystora-snapshot-exclude`,
   `/etc/amethystora/snapshot-excludes`, changed only from Security's **Ransomware protection** page, in a terminal
   with a password): a btrfs snapshot cannot skip a path, so a folder left out becomes a subvolume of its own
-  (a reflink copy swapped in under the same name, refused while one of the account's programs holds it), which
+  (a reflink copy swapped in under the same name, refused while one of the account's programs holds it; root moves
+  the folder by name into `/var/home/.amethystora-snapshot-exclude`, its own, and copies it there, so that a link the
+  account swaps in meanwhile cannot lead root's copy, chown or move out of the home), which
   every later snapshot shows empty. The watcher counts nothing under a listed folder and reads the hour in which
   the list changed as files moved, not deleted. Both are on the agent's never list but `list`.
   `test-snapshot-exclude.sh` holds both helpers to stand-ins, suite 70 the subvolume on a real disk.
