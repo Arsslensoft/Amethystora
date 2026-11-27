@@ -8,6 +8,7 @@ pub mod agentcli;
 pub mod agents;
 pub mod checks;
 pub mod files;
+pub mod gitguard;
 pub mod handoff;
 pub mod history;
 pub mod index;

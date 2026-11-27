@@ -74,6 +74,12 @@ pub struct AgentPaths {
     pub ro: Vec<String>,
     pub project: Vec<String>,
     pub env: Vec<String>,
+    /// Places of its folder a sandbox gives a layer of the launch's own, thrown away when it ends ({project} is the project's
+    /// folder and the launch's, as Claude Code names them); places inside one that are the real one again; places that are
+    /// an empty folder of the launch's own
+    pub layers: Vec<String>,
+    pub keeps: Vec<String>,
+    pub empties: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -156,6 +162,9 @@ impl Table {
                 ("program", [_]) => entry.programs.push(path(0)?),
                 ("ro", [_]) => entry.ro.push(path(0)?),
                 ("project", [_]) => entry.project.push(path(0)?),
+                ("layer", [_]) => entry.layers.push(path(0)?),
+                ("keep", [_]) => entry.keeps.push(path(0)?),
+                ("empty", [_]) => entry.empties.push(path(0)?),
                 ("env", [name]) if variable(name) => entry.env.push(name.to_string()),
                 _ => return Err(bad()),
             }
@@ -172,7 +181,8 @@ impl Table {
     pub fn agent(&self, agent: &str) -> Result<&AgentPaths, String> {
         // `ame agent sandbox run`: a command held as an agent would be, with no agent's folder at all
         static NONE: AgentPaths =
-            AgentPaths { way: None, dirs: Vec::new(), logins: Vec::new(), copies: Vec::new(), programs: Vec::new(), ro: Vec::new(), project: Vec::new(), env: Vec::new() };
+            AgentPaths { way: None, dirs: Vec::new(), logins: Vec::new(), copies: Vec::new(), programs: Vec::new(), ro: Vec::new(), project: Vec::new(), env: Vec::new(),
+                layers: Vec::new(), keeps: Vec::new(), empties: Vec::new() };
         if agent == NO_AGENT {
             return Ok(&NONE);
         }
@@ -371,34 +381,80 @@ pub fn which(home: &Path, asked: Option<&str>, pin: Option<&str>, dir: &Path) ->
     if let Some(name) = pin.filter(|name| !name.is_empty()) {
         return Ok((check(name)?, "the terminal's"));
     }
-    let map = Map::read(&profile_map_path())?;
+    let path = profile_map_path();
+    let map = Map::read(&path)?;
     let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    if let Some((_, Value::String(name))) = map.find(&dir) {
-        // A profile removed while a folder still names it falls back to the home's, said by `which`
-        if exists(home, name) {
-            return Ok((name.clone(), "the folder's"));
-        }
+    folder_profile(home, &path, map.find(&dir))
+}
+
+/// What the folder's line of the map says. A folder that names a profile no longer there is an error, never the home's: going
+/// on with `default` would send that folder's work to the other account, the very mistake profiles are for
+fn folder_profile(home: &Path, map: &Path, found: Option<(&str, &Value)>) -> Result<(String, &'static str), String> {
+    match found {
+        None => Ok((DEFAULT.into(), "the home's")),
+        Some((_, Value::String(name))) if exists(home, name) => Ok((name.clone(), "the folder's")),
+        Some((folder, Value::String(name))) => Err(format!(
+            "{folder} uses the profile {name}, which is not there any more, so no agent starts there on another account. \
+             To use the home's profile there: ame agent profile use default {folder} (or make it again: ame agent profile add {name})"
+        )),
+        Some((folder, _)) => Err(format!(
+            "{}: the profile of {folder} is not a name, so no agent starts there. To use the home's profile there: \
+             ame agent profile use default {folder}",
+            map.display()
+        )),
     }
-    Ok((DEFAULT.into(), "the home's"))
+}
+
+/// Whether the variable NAME points into a profile's folder: then one of our own set it (a hooked shell, a pinned terminal) and
+/// it is ours to take away. One the person set to a place of their own is theirs, and kept on the home's profile.
+pub fn ours(home: &Path, name: &str) -> bool {
+    std::env::var_os(name).is_some_and(|value| Path::new(&value).starts_with(profiles_dir(home)))
 }
 
 /// What a launch of AGENT on PROFILE is given in its environment: the variable of its way, and our own two. For the home's
-/// profile the variable is taken away only when one of our own set it (a hooked shell): one the person set is theirs.
+/// profile a way's variable is taken away only when it is ours. On any other profile the agent's own credential variables
+/// (its env lines: ANTHROPIC_API_KEY, OPENAI_API_KEY and the like) are taken away too: a key in the shell wins over the
+/// profile's login, and would send the work to the account the key belongs to. One is used on purpose on `default`.
 pub fn environment(table: &Table, home: &Path, agent: &str, profile: &str) -> Vec<(String, Option<String>)> {
     let mut env = Vec::new();
-    let ours = std::env::var_os(PROFILE_VAR).is_some();
     for (other, paths) in &table.agents {
         if let Some(Way::Variable { name, dir }) = &paths.way {
             if other == agent && profile != DEFAULT {
                 env.push((name.clone(), Some(profile_root(home, profile).join(dir).to_string_lossy().into_owned())));
-            } else if ours {
+            } else if ours(home, name) {
                 env.push((name.clone(), None));
             }
+        }
+    }
+    if profile != DEFAULT {
+        for name in table.agents.get(agent).map(|paths| paths.env.as_slice()).unwrap_or_default() {
+            env.push((name.clone(), None));
         }
     }
     env.push((PROFILE_VAR.into(), Some(profile.into())));
     env.push((AGENT_VAR.into(), Some(agent.into())));
     env
+}
+
+/// The agent's credential variables set in this environment that a launch on PROFILE is not given (environment takes them away)
+pub fn withheld(table: &Table, agent: &str, profile: &str) -> Vec<String> {
+    if profile == DEFAULT {
+        return Vec::new();
+    }
+    let set = |name: &&String| std::env::var_os(name.as_str()).is_some_and(|value| !value.is_empty());
+    table.agents.get(agent).map(|paths| paths.env.iter().filter(set).cloned().collect()).unwrap_or_default()
+}
+
+/// The one line said at the start of such a launch, so that a key left out is never a surprise
+pub fn withheld_words(table: &Table, agent: &str, profile: &str) -> Option<String> {
+    let names = withheld(table, agent, profile);
+    (!names.is_empty()).then(|| {
+        format!(
+            "{} on the profile {profile} is not given {} from this shell: it uses the profile's own login. To use a key, start it on default.",
+            title(agent),
+            names.join(", ")
+        )
+    })
 }
 
 // --- ame agent profile ----------------------------------------------------------------------------------------------
@@ -483,12 +539,18 @@ pub fn forget(name: &str) -> Result<String, String> {
     Ok(String::new())
 }
 
-pub fn ask_profile(home: &Path) -> String {
-    Map::read(&profile_map_path())
-        .ok()
-        .and_then(|map| map.other.get("ask").and_then(Value::as_str).map(String::from))
-        .filter(|name| exists(home, name))
-        .unwrap_or_else(|| DEFAULT.into())
+/// The profile the pill's question goes to. A map that cannot be read, or one that names a profile no longer there, is an
+/// error, never the home's, for the same reason as a folder's
+pub fn ask_profile(home: &Path) -> Result<String, String> {
+    let map = Map::read(&profile_map_path())?;
+    match map.other.get("ask") {
+        None => Ok(DEFAULT.into()),
+        Some(Value::String(name)) if exists(home, name) => Ok(name.clone()),
+        Some(value) => Err(format!(
+            "The pill's questions go to the profile {}, which is not there any more. To send them to the home's: ame agent profile ask default",
+            value.as_str().unwrap_or("?")
+        )),
+    }
 }
 
 /// The sessions running now, from the account's runtime folder: each tool server's file, and each sandbox's (written by its
@@ -612,6 +674,70 @@ mod tests {
         assert!(env.contains(&(PROFILE_VAR.into(), Some("work".into()))));
         let env = environment(&table, Path::new("/h"), "codex", "work");
         assert!(!env.iter().any(|(name, value)| name == "CLAUDE_CONFIG_DIR" && value.is_some()));
+    }
+
+    #[test]
+    fn the_shipped_keys_are_the_agents_own() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../system_files/shared/usr/share/amethystora/agent-paths"));
+        let Ok(text) = text else { return };
+        let table = Table::parse(&text).unwrap();
+        // The variables a launch on another profile is not given: each would win over the profile's login
+        for (agent, name) in [("claude", "ANTHROPIC_API_KEY"), ("claude", "ANTHROPIC_AUTH_TOKEN"), ("claude", "CLAUDE_CODE_OAUTH_TOKEN"),
+            ("codex", "OPENAI_API_KEY"), ("codex", "CODEX_API_KEY")]
+        {
+            assert!(table.agents[agent].env.iter().any(|line| line == name), "{agent} {name}");
+        }
+    }
+
+    #[test]
+    fn a_key_from_the_shell_never_reaches_another_profile() {
+        let key = format!("AMETHYSTORA_TEST_KEY_{}", std::process::id());
+        let table = Table::parse(&AGENTS.iter().map(|agent| match *agent {
+            "claude" => format!("way claude var CLAUDE_CONFIG_DIR .claude\ndir claude .claude\nenv claude {key}\n"),
+            other => format!("way {other} mount\ndir {other} .{other}\n"),
+        }).collect::<String>()).unwrap();
+        unsafe { std::env::set_var(&key, "sk-personal") };
+        // On a profile the key is taken away, and said
+        assert!(environment(&table, Path::new("/h"), "claude", "work").contains(&(key.clone(), None)));
+        assert_eq!(withheld(&table, "claude", "work"), vec![key.clone()]);
+        assert!(withheld_words(&table, "claude", "work").is_some_and(|words| words.contains(&key) && words.contains("work")));
+        // On the home's it is the person's to use, and another agent's launch leaves it as it is
+        assert!(!environment(&table, Path::new("/h"), "claude", DEFAULT).iter().any(|(name, _)| *name == key));
+        assert!(withheld(&table, "claude", DEFAULT).is_empty() && withheld_words(&table, "claude", DEFAULT).is_none());
+        assert!(!environment(&table, Path::new("/h"), "codex", "work").iter().any(|(name, _)| *name == key));
+        unsafe { std::env::remove_var(&key) };
+        // Not set, nothing is said, and it is still taken away: none set later in the shell reaches the launch
+        assert!(withheld_words(&table, "claude", "work").is_none());
+        assert!(environment(&table, Path::new("/h"), "claude", "work").contains(&(key.clone(), None)));
+    }
+
+    #[test]
+    fn only_a_variable_into_a_profile_is_ours() {
+        let home = Path::new("/h");
+        let name = format!("AMETHYSTORA_TEST_OURS_{}", std::process::id());
+        assert!(!ours(home, &name));
+        unsafe { std::env::set_var(&name, "/h/.local/share/amethystora/agent-profiles/work/.claude") };
+        assert!(ours(home, &name));
+        unsafe { std::env::set_var(&name, "/h/my-claude") };
+        assert!(!ours(home, &name), "the person's own place");
+        unsafe { std::env::set_var(&name, "/h/.local/share/amethystora/agent-profiles-x/y") };
+        assert!(!ours(home, &name), "a name that only begins the same");
+        unsafe { std::env::remove_var(&name) };
+    }
+
+    #[test]
+    fn a_folder_on_a_profile_that_is_gone_starts_nothing() {
+        let home = temp("gone");
+        std::fs::create_dir_all(home.join(PROFILES).join("work")).unwrap();
+        let map = Path::new("/c/agent-profiles.json");
+        assert_eq!(folder_profile(&home, map, None).unwrap(), (DEFAULT.to_string(), "the home's"));
+        assert_eq!(folder_profile(&home, map, Some(("/w", &json!("work")))).unwrap(), ("work".to_string(), "the folder's"));
+        // Never the home's: the folder and the way back are said
+        let why = folder_profile(&home, map, Some(("/w/old", &json!("old")))).unwrap_err();
+        assert!(why.contains("/w/old uses the profile old") && why.contains("ame agent profile use default /w/old"), "{why}");
+        assert!(folder_profile(&home, map, Some(("/w", &json!(3)))).is_err());
+        assert!(folder_profile(&home, map, Some(("/w", &json!("Bad/")))).is_err());
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

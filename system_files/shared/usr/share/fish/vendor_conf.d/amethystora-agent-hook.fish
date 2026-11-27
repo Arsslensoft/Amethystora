@@ -1,25 +1,26 @@
 # The shells follow the folder for the AI agent (ame agent hook), as /usr/share/amethystora/agent-hook/hook.sh gives bash and
-# zsh: claude's and codex's own variables point at the folder's profile, the prompt says it and the sandbox, and each agent's
-# command typed here goes through amethystora-agent-tools agent-run when the folder has a profile or a sandbox rule. Off,
-# nothing here runs but the test.
+# zsh: before each prompt claude's and codex's own variables point at the folder's profile and the prompt says it and the
+# sandbox, and each agent's command typed here goes through amethystora-agent-tools agent-run, which works them out again as
+# it starts and refuses when it cannot. Off, nothing here runs but the test.
 set -l __config $HOME/.config
 set -q XDG_CONFIG_HOME; and test -n "$XDG_CONFIG_HOME"; and set __config $XDG_CONFIG_HOME
 if status is-interactive; and test -e $__config/amethystora/agent-hook
-    function __amethystora_agent_follow --on-variable PWD
-        # Our own set and erase lines, each value quoted
+    function __amethystora_agent_follow --on-event fish_prompt
+        # Our own set and erase lines, each value quoted, and in __amethystora_agent_warning what could not be worked out (the
+        # prompt then says agent ?), said here once until it changes. An event's handler leaves $status as it was.
         /usr/libexec/amethystora-agent-tools profile env --shell fish --dir "$PWD" 2>/dev/null | source
+        if test -n "$__amethystora_agent_warning"; and test "$__amethystora_agent_warning" != "$__amethystora_agent_said"
+            printf 'ame agent: %s\n' "$__amethystora_agent_warning" >&2
+        end
+        set -g __amethystora_agent_said "$__amethystora_agent_warning"
     end
 
+    # An agent typed here: always through agent-run, which starts it plain when the folder has neither a profile nor a
+    # sandbox rule
     function __amethystora_agent_run
         set -l name $argv[1]
         set -e argv[1]
-        if set -q AMETHYSTORA_AGENT_SANDBOX_RULE; or set -q AMETHYSTORA_AGENT_PROFILE_PIN; or begin
-                set -q AMETHYSTORA_AGENT_PROFILE; and test "$AMETHYSTORA_AGENT_PROFILE" != default
-            end
-            /usr/libexec/amethystora-agent-tools agent-run --agent $name -- $name $argv
-        else
-            command $name $argv
-        end
+        /usr/libexec/amethystora-agent-tools agent-run --agent $name -- $name $argv
     end
     for __agent in claude codex opencode agy copilot cursor-agent
         function $__agent --inherit-variable __agent

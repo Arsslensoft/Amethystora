@@ -22,25 +22,48 @@ hidden from it, and that the network is open. **A project never picks its own sa
 ## What it can write
 
 - The project: the top of the git repository it was started in, else the folder. A worktree's repository folder too.
-- The agent's own folder (the [profile](agent-profiles.md)'s).
-- The build caches that exist: Cargo's, npm's, Go's, pip's, uv's, Maven's and Gradle's.
+- The agent's own folder (the [profile](agent-profiles.md)'s), but for what a later session outside the sandbox would run or
+  read, below.
 - A `/tmp` and `/var/tmp` of its own, removed when it ends.
+
+**The build caches** that exist (Cargo's, npm's, Go's, pip's, uv's, Maven's, Gradle's, Playwright's browsers) it reads and
+writes through a layer of its own, kept in memory and thrown away when it ends. Nothing it writes there reaches your cache,
+since a build script or a package changed there would run at your next `cargo build`, `npx` or test, with no diff to read.
+The cost: what it downloads is downloaded again at each launch, and a large download takes memory while it runs.
+
+**In its own folder**, what a session started later outside the sandbox would run or read stays as it is:
+
+- Read-only: its settings, hooks, commands, skills and plugins, its `CLAUDE.md` or `AGENTS.md`, every script its settings
+  run (the status line's, a hook's, an MCP server's, a key helper) and every file its instructions bring in (`@file`).
+  Changing them fails with "Read-only file system". One its settings name that is not there yet (and each folder of a
+  `PATH` they set) is held by an empty file while it runs, so that it cannot make one, and taken away again when it ends.
+- Thrown away when it ends: Claude Code's memory (`~/.claude/projects/*/memory`), its shell's snapshots and the variables
+  its hooks set, and Antigravity CLI's `GEMINI.md`. It can write them while it runs, as it writes a cache. This project's
+  transcripts are kept, so a sandboxed session can be resumed.
+- A link there, such as a `settings.json` that leads to your dotfiles, or a hook that leads to a script it can change, cannot
+  be held read-only: the launch stops and says which. Put the file itself in its place.
+- A project inside a build cache (one under `~/go/pkg`) is refused, since every change to it would be thrown away with the
+  cache's layer.
 
 Everything else of the machine and your home is there to read and cannot be written.
 
 ## What it cannot see
 
-An empty folder or file stands in its place for your logins and keys (`~/.ssh`, `~/.gnupg`, the cloud tools' and `gh`'s
-settings, the container tools' logins, keyrings, `.npmrc`, `.netrc`), browsers' profiles, other apps' data, the Notes data,
-`~/Private`, the shells' histories, every other agent's folder and every other profile, and the hourly snapshots of your
-home, which hold copies of `~/.ssh`. There is no session, no keyring, no ssh agent, no [Vault](vault.md), no display and
-no container socket. It sees only its own processes, no graphics card, USB or camera, and `sudo`, `pkexec` and rootless
-containers do not work.
+An empty folder or file stands in its place for your logins and keys (`~/.ssh`, `~/.gnupg`, the cloud tools' settings
+(AWS, Azure, Google Cloud, Oracle, DigitalOcean, Hetzner, Fly), `gh`'s, `glab`'s and `hub`'s, the container tools' logins,
+keyrings, `.npmrc`, `.yarnrc.yml`, `.netrc`, git's credentials files, Cargo's, RubyGems', Composer's and Poetry's tokens,
+`.pgpass`, `.my.cnf`, `.vault-token`, Terraform's, ngrok's and Stripe's, SOPS's keys, 1Password's and Bitwarden's command
+lines), browsers' profiles, other apps' data, the Notes data, `~/Private`, the shells' histories, every other agent's folder
+and every other profile, and the hourly snapshots of your home, which hold copies of `~/.ssh`. There is no session, no
+keyring, no ssh agent, no [Vault](vault.md), no display and no container socket. Claude Code sees none of the other running
+sessions' files and not the editor's connection (`~/.claude/ide`, whose key would let it drive your editor). It sees only its
+own processes, no graphics card, USB or camera, and `sudo`, `pkexec` and rootless containers do not work.
 
 Inside the project, the repository's hooks and settings (`.git/hooks`, `.git/config`) and every agent's settings
-(`.claude`, `.mcp.json`, `.codex`, `.cursor`, `.gemini`, `.opencode`, `opencode.json`, `.copilot`) are read-only, and so are
-the files in the agent's own folder that start commands or loosen its checks. Its environment is yours, less the session's
-sockets and every variable whose name says secret (`TOKEN`, `PASSWORD`, `*_KEY`...), except the agent's own key.
+(`.claude`, `.mcp.json`, `.codex`, `.cursor`, `.gemini`, `.opencode`, `opencode.json`, `.copilot`) are read-only. Its
+environment is yours, less the session's sockets, every variable whose name says secret (`TOKEN`, `PASSWORD`, `*_KEY`,
+`MYSQL_PWD`, `DATABASE_URL`, `BW_SESSION`, `OP_SESSION_*`...) and every variable whose value is an address with a password
+in it (`postgres://app:password@db`), except the agent's own key and a proxy's address, which it needs to reach anything.
 
 If a sandbox cannot be made, nothing starts, and the sentence says why.
 
@@ -50,6 +73,12 @@ If a sandbox cannot be made, nothing starts, and the sentence says why.
 - **It does not make what the agent wrote safe.** A build script or a test it changed runs as you when you run it: read
   the diff first. When the agent ends, you are told if it made a settings file such as `.mcp.json`, which an agent reads
   when it next starts outside a sandbox.
+
+  The same goes for git. The repository's hooks and settings are read-only, but the agent can still make new ones that git
+  would use at your next command, or at your prompt's git status: a `.git` in a subfolder, a `.git/commondir` naming a
+  folder of its own, a repository under `.git/modules`. When the agent ends, you are told of each one it made or changed,
+  by its path, and nothing is removed: read it before you run git there. The look goes 12 folders deep and leaves out
+  `node_modules`, `target`, `vendor` and `.venv`. Inside, moving, removing or pruning a worktree that is already there fails.
 - It does not hide the project's own secrets, such as a `.env` in it.
 - It does not hold an agent that an editor's extension starts.
 - The network is the machine's unless you [hold it to a list](#the-network): it can still send what it can read.
@@ -96,8 +125,9 @@ package registry on the list.
 
 ## A closed sandbox
 
-`ame agent sandbox use FOLDER closed` shows it none of your home but the project, its own folder, the caches and the
-toolchains (`~/.cargo/bin`, `~/.rustup`, `~/.local/bin`, `~/.gitconfig`), read-only.
+`ame agent sandbox use FOLDER closed` shows it none of your home but the project, its own folder, the caches (through
+their layer, as above) and the toolchains (`~/.cargo/bin`, `~/.rustup`, `~/.local/bin`, `~/.gitconfig`, `~/.config/git`),
+read-only. A secret kept inside a toolchain's folder, such as git's `~/.config/git/credentials`, is hidden there too.
 
 ## Codex and Copilot CLI
 

@@ -445,14 +445,27 @@ agent cleaned and marked as data. Off costs nothing: no daemon, timer or service
 **Several accounts of one agent, and an agent held to its project** (`plans/done/PLAN-agent-accounts.md`, `plans/done/PLAN-agent-sandbox.md`;
 `ame agent profile`, `ame agent sandbox`, `ame agent hook`; manual `agent-profiles.md`, `agent-sandbox.md`). Where each agent keeps
 its folders, login, settings, program and a project's settings is one table, `/usr/share/amethystora/agent-paths` (its header says
-each kind of line), which the launcher, `apps/agent-tools` (`agents.rs`, `sandbox.rs`, `agentcli.rs`), the watcher's credential rules
-and `20-tests.sh` read; the logins and keys are one list, `/usr/share/amethystora/credential-files`, which the watcher watches and a
-sandbox hides. A new agent, or a new place an agent writes, gets its lines there, checked on the installed agent first.
+each kind of line: `ro`, `copy`, `layer` (a place of its folder it must write that a later plain session runs or reads, such as
+Claude Code's memory and shell snapshots), `keep` (the real place again inside a layer: this project's transcripts), `empty` (an
+empty folder of the launch's own: `.claude/ide`, `.claude/sessions`), `{project}` in a path for Claude Code's name of the project's
+folder, `hidden` with `*` within a name), which the launcher, `apps/agent-tools` (`agents.rs`, `sandbox.rs`, `agentcli.rs`,
+`gitguard.rs`), the watcher's credential rules and `20-tests.sh` read; the logins and keys are one list,
+`/usr/share/amethystora/credential-files`, which the watcher watches and a sandbox hides with the table's `hidden` lines. A new
+secret file gets a `hidden` line, a `credential-files` pattern and a place in the Vault's `USUAL` lists (`apps/vault-service/src/protect.rs`,
+`apps/vault/src/page/protect.rs`). A new agent, or a new place an agent writes, gets its lines there, checked on the installed agent first.
 - **A profile belongs to a launch, never to a file**: worked out when the launch starts (`--profile`, the terminal's pin, the folder's
   in `~/.config/amethystora/agent-profiles.json`, else `default`, the home's) and kept in its environment (`CLAUDE_CONFIG_DIR`,
   `CODEX_HOME`, seen on Claude Code 2.1.311 and Codex 0.169.0) or its own mount namespace (bubblewrap, the profile's folders over
   the home's: Opencode, Cursor CLI, Antigravity CLI, where nothing setuid runs). Copilot CLI has none. Keep it so: a feature that
-  wants "the active profile" takes it from a process. The launcher starts an agent where it was opened in a terminal (a diagnosis,
+  wants "the active profile" takes it from a process. **Profiles fail closed** (maintainer, 2026-11-26): on any profile but `default`
+  the agent's own key variables (its `env` lines: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+  `OPENAI_API_KEY`, `CODEX_API_KEY`) are taken from the launch and a line at its start names them (`agents::withheld_words`), since a
+  key wins over the profile's login; a key is used on `default` only, and there is no key of a profile's own. A folder, or the pill's
+  `ask`, mapped to a profile no longer there, and a map that cannot be read, start nothing, never `default`. The hook (`hook.sh`,
+  `amethystora-agent-hook.fish`) sends every agent typed in it through `agent-run`, which works the profile and the sandbox out
+  again at each start, so a rule given to the folder holds for the next command and `SANDBOX=always` covers typed commands too; it
+  refreshes at every prompt (zsh `precmd`), and what `profile env` cannot work out is said once and shows `agent ?`. A terminal from
+  `ame agent profile terminal` starts without the agents' key variables. The launcher starts an agent where it was opened in a terminal (a diagnosis,
   a triage and a selection's question still from the home). **A protected login in several terminals** is `ame vault run --shared`
   (`run_shared` in `apps/vault-service/src/tools.rs`, the launcher's only; plain `run` is untouched and still serves one command): the process the
   person started asks and fetches, its child the keeper holds the lock, the place and a door (a socket of the runtime folder that hands a
@@ -460,18 +473,32 @@ sandbox hides. A new agent, or a new place an agent writes, gets its lines there
   session holds `ID.sessions`, a later command is asked for as every use is before it enters, and what all of them left is read and
   sealed once. The keeper outlives its terminal: where sealing would ask there, it says so in a notification and waits. Suite 74 holds it.
 - **The sandbox is one recipe**, `sandbox::recipe`, printed by `ame agent sandbox show` and run by `agent-run` exactly so: bubblewrap
-  from the whole machine read-only, the project (a worktree's repository too), the agent's folder and the caches writable, the
+  from the whole machine read-only, the project (a worktree's repository too) and the agent's folder writable, the
   credentials, the other agents' and profiles' folders and `/var/home/.snapshots` hidden, the repository's hooks and settings, the
   agents' settings in the project and their own read-only, a private copy of each file the table's `copy` lines name, `/run`
   and `/tmp` its own, a PID namespace, and the seccomp filter `gen.c --agent` writes (`agent-sandbox.bpf`). It fails closed.
+  **The build caches are never writable**: each is read-only under a throwaway in-memory layer (`--overlay-src C --tmp-overlay C`),
+  since a package or build script changed there runs at the next plain build with no diff; a launch that cannot make the layer is
+  refused, never given the cache (maintainer, 2026-11-26). In the agent's folder, every script its settings run (status line, hooks,
+  MCP servers, key helpers) and every file its instructions import (`@file`) is read-only with the `ro` lines; `layer` places are
+  throwaway layers, `keep` places real, `empty` places empty; a link on a path that must be read-only refuses the launch
+  (maintainer: keep refusing). In `.git`, `commondir`, `gitdir`, `config.worktree` and `info/attributes` are read-only too, and each
+  worktree's and submodule's repository is bound in place; what a mount cannot stop (a new `.git` in a subfolder, a new `commondir`,
+  a repository in `.git/modules`) is `gitguard.rs`'s: it marks git's settings, hooks and pointers before the launch (12 folders deep,
+  bounded, never running git or following a link) and names every new or changed one when it ends, and removes nothing (maintainer:
+  warn on all, never delete). The environment loses every variable whose name says secret (`sandbox.rs`'s rules, with
+  `MYSQL_PWD`, `DATABASE_URL`, `BW_SESSION`, `OP_SESSION_*`...) and every value with a password in an address (`secret_value`:
+  `scheme://user:pass@`), but a `*_PROXY`'s and the agent's own key.
   Amethystora's tools start inside read-only (`AMETHYSTORA_READ_ONLY=1`); a sandbox's runner writes its session's file. The
-  network is the machine's unless the folder holds it to a list (`ame agent sandbox network FOLDER list`): then the sandbox has a
+  network is the machine's (the default, kept at the maintainer's word on 2026-11-26) unless the folder holds it to a list (`ame agent sandbox network FOLDER list`): then the sandbox has a
   network namespace with loopback alone, and the one way out is the plugins' proxy (`apps/net-proxy`, the crate both use) on a socket
   the runner holds, behind `amethystora-agent-tools net-shim` inside: HTTPS by name to `/usr/share/amethystora/agent-network-hosts`
   (each agent's maker, the registries, the code hosts) and the folder's `network=HOST`, nothing else, no count of bytes. Known and said
   in the manual: unix sockets in the home stay reachable, and `localhost` and X11's abstract socket while the network is the machine's. `SANDBOX=always` in `agent.conf` is the
   administrator's; the watcher says an agent run in a project outside a sandbox then, and records quietly one run with its checks
-  off inside one. `build_files/shared/test-agent-sandbox.sh` and `tests/vm/suites/77-agent-sandbox.sh` hold all of it.
+  off inside one. `build_files/shared/test-agent-sandbox.sh`, `test-agent-gitguard.sh` (the recipe's git mounts, and gitguard's
+  warnings where the build has namespaces), `test-agent-profiles-hook.sh` (the dropped keys, a gone profile, the hook through
+  `agent-run`) and `tests/vm/suites/77-agent-sandbox.sh` hold all of it.
 
 **The knowledge and the index.** `system_files/shared/usr/share/amethystora/agents/knowledge` is written for
 agents: `architecture.md`, `by-design.md` (each default the image hardens, its symptom, how to confirm it and

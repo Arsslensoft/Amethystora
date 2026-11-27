@@ -24,6 +24,8 @@ grep -q '/usr/share/amethystora/credential-files' /usr/libexec/amethystora-audit
 grep -q 'agent-profiles/\*/' /usr/libexec/amethystora-audit-home-rules || fail "the watcher's rules do not read each profile's logins"
 test -s /usr/share/amethystora/agent-sandbox.bpf || fail "the sandbox's seccomp filter is missing"
 test -x /usr/bin/bwrap || fail "bubblewrap is missing"
+# The build caches and the agent's memory are each a layer of the launch's own (--overlay-src, --tmp-overlay: bubblewrap 0.10)
+[[ "$(/usr/bin/bwrap --help 2>&1)" == *--tmp-overlay* ]] || fail "bubblewrap has no --tmp-overlay, which the sandbox's layers need"
 
 # A stand-in home, outside /tmp (which a sandbox has its own of, and never takes a project from). The image's build has no
 # /var/lib yet: what this makes there is taken away again, /var/lib with it, so that nothing is left in /var
@@ -92,6 +94,78 @@ command="$(jq -r .command <<<"${shown}")"
 [[ ${command} == *"--tmpfs /run "* && ${command} != *"/run/user/"*"/bus"* ]] || fail "the bus"
 # A closed sandbox replaces the home
 [[ "$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site" --sandbox closed --json | jq -r .command)" == *"--tmpfs ${H} "* ]] || fail "a closed sandbox"
+# A build cache is a layer of the launch's own, never writable: a package changed there would run at the next plain build
+mkdir -p "${H}/.cargo/registry"
+shown="$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site/src" --json)"
+command="$(jq -r .command <<<"${shown}")"
+[[ ${command} == *"--overlay-src ${H}/.cargo/registry --tmp-overlay ${H}/.cargo/registry "* ]] || fail "the cache a layer: ${command}"
+[[ ${command} != *"--bind ${H}/.cargo/registry "* ]] || fail "the cache bound writable"
+jq -e --arg h "${H}" '.writable | index("\($h)/.cargo/registry") | not' <<<"${shown}" >/dev/null || fail "the cache said writable"
+# Claude Code's projects a layer, this project's folder in it (and the launch's) the real one, its memory a layer again, the
+# shell's snapshots a layer, the editor's connection an empty folder of its own
+name="${H}/code/site"
+name="${name//[^a-zA-Z0-9]/-}"
+below="${H}/code/site/src"
+below="${below//[^a-zA-Z0-9]/-}"
+P="${H}/.claude/projects"
+[[ ${command} == *"--overlay-src ${P} --tmp-overlay ${P} "*"--bind ${P}/${name} ${P}/${name} "*"--overlay-src ${P}/${name}/memory --tmp-overlay ${P}/${name}/memory "* ]] ||
+    fail "Claude Code's memory: ${command}"
+[[ ${command} == *"--bind ${P}/${below} ${P}/${below} "* ]] || fail "the launch's own folder of projects"
+[[ ${command} == *"--overlay-src ${H}/.claude/shell-snapshots --tmp-overlay ${H}/.claude/shell-snapshots "* ]] || fail "the shell's snapshots"
+[[ ${command} == *"--tmpfs ${H}/.claude/ide "* && ${command} == *"--tmpfs ${H}/.claude/sessions "* ]] || fail "the editor's connection and the other sessions"
+# What its settings run and what its instructions bring in, read-only, the folder on the way a mount of its own first
+mkdir -p "${H}/.claude/scripts"
+echo x >"${H}/.claude/statusline.sh"
+echo x >"${H}/.claude/scripts/guard.sh"
+echo x >"${H}/.claude/RTK.md"
+echo '{"statusLine": {"type": "command", "command": "bash ~/.claude/statusline.sh"}, "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "$HOME/.claude/scripts/guard.sh"}]}]}}' \
+    >"${H}/.claude/settings.json"
+echo 'Read @RTK.md' >"${H}/.claude/CLAUDE.md"
+command="$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site" --json | jq -r .command)"
+for file in statusline.sh scripts/guard.sh RTK.md; do
+    [[ ${command} == *"--ro-bind ${H}/.claude/${file} ${H}/.claude/${file} "* ]] || fail "${file}, which a later session runs or reads, is writable: ${command}"
+done
+[[ ${command} == *"--bind ${H}/.claude/scripts ${H}/.claude/scripts "*"--ro-bind ${H}/.claude/scripts/guard.sh "* ]] || fail "the folder on the way to a script"
+# ...and a link there stops the launch, which a mount cannot hold
+ln -s "${H}/.claude/scripts/guard.sh" "${H}/.claude/linked.sh"
+echo '{"statusLine": {"command": "~/.claude/linked.sh"}}' >"${H}/.claude/settings.local.json"
+jq -e '.refused | test("link")' <<<"$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site" --json)" >/dev/null || fail "a link to run was not refused"
+rm -f "${H}/.claude/linked.sh" "${H}/.claude/settings.local.json"
+# The secrets the table names hidden, in an open sandbox and inside a closed one's toolchains (git's own credentials file)
+mkdir -p "${H}/.config/git" "${H}/.config/glab-cli" "${H}/.azure"
+echo "[user]" >"${H}/.config/git/config"
+for file in .config/git/credentials .pgpass .my.cnf .vault-token .cargo/credentials.toml .config/glab-cli/config.yml .azure/msal_token_cache.json; do
+    echo secret >"${H}/${file}"
+done
+shown="$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site" --json)"
+for place in .config/git/credentials .pgpass .my.cnf .vault-token .cargo/credentials.toml .config/glab-cli .azure; do
+    jq -e --arg p "${H}/${place}" '.hidden | index($p)' <<<"${shown}" >/dev/null || fail "${place} is not hidden"
+done
+command="$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site" --sandbox closed --json | jq -r .command)"
+[[ ${command} == *"--ro-bind ${H}/.config/git ${H}/.config/git "*"--ro-bind /dev/null ${H}/.config/git/credentials "* ]] ||
+    fail "git's credentials inside a closed sandbox's toolchains: ${command}"
+rm -rf "${H}/.config/git" "${H}/.config/glab-cli" "${H}/.azure" "${H}/.pgpass" "${H}/.my.cnf" "${H}/.vault-token" "${H}/.cargo/credentials.toml"
+rm -f "${H}/.claude/settings.json" "${H}/.claude/CLAUDE.md" "${H}/.claude/RTK.md" "${H}/.claude/statusline.sh"
+rm -rf "${H}/.claude/scripts"
+# A script its settings name that is not there yet, and a folder of a PATH-like value, are held by an empty file read-only
+# (made only at the launch, never by show); a link in a read-only folder to a place the agent writes stops the launch
+echo '{"statusLine": {"command": "~/.claude/later.sh"}, "env": {"PATH": "~/.claude/bin:/usr/bin"}}' >"${H}/.claude/settings.json"
+command="$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site" --json | jq -r .command)"
+for file in later.sh bin; do
+    [[ ${command} == *"--ro-bind ${H}/.claude/${file} ${H}/.claude/${file} "* ]] || fail "${file}, named but not there, is not held: ${command}"
+done
+[[ ! -e ${H}/.claude/later.sh ]] || fail "show made a file"
+mkdir -p "${H}/.claude/hooks" "${H}/.claude/scripts"
+echo x >"${H}/.claude/scripts/guard.sh"
+ln -s "${H}/.claude/scripts/guard.sh" "${H}/.claude/hooks/guard.sh"
+jq -e '.refused | test("link")' <<<"$("${TOOLS}" sandbox show --agent claude --dir "${H}/code/site" --json)" >/dev/null ||
+    fail "a link in a read-only folder to where the agent writes was not refused"
+rm -rf "${H}/.claude/hooks" "${H}/.claude/scripts" "${H}/.claude/settings.json"
+# A project inside a build cache (Go's is not a dot-folder) would lose every change with the cache's layer: refused
+mkdir -p "${H}/go/pkg/mod/example.org/x"
+jq -e '.refused | test("inside the build cache")' <<<"$("${TOOLS}" sandbox show --agent claude --dir "${H}/go/pkg/mod/example.org/x" --sandbox open --json)" >/dev/null ||
+    fail "a project inside a build cache"
+rm -rf "${H}/go"
 # Never a project that is the home, a dot-folder of it, or above it
 ! "${TOOLS}" agent-plan --agent claude --sandbox open --dir "${H}" 2>/dev/null || fail "the home as a project"
 ! "${TOOLS}" agent-plan --agent claude --sandbox open --dir "${H}/.config/x" 2>/dev/null || fail "a dot-folder as a project"

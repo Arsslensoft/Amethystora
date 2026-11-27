@@ -26,7 +26,7 @@ HTTPS address for a git remote. Never try another route out.
 
 A file that stays read-only inside the project (`.git/hooks`, `.git/config`, `.claude`, `.mcp.json`, `.codex`, `opencode.json`...) is held on
 purpose: tell the person what you would have changed and let them make it. A script you changed runs as them when they run it: say which, so
-they read the diff.
+they read the diff. A `.git` you make anywhere in the project (`git init`, `git clone`, a submodule's or a worktree's repository, a `commondir`) is named to them when the launch ends: say why you made it.
 
 Codex's first start needs its program in `~/.codex/packages`: if it says "Read-only file system" there, the person starts Codex once outside a
 sandbox. Copilot CLI inside one needs its token in `COPILOT_GITHUB_TOKEN` or `GH_TOKEN`.

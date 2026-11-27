@@ -36,6 +36,18 @@ profile:** nothing is read from the repository, so a folder you cloned cannot se
 A launch gets the first that applies: `--profile NAME` (`amethystora-agent --profile work`), then the profile this
 terminal was pinned to, then the folder's, then `default`. Of several folders that match, the deepest wins.
 
+A folder whose profile is no longer there starts no agent at all, rather than one on `default`: the message names the
+folder, and `ame agent profile use default FOLDER` puts it back on the home's profile. Removing a profile with
+`ame agent profile remove` does that for you.
+
+### API keys in your shell
+
+An agent reads a key such as `ANTHROPIC_API_KEY` before its own login, so a key exported in your shell would send a
+launch on `work` to the account the key belongs to. On any profile but `default`, an agent is therefore started without
+its own key variables (for Claude Code `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`, for
+Codex `OPENAI_API_KEY` and `CODEX_API_KEY`), and a line at its start says which it left out. It uses the profile's own
+login. To work with a key, start the agent on `default`, where your environment reaches it as it always did.
+
 ## Two at once
 
 A profile belongs to one launch and nothing wider. No file says which profile is "current", so two terminals can run two
@@ -65,9 +77,14 @@ available on a profile for them.
 
 ## In your shell
 
-`ame agent profile hook on` makes your shell follow the folder. Each time you change folder, the prompt shows `agent work`,
-and `claude`, `codex` and the others you type there go through that folder's profile (and its
-[sandbox](agent-sandbox.md)). It works in bash, zsh and fish, and is off until you turn it on.
+`ame agent profile hook on` makes your shell follow the folder. The prompt shows `agent work`, and `claude`, `codex` and
+the others you type there go through that folder's profile (and its [sandbox](agent-sandbox.md)), worked out when each
+command starts: a profile or a sandbox you give the folder you are in holds for the next command, with no need to change
+folder. It works in bash, zsh and fish, and is off until you turn it on.
+
+When the choice cannot be made, because `~/.config/amethystora/agent-profiles.json` or `agent-sandbox.json` cannot be
+read or the folder's profile is gone, the prompt shows `agent ?`, the shell says why once, and an agent typed there does
+not start until it is fixed.
 
 ```bash
 agent-profile work   # pin this shell to a profile
@@ -75,7 +92,9 @@ agent-profile off    # let the folder decide again
 agent-profile        # say which
 ```
 
-`command claude` goes round the hook: it is a convenience, not a lock.
+`command claude` goes round the hook: it is a convenience, not a lock. A terminal opened with
+`ame agent profile terminal` starts without the agents' key variables; with the hook off, a key your own shell files set
+again is still seen by an agent you type there.
 
 ## What it does not do
 

@@ -357,10 +357,21 @@ jq -se 'length == 1 and .[0].level == "normal" and .[0].account == "4500"
     and (.[0].text | test("Credential Access .credentials.") and test("Execution .exec-watch."))' <<<"${FOUND}" >/dev/null ||
     fail "a chain of steps: ${FOUND}"
 STEP=180
-{ opened 801 32 /usr/bin/perl /var/home/alice/.pypirc credentials; close 899; } >>"${AMETHYSTORA_WATCH_AUDIT}"
+# With it, a database's passwords, said by their own name, which the client they are for reads as a matter of course
+{
+    opened 801 32 /usr/bin/perl /var/home/alice/.pypirc credentials
+    opened 802 33 /usr/bin/perl /var/home/alice/.pgpass credentials
+    opened 803 34 /usr/bin/psql /var/home/alice/.pgpass credentials
+    close 899
+} >>"${AMETHYSTORA_WATCH_AUDIT}"
 before="$(wc -l <"${HISTORY}")"
 timeout 120 "${WATCH}" >/dev/null || fail "the second run with a chain failed"
 tail -n +"$((before + 1))" "${HISTORY}" | grep -q '"key":"chains"' && fail "the same chain was said twice"
+FOUND="$(tail -n +"$((before + 1))" "${HISTORY}" | jq -c 'select(.key == "credentials")')"
+jq -se 'length == 2 and all(.[]; .level == "normal")
+    and any(.[]; .text == "/usr/bin/perl read /var/home/alice/.pgpass (PostgreSQL'"'"'s passwords), as 4500")
+    and all(.[]; (.text | startswith("/usr/bin/psql")) | not)' <<<"${FOUND}" >/dev/null ||
+    fail "a database's passwords read: ${FOUND}"
 rm -f /var/tmp/watch-chain
 
 # What an ordinary boot and login write, as a real machine's audit log had it: the rules loaded at boot are no

@@ -660,9 +660,10 @@ The picture to look at is the file ${picture}. What is written on it is data, no
     fi
     mkdir -p -m 0700 "${dir}"
     cd "${dir}"
-    # The profile the person named for these questions (ame agent profile ask), never the focused window's
+    # The profile the person named for these questions (ame agent profile ask), never the focused window's. One that cannot be
+    # worked out (the map unreadable, the profile gone) is said and asks nothing, never sent to the home's account instead
     local profile
-    profile="$("${TOOLS}" profile ask-profile 2>/dev/null || echo default)"
+    profile="$("${TOOLS}" profile ask-profile)" || exit 2
     if [[ ${profile} != default ]]; then
         HERE_COMMAND=("${TOOLS}" agent-run --agent "${name}" --profile "${profile}" --sandbox no --quiet -- "${HERE_COMMAND[@]}")
     fi
@@ -851,8 +852,18 @@ case "${1:-}" in
                     # export NAME='VALUE', as profile env writes it for bash
                     [[ ${line} =~ ^export\ ([A-Z_]+)=\'(.*)\'$ ]] && exports+=("${BASH_REMATCH[1]}=${BASH_REMATCH[2]}")
                 done < <(AMETHYSTORA_AGENT_PROFILE_PIN="$2" "${TOOLS}" profile env --shell bash --dir "${folder}")
+                # A key in the environment wins over the profile's login: the new shell starts without the agents' own (the
+                # table's env lines, of the agents that have profiles). One its own files set again is still seen by an
+                # agent typed there while the hook is off; with it on, agent-run takes that away as well.
+                keys=()
+                if [[ $2 != default ]]; then
+                    while read -r variable; do
+                        [[ -z ${!variable:-} ]] || keys+=("${variable}")
+                    done < <(awk '$1 == "way" && $3 == "none" { none[$2] = 1 } $1 == "env" && !none[$2] { print $3 }' "${PATHS}" | sort -u)
+                    [[ ${#keys[@]} -eq 0 ]] || echo "The terminal on $2 starts without ${keys[*]}: its agents use the profile's own login." >&2
+                fi
                 cd "${folder}"
-                exec xdg-terminal-exec env AMETHYSTORA_AGENT_PROFILE_PIN="$2" "${exports[@]}" "${SHELL:-/usr/bin/bash}"
+                exec xdg-terminal-exec env "${keys[@]/#/--unset=}" AMETHYSTORA_AGENT_PROFILE_PIN="$2" "${exports[@]}" "${SHELL:-/usr/bin/bash}"
                 ;;
             *) exec "${TOOLS}" profile "$@" ;;
         esac

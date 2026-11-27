@@ -10,15 +10,29 @@
 #   way     AGENT none            the agent has no profile: it keeps its login where no folder isolates it
 #   dir     AGENT PATH            a folder of the agent's own: a profile has its copy; writable in a sandbox
 #   login   AGENT PATH            its login, which the watcher watches and the Vault may protect
-#   copy    AGENT PATH            a file it rewrites that names commands: a sandbox gives it a private copy, never written back
-#   ro      AGENT PATH            in its folder, a file or folder that starts commands or loosens its checks: read-only in a sandbox
+#   copy    AGENT PATH            a file it rewrites that names commands or that a later session reads as instructions: a
+#                                 sandbox gives it a private copy, never written back
+#   ro      AGENT PATH            in its folder, a file or folder that starts commands, loosens its checks or is read as
+#                                 instructions: read-only in a sandbox, with each file of its own that one of them runs or
+#                                 brings in (a hook's script, the status line's, a CLAUDE.md's @file). A link there stops a
+#                                 sandboxed launch, since a mount cannot hold a link
+#   layer   AGENT PATH            in its folder, a place it must write that a later plain session runs or reads as
+#                                 instructions (its memory, its shell's snapshots): a sandbox gives it a layer of the launch's
+#                                 own, which it reads and writes, thrown away when it ends. {project} is the project's folder
+#                                 and the launch's, each with every character but a letter or a digit made - (Claude Code's
+#                                 names for them)
+#   keep    AGENT PATH            inside a layer, a place that is the real one again (this project's transcripts)
+#   empty   AGENT PATH            in its folder, a place of the other sessions' (their keys, the editor's): an empty folder of
+#                                 the launch's own in a sandbox
 #   project AGENT PATH            the same in the project (- for every agent); .git's hooks and config are always read-only
 #   program AGENT PATH            the agent's own program, where its installer puts it inside its folder: always the home's,
 #                                 read-only in a sandbox (the next plain launch runs it) and there when the folder is hidden
 #   env     AGENT NAME            a variable whose name says secret that the agent itself needs: kept in a sandbox
-#   cache   - PATH                a build cache: writable in a sandbox
+#   cache   - PATH                a build cache: in a sandbox, a layer of the launch's own over it, which takes what it writes and
+#                                 is thrown away when it ends (a package changed there would run at the next plain build)
 #   hidden  - PATH                hidden in a sandbox (an empty folder or file in its place), with every credential-files pattern;
-#                                 an absolute PATH is the machine's
+#                                 an absolute PATH is the machine's; * within a name is each one there is (for a name with a
+#                                 space). A closed sandbox hides each one that lies inside a toolchain's folder it is given
 #   tool    - PATH                read-only in a closed sandbox, which has nothing else of the home
 #
 # Facts marked (unverified) are from the agents' own documentation as remembered on 2026-11-14, not seen on a machine.
@@ -39,6 +53,22 @@ ro      claude          .claude/plugins
 ro      claude          .claude/skills
 ro      claude          .claude/output-styles
 ro      claude          .claude/CLAUDE.md
+# Its rules, each read as instructions as CLAUDE.md is (unverified)
+ro      claude          .claude/rules
+# What a later plain session runs or reads, which the agent must still write (seen in ~/.claude, 2026-11-26): its shell's
+# snapshots (a login-path-*.sh there is kept and sourced again by the next session), the variables a session's hooks set
+# (session-env, one folder a session: what reads it again is unverified), and its folder of projects, in which each
+# project's memory is read as instructions by a session started there. The projects folder is a layer; this project's
+# folder in it is the real one, so that its transcripts stay, with its memory a layer again
+layer   claude          .claude/shell-snapshots
+layer   claude          .claude/session-env
+layer   claude          .claude/projects
+keep    claude          .claude/projects/{project}
+layer   claude          .claude/projects/{project}/memory
+# The editor's connection (ide/*.lock, each with the key the editor's server takes) and the other running sessions' files,
+# with a key each (seen, 2026-11-26)
+empty   claude          .claude/ide
+empty   claude          .claude/sessions
 project claude          .claude
 project claude          .mcp.json
 env     claude          ANTHROPIC_API_KEY
@@ -60,6 +90,9 @@ ro      codex           .codex/rules
 ro      codex           .codex/AGENTS.md
 ro      codex           .codex/skills
 ro      codex           .codex/prompts
+# Read in place of AGENTS.md where it is there, and the shell's snapshots it keeps (both unverified)
+ro      codex           .codex/AGENTS.override.md
+layer   codex           .codex/shell_snapshots
 project codex           .codex
 env     codex           OPENAI_API_KEY
 env     codex           CODEX_API_KEY
@@ -94,6 +127,9 @@ ro      agy             .gemini/config
 ro      agy             .gemini/extensions
 ro      agy             .gemini/antigravity-cli/plugins
 ro      agy             .gemini/antigravity-cli/skills
+# Its memory, which it writes when told to remember and reads as instructions at each start (Gemini CLI's; unverified for
+# Antigravity CLI): a private copy, so that it may still write it
+copy    agy             .gemini/GEMINI.md
 project agy             .gemini
 env     agy             GEMINI_API_KEY
 env     agy             GOOGLE_API_KEY
@@ -106,6 +142,9 @@ copy    copilot         .copilot/permissions-config.json
 ro      copilot         .copilot/settings.json
 ro      copilot         .copilot/mcp-config.json
 ro      copilot         .copilot/hooks
+# Its instructions and its custom agents (unverified)
+ro      copilot         .copilot/copilot-instructions.md
+ro      copilot         .copilot/agents
 project copilot         .copilot
 env     copilot         COPILOT_GITHUB_TOKEN
 env     copilot         GH_TOKEN
@@ -120,6 +159,8 @@ copy    cursor-agent    .cursor/cli-config.json
 ro      cursor-agent    .cursor/mcp.json
 ro      cursor-agent    .cursor/hooks.json
 ro      cursor-agent    .cursor/rules
+# Its commands (unverified)
+ro      cursor-agent    .cursor/commands
 project cursor-agent    .cursor
 env     cursor-agent    CURSOR_API_KEY
 tool    -               .local/share/cursor-agent
@@ -167,6 +208,39 @@ hidden  -               .npmrc
 hidden  -               .pypirc
 hidden  -               .netrc
 hidden  -               .git-credentials
+hidden  -               .config/git/credentials
+hidden  -               .yarnrc.yml
+hidden  -               .cargo/credentials.toml
+hidden  -               .cargo/credentials
+hidden  -               .gem/credentials
+hidden  -               .config/composer/auth.json
+hidden  -               .composer/auth.json
+hidden  -               .config/pypoetry/auth.toml
+hidden  -               .m2/settings-security.xml
+hidden  -               .pgpass
+hidden  -               .my.cnf
+hidden  -               .mylogin.cnf
+hidden  -               .config/glab-cli
+hidden  -               .config/hub
+hidden  -               .vault-token
+hidden  -               .azure
+hidden  -               .oci
+hidden  -               .config/doctl
+hidden  -               .config/hcloud
+hidden  -               .fly
+hidden  -               .s3cfg
+hidden  -               .boto
+hidden  -               .terraform.d/credentials.tfrc.json
+hidden  -               .terraformrc
+hidden  -               .config/helm/registry
+hidden  -               .config/ngrok
+hidden  -               .config/stripe
+hidden  -               .config/sops
+hidden  -               .config/op
+hidden  -               .op
+hidden  -               .config/Bitwarden*CLI
+hidden  -               .local/share/gopass
+hidden  -               .local/share/kwalletd
 hidden  -               .local/share/amethystora-notes
 hidden  -               .local/share/amethystora/routines
 hidden  -               .local/share/amethystora/private

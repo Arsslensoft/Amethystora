@@ -93,6 +93,11 @@ account bulk 4203
 account omega 4204
 as 4203 bash -c 'cd "$1" && for i in $(seq 350); do mkdir -p ".config/chromium/p$i"; : >".config/chromium/p$i/Cookies"; done' _ "${R}/var/home/bulk"
 as 4204 touch "${R}/var/home/omega/.npmrc"
+# Beside it, secrets the sandbox hides as well (credential-files): a database's passwords, a file in a tool's folder
+# (and not the file beside it there, which holds none), and KDE's wallets, read as a folder as GNOME's keyring is
+O="${R}/var/home/omega"
+as 4204 mkdir -p "${O}/.config/glab-cli" "${O}/.azure" "${O}/.local/share/kwalletd"
+as 4204 touch "${O}/.pgpass" "${O}/.config/glab-cli/config.yml" "${O}/.azure/msal_token_cache.json" "${O}/.azure/azureProfile.json"
 printf 'CREDENTIALS=on\n' >"${T}/security.conf"
 AMETHYSTORA_SECURITY_CONF="${T}/security.conf" AMETHYSTORA_SENSOR_FORCE=sensor bash "${GENERATOR}"
 RUN="${R}/run/amethystora/sensor"
@@ -100,8 +105,21 @@ grep -qx 4203 "${RUN}/skipped" || { echo "a home that cost too much was not said
 grep -qx 4204 "${RUN}/skipped" && { echo "a home that cost little was said"; false; }
 [[ "$(grep -c "^read-file credentials ${R}/var/home/bulk/" "${RUN}/watch.list")" -le 300 ]] || { echo "one home was not bounded"; false; }
 grep -qx "read-file credentials ${R}/var/home/omega/.npmrc" "${RUN}/watch.list" || { echo "the home after it was not read"; false; }
+for file in .pgpass .config/glab-cli/config.yml .azure/msal_token_cache.json; do
+    grep -qx "read-file credentials ${O}/${file}" "${RUN}/watch.list" || { echo "${file} is not watched"; false; }
+done
+grep -qx "read-tree credentials ${O}/.local/share/kwalletd" "${RUN}/watch.list" || { echo "KDE's wallets are not watched"; false; }
+grep -qF "${O}/.azure/azureProfile.json" "${RUN}/watch.list" && { echo "a file beside a secret is watched"; false; }
 grep -qx 'identity sensor' "${RUN}/plan"
 [[ "$(stat -c %a "${RUN}/watch.list")" == 600 && "$(stat -c %a "${RUN}/plan")" == 600 ]] ||
     { echo "the plan or the watch list can be read by anyone"; false; }
+
+# Without the sensor the same secrets are audit rules on reading them
+AMETHYSTORA_SECURITY_CONF="${T}/security.conf" AMETHYSTORA_SENSOR_FORCE=audit bash "${GENERATOR}"
+for rule in "path=${O}/.pgpass" "path=${O}/.config/glab-cli/config.yml" "dir=${O}/.local/share/kwalletd"; do
+    grep -qxF -- "-a always,exit -F arch=b64 -F ${rule} -F perm=r -F auid>=1000 -F auid!=unset -k credentials" "${RULES}" ||
+        { echo "no rule on reading ${rule}"; false; }
+done
+grep -qF "${O}/.azure/azureProfile.json" "${RULES}" && { echo "a rule on a file beside a secret"; false; }
 
 echo "test-audit-home-rules: every check passed"

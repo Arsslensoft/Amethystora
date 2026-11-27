@@ -6,6 +6,7 @@
 //!   sandbox list [--json] | use FOLDER [open|closed] | off FOLDER | allow FOLDER PERMISSION | disallow FOLDER PERMISSION
 //!   sandbox cost PERMISSION [FOLDER] | show ... (agent-plan's options)
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -129,10 +130,7 @@ pub fn profile(args: &[String]) -> i32 {
         ["ask", name] => out(agents::set_ask(&home, name)),
         // A removed profile's folders, and the pill's questions if they went to it, follow the home's again
         ["forget", name] => out(agents::forget(name)),
-        ["ask-profile"] => {
-            println!("{}", agents::ask_profile(&home));
-            0
-        }
+        ["ask-profile"] => out(agents::ask_profile(&home)),
         ["env", rest @ ..] => env(rest, &home),
         _ => {
             eprintln!("usage: amethystora-agent-tools profile list|add|use|which|running|in-use|ask|ask-profile|root|env ...");
@@ -141,48 +139,116 @@ pub fn profile(args: &[String]) -> i32 {
     }
 }
 
-/// What a hooked shell exports when its folder changes (or a pinned one once): each agent of way 1's variable for the folder's
-/// profile, our own profile variable, and the words of the prompt's segment. A pinned shell keeps its pin, whatever the folder.
+/// A word for fish, whose single quotes take \\ and \' as escapes
+fn fish_quoted(word: &str) -> String {
+    format!("'{}'", word.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+/// The hook's own variable, never exported: what could not be worked out, which the shell says once until it changes
+const WARNING_VAR: &str = "__amethystora_agent_warning";
+
+/// What a hooked shell evaluates before each prompt (and a pinned terminal once): each agent of way 1's variable for the
+/// folder's profile, our own profile variable, and the words of the prompt's segment. A pinned shell keeps its pin, whatever
+/// the folder. What cannot be worked out (the table or a map unreadable, a folder whose profile is gone) is said on standard
+/// error and in the hook's own variable, the prompt says `agent ?`, the way-1 variables that point into a profile (the last
+/// folder's) are taken away and our profile variable says `?`: `command claude`, an IDE started from that shell or a script
+/// never goes on to the last folder's account. An agent typed there goes through agent-run, which refuses to start for the
+/// same reason.
 fn env(args: &[&str], home: &Path) -> i32 {
     let shell = args.windows(2).find(|pair| pair[0] == "--shell").map(|pair| pair[1]).unwrap_or("bash");
     let dir = args.windows(2).find(|pair| pair[0] == "--dir").map(|pair| PathBuf::from(pair[1]));
-    let Ok(table) = table() else { return 0 };
     let dir = dir.or_else(|| std::env::current_dir().ok()).unwrap_or_else(|| home.to_path_buf());
     let pin = std::env::var(agents::PIN).ok().filter(|pin| !pin.is_empty());
-    let (profile, _) = agents::which(home, None, pin.as_deref(), &dir).unwrap_or((DEFAULT.into(), ""));
-    let rule = sandbox::rule_of(home, &dir).ok().flatten().map(|(_, mode, _)| mode);
-    let mut set: Vec<(String, Option<String>)> = Vec::new();
-    // On the home's profile a variable is taken away only when this hook set it (our own profile variable is there): one the
-    // person set in their own shell files is theirs
-    let ours = std::env::var_os(agents::PROFILE_VAR).is_some();
-    for paths in table.agents.values() {
-        if let Some(Way::Variable { name, dir }) = &paths.way {
-            let value = (profile != DEFAULT).then(|| agents::profile_root(home, &profile).join(dir).to_string_lossy().into_owned());
-            if value.is_some() || ours {
-                set.push((name.clone(), value));
-            }
-        }
-    }
-    set.push((agents::PROFILE_VAR.into(), Some(profile.clone())));
-    set.push(("AMETHYSTORA_AGENT_SANDBOX_RULE".into(), rule.map(|mode| mode.word().to_string())));
-    let mut prompt: Vec<String> = Vec::new();
-    if profile != DEFAULT {
-        prompt.push(profile.clone());
-    }
-    if rule.is_some() {
-        prompt.push("sandboxed".into());
-    }
-    set.push(("AMETHYSTORA_AGENT_PROMPT".into(), (!prompt.is_empty()).then(|| prompt.join(" · "))));
+    let (set, problems) = env_lines(table(), home, pin.as_deref(), &dir, &|name: &str| std::env::var_os(name));
     for (name, value) in set {
         let line = match (shell, value) {
-            ("fish", Some(value)) => format!("set -gx {name} {}", quoted(&value)),
+            ("fish", Some(value)) => format!("set -gx {name} {}", fish_quoted(&value)),
             ("fish", None) => format!("set -e {name}"),
             (_, Some(value)) => format!("export {name}={}", quoted(&value)),
             (_, None) => format!("unset {name}"),
         };
         println!("{line}");
     }
-    0
+    let warning = problems.join(" ");
+    for problem in &problems {
+        eprintln!("{problem}");
+    }
+    match shell {
+        "fish" => println!("set -g {WARNING_VAR} {}", fish_quoted(&warning)),
+        _ => println!("{WARNING_VAR}={}", quoted(&warning)),
+    }
+    if problems.is_empty() { 0 } else { 1 }
+}
+
+/// The variables of way 1 in the shipped table (claude's and codex's), for when the table itself cannot be read
+const WAY_VARIABLES: &[&str] = &["CLAUDE_CONFIG_DIR", "CODEX_HOME"];
+
+/// The variables profile env sets (None: unset) for a shell in DIR, and what could not be worked out. LOOKUP reads the
+/// shell's variables (the process's own environment, which the shell passed down)
+fn env_lines(
+    table: Result<Table, String>,
+    home: &Path,
+    pin: Option<&str>,
+    dir: &Path,
+    lookup: &dyn Fn(&str) -> Option<OsString>,
+) -> (Vec<(String, Option<String>)>, Vec<String>) {
+    // As agents::ours: a variable is ours when it points into the profiles' folder
+    let ours = |name: &str| lookup(name).is_some_and(|value| Path::new(&value).starts_with(agents::profiles_dir(home)));
+    let mut problems = Vec::new();
+    let table = table.map_err(|why| problems.push(why)).ok();
+    let profile = agents::which(home, None, pin, dir).map(|(profile, _)| profile).map_err(|why| problems.push(why)).ok();
+    let rule = sandbox::rule_of(home, dir).map(|rule| rule.map(|(_, mode, _)| mode)).map_err(|why| problems.push(why)).ok();
+    let mut set: Vec<(String, Option<String>)> = Vec::new();
+    if let (Some(table), Some(profile)) = (&table, &profile) {
+        for paths in table.agents.values() {
+            if let Some(Way::Variable { name, dir }) = &paths.way {
+                let value = (profile != DEFAULT).then(|| agents::profile_root(home, profile).join(dir).to_string_lossy().into_owned());
+                // On the home's profile a variable is taken away only when it is ours (it points into a profile): one the
+                // person set in their own shell files to a place of their own is theirs
+                if value.is_some() || ours(name.as_str()) {
+                    set.push((name.clone(), value));
+                }
+            }
+        }
+        set.push((agents::PROFILE_VAR.into(), Some(profile.clone())));
+    } else {
+        // The profile not known: what points into a profile (the last folder's, left by the last prompt) is taken away, so
+        // that `command claude`, an IDE started from this shell or a script never works on the last folder's account. One
+        // the person set to a place of their own stays theirs. Our own variable says it is not known, never the home's
+        let names: Vec<String> = match &table {
+            Some(table) => table
+                .agents
+                .values()
+                .filter_map(|paths| match &paths.way {
+                    Some(Way::Variable { name, .. }) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+            None => WAY_VARIABLES.iter().map(|name| name.to_string()).collect(),
+        };
+        for name in names {
+            if ours(name.as_str()) && !set.iter().any(|(each, _)| *each == name) {
+                set.push((name, None));
+            }
+        }
+        set.push((agents::PROFILE_VAR.into(), Some("?".into())));
+    }
+    if let Some(rule) = rule {
+        set.push(("AMETHYSTORA_AGENT_SANDBOX_RULE".into(), rule.map(|mode| mode.word().to_string())));
+    }
+    let mut prompt: Vec<String> = Vec::new();
+    if let Some(profile) = profile.as_ref().filter(|profile| *profile != DEFAULT) {
+        prompt.push(profile.clone());
+    }
+    if rule.flatten().is_some() {
+        prompt.push("sandboxed".into());
+    }
+    // Not known is said as such, never as the home's plain one
+    if !problems.is_empty() {
+        prompt = vec!["?".into()];
+    }
+    set.push(("AMETHYSTORA_AGENT_PROMPT".into(), (!prompt.is_empty()).then(|| prompt.join(" · "))));
+    (set, problems)
 }
 
 pub fn sandbox_cmd(args: &[String]) -> i32 {
@@ -292,5 +358,105 @@ pub fn sandbox_cmd(args: &[String]) -> i32 {
             eprintln!("usage: amethystora-agent-tools sandbox list|use|off|network|allow|disallow|cost|show ...");
             64
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table_of_two_ways() -> Table {
+        Table::parse(
+            &agents::AGENTS
+                .iter()
+                .map(|agent| match *agent {
+                    "claude" => "way claude var CLAUDE_CONFIG_DIR .claude\ndir claude .claude\n".to_string(),
+                    other => format!("way {other} mount\ndir {other} .{other}\n"),
+                })
+                .collect::<String>(),
+        )
+        .unwrap()
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("amethystora-agentcli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(agents::PROFILES).join("work")).unwrap();
+        std::fs::canonicalize(&dir).unwrap()
+    }
+
+    fn value<'a>(set: &'a [(String, Option<String>)], name: &str) -> Option<&'a Option<String>> {
+        set.iter().find(|(each, _)| each == name).map(|(_, value)| value)
+    }
+
+    #[test]
+    fn fish_reads_its_quotes_back() {
+        assert_eq!(fish_quoted("work"), "'work'");
+        assert_eq!(fish_quoted("a'b\\"), "'a\\'b\\\\'");
+        assert_eq!(quoted("a'b"), "'a'\\''b'");
+    }
+
+    /// A shell with no variable of its own
+    fn none(_: &str) -> Option<OsString> {
+        None
+    }
+
+    #[test]
+    fn what_cannot_be_read_is_said_and_never_the_homes() {
+        let home = temp("unread");
+        // The table unread: nothing of a profile is set, and the prompt says it is not known
+        let (set, problems) = env_lines(Err("agent-paths: unreadable".into()), &home, Some("work"), &home, &none);
+        assert!(problems.iter().any(|problem| problem.contains("unreadable")));
+        assert!(value(&set, "CLAUDE_CONFIG_DIR").is_none());
+        assert_eq!(value(&set, agents::PROFILE_VAR), Some(&Some("?".to_string())));
+        assert_eq!(value(&set, "AMETHYSTORA_AGENT_PROMPT"), Some(&Some("?".to_string())));
+        // A pin on a profile that is not there: the same, not the home's
+        let (set, problems) = env_lines(Ok(table_of_two_ways()), &home, Some("nope"), &home, &none);
+        assert!(problems.iter().any(|problem| problem.contains("nope")));
+        assert_eq!(value(&set, agents::PROFILE_VAR), Some(&Some("?".to_string())));
+        assert_eq!(value(&set, "AMETHYSTORA_AGENT_PROMPT"), Some(&Some("?".to_string())));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn a_gone_profile_takes_away_the_last_folders_variables_and_keeps_the_persons() {
+        let home = temp("gone");
+        let last = agents::profile_root(&home, "work").join(".claude").into_os_string();
+        let left_by_the_last_folder = |name: &str| match name {
+            "CLAUDE_CONFIG_DIR" | "CODEX_HOME" => Some(last.clone()),
+            agents::PROFILE_VAR => Some("work".into()),
+            _ => None,
+        };
+        // A pin on a profile that is gone, the table read: the variable into the last profile goes, ours says not known
+        let (set, problems) = env_lines(Ok(table_of_two_ways()), &home, Some("nope"), &home, &left_by_the_last_folder);
+        assert!(!problems.is_empty());
+        assert_eq!(value(&set, "CLAUDE_CONFIG_DIR"), Some(&None));
+        assert_eq!(value(&set, agents::PROFILE_VAR), Some(&Some("?".to_string())));
+        // CODEX_HOME is of way 2 in this table, so it is not ours to take away here
+        assert!(value(&set, "CODEX_HOME").is_none());
+        // The table unread: the shipped variables of way 1 that point into a profile go
+        let (set, _) = env_lines(Err("agent-paths: unreadable".into()), &home, Some("work"), &home, &left_by_the_last_folder);
+        assert_eq!(value(&set, "CLAUDE_CONFIG_DIR"), Some(&None));
+        assert_eq!(value(&set, "CODEX_HOME"), Some(&None));
+        assert_eq!(value(&set, agents::PROFILE_VAR), Some(&Some("?".to_string())));
+        // One the person set to a place of their own is theirs, and stays
+        let mine = home.join("mine").into_os_string();
+        let their_own = |name: &str| (name == "CLAUDE_CONFIG_DIR").then(|| mine.clone());
+        for table in [Ok(table_of_two_ways()), Err("agent-paths: unreadable".to_string())] {
+            let (set, problems) = env_lines(table, &home, Some("nope"), &home, &their_own);
+            assert!(!problems.is_empty());
+            assert!(value(&set, "CLAUDE_CONFIG_DIR").is_none());
+        }
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn a_pinned_shell_gets_its_profiles_variable() {
+        let home = temp("pinned");
+        let (set, _) = env_lines(Ok(table_of_two_ways()), &home, Some("work"), &home, &none);
+        let dir = agents::profile_root(&home, "work").join(".claude").to_string_lossy().into_owned();
+        assert_eq!(value(&set, "CLAUDE_CONFIG_DIR"), Some(&Some(dir)));
+        assert_eq!(value(&set, agents::PROFILE_VAR), Some(&Some("work".to_string())));
+        std::fs::remove_dir_all(&home).unwrap();
     }
 }
