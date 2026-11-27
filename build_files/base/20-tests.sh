@@ -3420,9 +3420,25 @@ bash -n /usr/libexec/amethystora-guest
 # ...whose clean-up also runs as the next session starts, so that a crash or a power cut leaves nothing for the next
 # visitor, and asks each service that keeps something for the guest to forget it
 sed -n '/^prepare() {/,/^}/p' /usr/libexec/amethystora-guest | grep -x '    cleanup' >/dev/null
-for command in 'umount -l' 'SetIconFile' 'cancel -a -x -u' 'nmcli connection delete' 'bluetoothctl remove'; do
+for command in 'umount -l' 'SetIconFile' 'cancel -a -x -u' 'nmcli connection delete' 'bluetoothctl remove' 'pkill -KILL -U' "mapfile -d ''"; do
     sed -n '/^cleanup() {/,/^}/p' /usr/libexec/amethystora-guest | grep -F -- "${command}" >/dev/null
 done
+# ...the empty password only once the feature refuses it everywhere but the login screen, the account locked and expired before
+# the feature goes, and the home's first files made by the guest itself, never by root through what is in it
+ENABLE="$(sed -n '/^enable() {/,/^}/p' /usr/libexec/amethystora-guest)"
+[[ "$(grep -n 'passwd -d' <<<"${ENABLE}" | cut -d: -f1)" -gt "$(grep -n 'authselect enable-feature' <<<"${ENABLE}" | cut -d: -f1)" ]]
+DISABLE="$(sed -n '/^disable() {/,/^}/p' /usr/libexec/amethystora-guest)"
+[[ "$(grep -n 'usermod --lock --expiredate 1' <<<"${DISABLE}" | cut -d: -f1)" -lt "$(grep -n 'authselect disable-feature' <<<"${DISABLE}" | cut -d: -f1)" ]]
+# ...and the guest's user manager ends with its session, for the guest alone, so that a guest logging in within logind's
+# UserStopDelaySec of the last never takes over its manager and home
+GUEST_LOGOUT=/usr/lib/systemd/user/amethystora-guest-logout.service
+grep -qx 'ConditionUser=amethystora-guest' "${GUEST_LOGOUT}"
+grep -qx 'ExecStop=/usr/bin/systemctl --user --no-block exit' "${GUEST_LOGOUT}"
+grep -qx 'PartOf=graphical-session.target' "${GUEST_LOGOUT}"
+[[ "$(systemctl --global is-enabled amethystora-guest-logout.service)" == enabled ]]
+PREPARE="$(sed -n '/^prepare() {/,/^}/p' /usr/libexec/amethystora-guest)"
+grep -qF 'setpriv --reuid="${uid}" --regid="${gid}" --clear-groups' <<<"${PREPARE}"
+[[ -z "$(grep -E '(install .*|>)"\$\{HOME_DIR\}' <<<"${PREPARE}")" ]]
 # The bookmarks are read from a copy, which goes before anything is printed, and never a visit
 [[ -z "$(grep -v '^ *#' /usr/libexec/amethystora-bookmarks | grep -n "moz_historyvisits\|visit_count\|last_visit")" ]]
 grep -q "WHERE b.type = 1" /usr/libexec/amethystora-bookmarks

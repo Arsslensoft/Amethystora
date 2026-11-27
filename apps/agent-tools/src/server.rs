@@ -39,6 +39,8 @@ pub struct Server {
     checks_off: OnceLock<Option<String>>,
     /// Serving an agent over MCP (`mcp`), where the launcher must stand above; the person's own commands (the pill's Undo) are not
     serves_agent: bool,
+    /// Serving it over a pipe, which any program of the account can open and write requests into (act::root_refusal)
+    over_pipe: bool,
 }
 
 impl Default for Server {
@@ -62,12 +64,15 @@ impl Server {
             index_dir,
             checks_off: OnceLock::new(),
             serves_agent: false,
+            over_pipe: false,
         }
     }
 
-    /// The server an agent starts (`mcp`), whose tools that change things need the launcher above it
+    /// The server an agent starts (`mcp`), whose tools that change things need the launcher above it, and which reads the agent's
+    /// requests from its standard input: a socket, or anything else, which another program can open
     pub fn serving_agent(mut self) -> Server {
         self.serves_agent = true;
+        self.over_pipe = !act::fd_is_socket(0);
         self
     }
 
@@ -178,7 +183,7 @@ impl Server {
         match name {
             "change" => act::change(&self.cache, &self.jobs, args),
             "software" => act::software(&self.jobs, &self.cache, args, None),
-            "run" => act::run_command(&self.jobs, &self.root, policy, args),
+            "run" => act::run_command(&self.jobs, &self.root, policy, args, self.serves_agent && self.over_pipe),
             "plugin" => act::plugin_tool(args),
             _ => act::undo(&self.jobs, &self.cache, args),
         }
@@ -229,9 +234,12 @@ impl Server {
                 }
                 return Ok(format!("{id} is still running; ask again with wait."));
             }
-            // A hand-off another session of the agent opened is read from its folder
-            if let Some(said) = handoff::result(id) {
-                return Ok(said);
+            // A hand-off another session of the agent opened is read from its folder, named by an id history::new_id made:
+            // anything else would be a path joined onto the runtime folder
+            if id.len() == 8 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
+                if let Some(said) = handoff::result(id) {
+                    return Ok(said);
+                }
             }
             return history::find(id).map(|record| history::line(&record)).ok_or_else(|| format!("No change {id} was recorded."));
         }

@@ -50,8 +50,10 @@ def walk(data):
         tag = prefix >> 4
         if kind == 1:  # global
             if tag == 0:
-                page = value
-                pages.append(value)
+                # The kernel keeps a page in the upper half of a 32-bit usage, so a 4-byte Usage Page item counts by its
+                # lower 16 bits alone (0x00010007 types as the keyboard page): read it as the kernel does
+                page = value & 0xFFFF
+                pages.append(page)
             elif tag == 0xA and len(stack) < 64:
                 stack.append(page)
             elif tag == 0xB and stack:

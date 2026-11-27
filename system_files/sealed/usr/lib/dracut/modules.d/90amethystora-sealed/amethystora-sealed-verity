@@ -48,16 +48,20 @@ for arg in "${args[@]}"; do
 done
 ((formats <= 1 && bare <= 1 && ${#digests[@]} >= 1)) || refuse "the command line names ${#digests[@]} images"
 
+# A mountinfo line is six fields, then none or more optional ones (shared:N, master:N...), then " - " and the file
+# system's type, source and options. The optional fields depend on the mount's propagation, so the line is split at
+# the separator rather than counted from the start: a mount with none would otherwise go unread
 root="" bad=""
-while read -r _ _ _ _ mountpoint _ rest; do
-    [[ "${rest}" == *" - overlay composefs:"* ]] || continue
-    if [[ ",${rest##* }," != *",verity=require,"* ]]; then
+while IFS= read -r line; do
+    [[ "${line}" == *" - "* ]] || continue
+    read -r _ _ _ _ mountpoint _ <<<"${line%% - *}"
+    read -r fstype source options _ <<<"${line#* - }"
+    [[ "${fstype}" == overlay && "${source}" == composefs:* ]] || continue
+    if [[ ",${options}," != *",verity=require,"* ]]; then
         bad="${mountpoint}"
     fi
     if [[ "${mountpoint}" == /sysroot ]]; then
-        source="${rest#* - overlay }"
-        root="${source%% *}"
-        root="${root#composefs:}"
+        root="${source#composefs:}"
     fi
 done <"${mountinfo}"
 

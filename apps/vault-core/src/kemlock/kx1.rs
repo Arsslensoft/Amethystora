@@ -42,8 +42,8 @@ impl Kx1PublicKey {
     /// A shared secret and the ciphertext that gives it to the holder of the private key. An all-zero X25519 secret (a
     /// public key of low order) is refused.
     pub fn encapsulate(&self) -> Result<(Vec<u8>, Key)> {
-        let mut m = ml_kem::B32::default();
-        crate::seal::random(&mut m);
+        let mut m = Zeroizing::new(ml_kem::B32::default());
+        crate::seal::random(&mut m[..]);
         let mut ephemeral = Zeroizing::new([0u8; 32]);
         crate::seal::random(&mut ephemeral[..]);
         self.encapsulate_with(&m, &ephemeral)
@@ -83,7 +83,10 @@ impl Kx1PrivateKey {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Kx1PrivateKey> {
         let bytes: &[u8; PRIVATE_KEY] = bytes.try_into().map_err(|_| Error::Malformed("a kx1 private key is 96 bytes"))?;
-        Ok(Kx1PrivateKey(Zeroizing::new(*bytes)))
+        // Copied into memory that wipes itself, never through a plain array on the stack
+        let mut key = Zeroizing::new([0u8; PRIVATE_KEY]);
+        key.copy_from_slice(bytes);
+        Ok(Kx1PrivateKey(key))
     }
 
     pub fn as_bytes(&self) -> &[u8; PRIVATE_KEY] {
@@ -91,9 +94,8 @@ impl Kx1PrivateKey {
     }
 
     fn decapsulation_key(&self) -> ml_kem_1024::DecapsulationKey {
-        let mut seed = ml_kem::Seed::default();
-        seed.copy_from_slice(&self.0[..64]);
-        ml_kem_1024::DecapsulationKey::from_seed(seed)
+        // The seed straight into the key, which takes it by value: no named copy of it is left behind
+        ml_kem_1024::DecapsulationKey::from_seed(ml_kem::Seed::try_from(&self.0[..64]).expect("64 bytes"))
     }
 
     fn x25519_secret(&self) -> Zeroizing<[u8; 32]> {

@@ -84,6 +84,17 @@ printf '%s\n' "${CMDLINE}" >"${G}/cmdline"
 printf '9 1 0:9 / /sysroot ro - overlay composefs:%s ro,verity=require\n' "${MOUNTED}" >"${G}/mountinfo"
 touch "${G}/physical/composefs/images/${MOUNTED}"
 bash "${GUARD}" "${G}/cmdline" "${G}/mountinfo" "${G}/physical"
+# ...with the optional fields a shared mount has before the separator too, and not with another composefs mount
+# that lacks fs-verity, with or without them
+printf '9 1 0:9 / /sysroot ro shared:5 master:1 - overlay composefs:%s ro,verity=require\n' "${MOUNTED}" >"${G}/mountinfo"
+bash "${GUARD}" "${G}/cmdline" "${G}/mountinfo" "${G}/physical"
+for fields in "" " shared:6"; do
+    printf '10 9 0:10 / /sysroot/usr ro%s - overlay composefs:%s ro\n' "${fields}" "${MOUNTED}" >>"${G}/mountinfo"
+    if bash "${GUARD}" "${G}/cmdline" "${G}/mountinfo" "${G}/physical"; then
+        exit 1
+    fi
+    printf '9 1 0:9 / /sysroot ro shared:5 master:1 - overlay composefs:%s ro,verity=require\n' "${MOUNTED}" >"${G}/mountinfo"
+done
 printf '%s composefs.digest=v1-sha512-12:%s\n' "${CMDLINE}" "${MOUNTED}" >"${G}/cmdline"
 if bash "${GUARD}" "${G}/cmdline" "${G}/mountinfo" "${G}/physical"; then
     exit 1

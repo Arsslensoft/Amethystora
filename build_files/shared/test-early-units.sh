@@ -78,6 +78,10 @@ for unit in systemd-modules-load systemd-remount-fs; do
         fail "${dropin} does not replace ExecStart once"
     grep -qF "exec /usr/libexec/amethystora-early-units ${mode};" "${dropin}" || fail "${dropin} does not start the helper's ${mode}"
     grep -qF "exec /usr/lib/systemd/${unit}'" "${dropin}" || fail "${dropin} has no fallback to systemd's ${unit}"
+    # ...and no other drop-in that takes a failure for success, which would pass what the helper still fails
+    if grep -lE '^SuccessExitStatus=' "${UNITS}/${unit}.service.d/"*.conf 2>/dev/null; then
+        fail "a drop-in of ${unit} takes a failure for success: the helper is the one place that decides"
+    fi
 done
 
 echo "test-early-units: ok"

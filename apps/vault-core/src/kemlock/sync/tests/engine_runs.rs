@@ -610,21 +610,35 @@ fn the_first_write_of_an_item_names_no_revision_it_replaces() {
 }
 
 #[test]
-fn every_kind_is_on_by_default_here_and_a_kind_turned_off_is_not_written() {
+fn every_kind_but_keys_certificates_and_files_is_on_by_default_here_and_a_kind_turned_off_is_not_written() {
     let mut fake = server();
     let mut client = Client::connect(&mut fake, EMAIL);
-    for kind in ["password", "authenticator", "backup-codes", "key", "certificate", "protected"] {
+    // Connecting says yes to the account, not to sending a private key: keys, certificates and files wait to be chosen, as on
+    // Bitwarden's API
+    client.connection.kinds.clear();
+    for kind in ["password", "authenticator", "backup-codes"] {
         assert_eq!(client.connection.kind_choice(kind), "on", "{kind}");
     }
-    client.connection.kinds.insert("key".into(), "off".into());
+    for kind in ["key", "certificate", "protected"] {
+        assert_eq!(client.connection.kind_choice(kind), "off", "{kind}");
+    }
     every_kind(&mut client);
     let outcome = client.sync(&mut fake);
     assert_clean(&outcome.problem);
-    assert_eq!(fake.live_ids(EMAIL).len(), 6, "the three keys stayed home");
+    let written = fake.live_ids(EMAIL).len();
+    assert!(written > 0 && client.of_kind("key").iter().all(|key| !fake.live_ids(EMAIL).contains(&sid(&fake, &key.id))), "no key went by itself");
+    // Chosen, they go; a kind turned off again is not written
+    for kind in ["key", "certificate", "protected"] {
+        client.connection.kinds.insert(kind.into(), "on".into());
+    }
+    client.connection.kinds.insert("key".into(), "off".into());
+    assert_clean(&client.sync(&mut fake).problem);
+    assert!(fake.live_ids(EMAIL).len() > written);
+    assert!(client.of_kind("key").iter().all(|key| !fake.live_ids(EMAIL).contains(&sid(&fake, &key.id))), "the keys stayed home");
     assert_eq!(client.of_kind("key").len(), 3);
-    // A kind a sealed note was kept for reads as on
+    // A kind a sealed note was kept for waits for the person: off until they say
     client.connection.kinds.insert("key".into(), "sealed".into());
-    assert_eq!(client.connection.kind_choice("key"), "on");
+    assert_eq!(client.connection.kind_choice("key"), "off");
 }
 
 #[test]
@@ -742,6 +756,53 @@ fn a_key_replaced_on_the_server_is_a_conflict_and_the_vaults_key_is_never_overwr
     assert_eq!(fake.revision_of(EMAIL, &id), Some(2));
     assert_clean(&client.sync(&mut fake).problem);
     assert_eq!(fake.revision_of(EMAIL, &id), Some(2));
+    // ...nor by the vault's next change to its own key: the server's revision it did not take is no base to write the vault's over
+    edit(&mut client, "key", SSH_ID, |value| value["comment"] = json!("work laptop"));
+    assert_clean(&client.sync(&mut fake).problem);
+    assert_eq!(fake.plain_of(EMAIL, &id).unwrap()["private"], other.value["key"], "the server's key is not written over by the vault's change");
+    assert_eq!(fake.revision_of(EMAIL, &id), Some(2));
+    assert_eq!(client.value("key", SSH_ID)["key"], held["key"], "and the vault's key is still its own");
+}
+
+#[test]
+fn a_cursor_lost_halfway_through_a_read_leaves_what_the_first_page_brought_held_and_never_signed() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    let (kept, edited) = ("00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002");
+    client.put("password", kept, with_id(password("Kept", "u", "p", "kept.example"), kept));
+    client.put("password", edited, with_id(password("Edited", "u", "p", "edited.example"), edited));
+    assert_clean(&client.sync(&mut fake).problem);
+    // The server deletes a login with a tombstone of its own making, which no manifest lists, serves more than a page, and loses the cursor
+    // after the first: the run reads again from nothing
+    let id = sid(&fake, kept);
+    fake.plant_tombstone(EMAIL, &id);
+    for n in 0..150 {
+        fake.plant_foreign(EMAIL, &with_id(password(&format!("Space {n}"), "u", "p", "space.example"), &format!("00000000-0000-4000-9000-{n:012}")));
+    }
+    fake.attack(Attack::GoneAfterAPage);
+    edit(&mut client, "password", edited, |value| value["password"] = json!("p2"));
+    let outcome = client.sync(&mut fake);
+    assert_clean(&outcome.problem);
+    assert!(!fake.attacks_left().contains(&Attack::GoneAfterAPage), "the run read past the first page");
+    // The vault's login stays, and the manifest this client signed for its edit does not say the login is gone
+    assert!(client.value("password", kept).get("deletedAt").is_none_or(Value::is_null), "{}", client.value("password", kept));
+    let manifest = fake.manifest(EMAIL).expect("a manifest");
+    let listed = manifest.entries.iter().find(|entry| entry.item_id.to_string() == id);
+    assert!(listed.is_none_or(|entry| !entry.deleted), "the server's tombstone was signed as this client's word");
+}
+
+#[test]
+fn a_counter_the_server_names_in_a_refusal_is_never_the_one_signed_above() {
+    let mut fake = server();
+    let mut client = Client::connect(&mut fake, EMAIL);
+    client.put("password", PASSWORD_ID, with_id(password("Site", "u", "p", "site.example"), PASSWORD_ID));
+    assert_clean(&client.sync(&mut fake).problem);
+    let before = fake.manifest(EMAIL).expect("a manifest").counter;
+    // The highest counter there is, named in a 409 that no manifest backs: above it, the next would wrap to 0
+    fake.attack(Attack::StaleManifestClaims(u64::MAX));
+    edit(&mut client, "password", PASSWORD_ID, |value| value["password"] = json!("p2"));
+    assert_clean(&client.sync(&mut fake).problem);
+    assert_eq!(fake.manifest(EMAIL).expect("a manifest").counter, before + 1, "signed one above the verified manifest, not the server's word");
 }
 
 #[test]

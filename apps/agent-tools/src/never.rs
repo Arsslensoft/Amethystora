@@ -23,9 +23,25 @@ const RUNNERS: &[&str] = &[
     "nice", "ionice", "chroot", "systemd-run", "run0", "runuser", "setpriv", "unshare", "nsenter", "flock", "stdbuf",
     "script", "sudo", "su", "pkexec", "doas", "watch", "parallel", "expect", "tmux", "screen", "eval", "exec", "strace",
     "gdb", "ltrace",
+    // ...and util-linux's and others' wrappers, which run the command they are given as they are given it
+    "setarch", "linux32", "linux64", "chrt", "taskset", "prlimit", "time", "capsh", "fakeroot", "dbus-run-session",
+    "daemonize", "start-stop-daemon", "valgrind", "catchsegv", "perf",
 ];
 /// Interpreters, refused when given code on the command line rather than a file
 const INTERPRETERS: &[&str] = &["python", "python3", "perl", "ruby", "node", "lua", "php", "awk", "gawk", "osascript", "gjs"];
+/// ...of which these take their program as their first word, not after an option: refused unless it comes from a file (-f)
+const AWKS: &[&str] = &["awk", "gawk", "mawk", "nawk"];
+/// Programs that run a command inside a container or another machine, where nothing of it is seen: the root helper refuses them
+const ELSEWHERE: &[&str] = &[
+    "podman", "docker", "nerdctl", "toolbox", "distrobox", "distrobox-enter", "systemd-nspawn", "machinectl", "flatpak-spawn",
+    "bwrap", "firejail", "incus", "lxc", "lxc-attach", "lxc-execute", "ssh",
+];
+/// git's settings that name a program git runs: given with -c, they run whatever they say (an alias that starts with `!` too)
+const GIT_RUNS: &[&str] = &[
+    "core.pager", "core.editor", "core.sshcommand", "core.fsmonitor", "core.hookspath", "core.askpass", "core.gitproxy",
+    "sequence.editor", "diff.external", "gpg.program", "gpg.ssh.program", "gpg.x509.program", "interactive.difffilter",
+    "uploadpack.packobjectshook", "safe.directory",
+];
 
 /// Paths no command of the agent's may name: who may become root, the agent's own lock, the duress
 /// feature's files, the notes, and the Vault
@@ -71,6 +87,80 @@ fn base(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
+/// The image's entry justfile, whose `alias OLD := group::recipe` lines keep the names the recipes had under ujust: each runs
+/// the recipe it names, and so is judged as that recipe. Read from the image itself, never from a path a caller could choose
+const ENTRY: &str = "/usr/share/amethystora/just/00-entry.just";
+
+#[cfg(not(test))]
+fn entry_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(ENTRY)
+}
+
+/// The tests read the checkout's: AMETHYSTORA_ROOT, as the apps layer sets it, or the repository the crate is in
+#[cfg(test)]
+fn entry_path() -> std::path::PathBuf {
+    std::env::var_os("AMETHYSTORA_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../system_files/shared"))
+        .join(ENTRY.trim_start_matches('/'))
+}
+
+/// ame's old names, each with the words of the recipe it runs, or None when the image's entry file cannot be read
+fn aliases() -> Option<&'static [(String, Vec<String>)]> {
+    static ALIASES: std::sync::OnceLock<Option<Vec<(String, Vec<String>)>>> = std::sync::OnceLock::new();
+    ALIASES
+        .get_or_init(|| {
+            let text = std::fs::read_to_string(entry_path()).ok()?;
+            Some(
+                text.lines()
+                    .filter_map(|line| {
+                        let (name, target) = line.trim().strip_prefix("alias ")?.split_once(":=")?;
+                        let words = target.trim().split("::").filter(|part| !part.is_empty()).map(str::to_lowercase).collect();
+                        Some((name.trim().to_lowercase(), words))
+                    })
+                    .collect(),
+            )
+        })
+        .as_deref()
+}
+
+/// A word as the kernel may read it as a path: itself, what follows an `=` (`of=/etc/x`, `--target-directory=etc`), each with
+/// `//` and `/./` taken out and `..` gone back over, from `/`, where the root helper runs its commands. Only a word with a `/` in
+/// it gets the other spellings
+fn spellings(arg: &str) -> Vec<String> {
+    let mut out = vec![arg.to_string()];
+    for part in [Some(arg), arg.split_once('=').map(|(_, value)| value)].into_iter().flatten() {
+        if part.contains('/') {
+            out.push(lexical(part));
+        }
+    }
+    out
+}
+
+fn lexical(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    let mut out = format!("/{}", parts.join("/"));
+    if path.ends_with('/') && out != "/" {
+        out.push('/');
+    }
+    out
+}
+
+/// The never list's path it names, in any of its spellings
+fn named_path<'a>(words: impl IntoIterator<Item = &'a str>) -> Option<&'static str> {
+    let spelled: Vec<String> = words.into_iter().flat_map(spellings).collect();
+    PATHS.iter().copied().find(|path| spelled.iter().any(|word| word.contains(path)))
+}
+
 /// Why `argv` is refused, or None when it may be handed over
 pub fn refusal(argv: &[String]) -> Option<String> {
     let Some(first) = argv.first() else {
@@ -86,7 +176,7 @@ pub fn refusal(argv: &[String]) -> Option<String> {
     if lower.iter().any(|arg| TYPING.iter().any(|name| arg.contains(name))) {
         return Some("text shortcuts look at what is typed, and their texts are the user's own writing: the user changes them".into());
     }
-    if let Some(path) = PATHS.iter().find(|path| argv.iter().any(|arg| arg.contains(*path))) {
+    if let Some(path) = named_path(argv.iter().map(String::as_str)) {
         return Some(format!("it names {path}, which the agent may never change"));
     }
     if program.starts_with("amethystora-agent") {
@@ -104,8 +194,22 @@ pub fn refusal(argv: &[String]) -> Option<String> {
     }
     let interpreter = program.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
     if INTERPRETERS.contains(&program) || INTERPRETERS.contains(&interpreter) {
-        if argv.iter().skip(1).any(|arg| matches!(arg.as_str(), "-c" | "-e" | "-E" | "--eval" | "-r" | "-p" | "--print") || arg.starts_with("-c")) {
+        if argv.iter().skip(1).any(|arg| code_option(arg)) {
             return Some(format!("{program} given code on its command line runs out of sight; save it as a file the user can read"));
+        }
+    }
+    if (AWKS.contains(&program) || AWKS.contains(&interpreter))
+        && !argv.iter().skip(1).any(|arg| arg == "-f" || arg.starts_with("--file") || (arg.starts_with("-f") && !arg.starts_with("--")))
+    {
+        return Some(format!("{program}'s program on its command line can run other commands (system()); save it as a file and give it with -f"));
+    }
+    // find runs a command of its own for each file it finds
+    if program == "find" && argv.iter().skip(1).any(|arg| matches!(arg.as_str(), "-exec" | "-execdir" | "-ok" | "-okdir")) {
+        return Some("find -exec runs another command out of sight; find the files, then run each command on its own".into());
+    }
+    if program == "git" {
+        if let Some(why) = git_runs(&argv[1..]) {
+            return Some(why);
         }
     }
     if matches!(program, "visudo" | "passwd" | "chpasswd" | "usermod" | "gpasswd" | "useradd" | "groupmod" | "authselect" | "cryptsetup") {
@@ -173,8 +277,21 @@ pub fn refusal(argv: &[String]) -> Option<String> {
     }
     if matches!(program, "ame" | "ujust" | "just") {
         return match recipe_words(&argv[1..]) {
-            // A group's own justfile is read both ways: as that group's recipes and as the file it may only be named like
-            Ok((words, group)) => ame_refusal(&words).or_else(|| group.and_then(|group| ame_refusal(&[vec![group], words].concat()))),
+            Ok((words, group)) => {
+                // An old name (`ame setup-usb-protection off`) runs the recipe it names, and is judged as that recipe with its words
+                let words = match (&group, words.first()) {
+                    (None, Some(first)) => match aliases() {
+                        Some(aliases) => match aliases.iter().find(|(name, _)| name == first) {
+                            Some((_, target)) => [target.clone(), words[1..].to_vec()].concat(),
+                            None => words,
+                        },
+                        None => return Some("the image's list of ame's commands cannot be read, so this one cannot be judged: the user runs it".into()),
+                    },
+                    _ => words,
+                };
+                // A group's own justfile is read both ways: as that group's recipes and as the file it may only be named like
+                ame_refusal(&words).or_else(|| group.and_then(|group| ame_refusal(&[vec![group], words].concat())))
+            }
             Err(why) => Some(why),
         };
     }
@@ -199,6 +316,101 @@ pub fn refusal(argv: &[String]) -> Option<String> {
         return Some("security switches are changed only through ame security, and only to turn protection on".into());
     }
     None
+}
+
+/// Whether an interpreter's option gives it code: `--eval`, `--print` and `--source` in either form, and any single-dash cluster
+/// whose letters hold one that does (`-c`, `-Ic`, `-uc`, `-ne`, `-pe`, `-E`, `-r`, `-cprint(1)`)
+fn code_option(arg: &str) -> bool {
+    if let Some(long) = arg.strip_prefix("--") {
+        let name = long.split('=').next().unwrap_or(long);
+        return matches!(name, "eval" | "print" | "source" | "exec");
+    }
+    let Some(cluster) = arg.strip_prefix('-') else {
+        return false;
+    };
+    cluster.chars().take_while(char::is_ascii_alphabetic).any(|c| matches!(c, 'c' | 'e' | 'E' | 'r' | 'p'))
+}
+
+/// Why a git command line runs another program: a setting given with -c (or --config-env) that names one, or an alias that is a
+/// shell command (`-c alias.x=!cmd`)
+fn git_runs(args: &[String]) -> Option<String> {
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        let setting = match word.as_str() {
+            "-c" | "--config-env" => words.next().map(String::as_str),
+            option if option.starts_with("--config-env=") => option.strip_prefix("--config-env="),
+            // git's other options that take the next word as their value, as git_subcommand passes them over
+            "-C" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix" => {
+                words.next();
+                continue;
+            }
+            option if option.starts_with('-') => continue,
+            _ => break,
+        };
+        let Some(setting) = setting else { break };
+        let (key, value) = setting.split_once('=').unwrap_or((setting, ""));
+        let key = key.to_lowercase();
+        let runs = GIT_RUNS.contains(&key.as_str())
+            || (key.starts_with("alias.") && value.trim_start().starts_with('!'))
+            || ["pager.", "include.", "includeif."].iter().any(|start| key.starts_with(start))
+            || [".textconv", ".command", ".driver", ".clean", ".smudge", ".process", ".receivepack", ".uploadpack", ".helper", ".program"]
+                .iter()
+                .any(|end| key.ends_with(end));
+        if runs {
+            return Some(format!("git -c {key} runs another program out of sight; run git without it"));
+        }
+    }
+    None
+}
+
+/// The same judgement for the root helper, which runs the command as root, and more: the program must be one of the image's own,
+/// under /usr where root's PATH finds it (a link or a copy in the account's folders would carry a name past the list, and is judged
+/// by the name it leads to), each word that names a file is judged again as the path it leads to now, and programs that run a
+/// command inside a container or on another machine are refused. A link changed after this check is not seen: the person's yes,
+/// with the command in front of them, is what holds a root command
+pub fn refusal_as_root(argv: &[String], path: &str) -> Option<String> {
+    if let Some(why) = refusal(argv) {
+        return Some(why);
+    }
+    let first = &argv[0];
+    let found = if first.contains('/') {
+        std::fs::canonicalize(std::path::Path::new("/").join(first)).ok()
+    } else {
+        path.split(':').map(|dir| std::path::Path::new(dir).join(first)).find(|candidate| candidate.is_file()).and_then(|found| std::fs::canonicalize(found).ok())
+    };
+    let Some(program) = found else {
+        return Some(format!("{first} is not a program root can find"));
+    };
+    let program = program.to_string_lossy().into_owned();
+    if !program.starts_with("/usr/") {
+        return Some(format!("{first} is {program}, not one of the image's programs under /usr: as root, the agent runs only those"));
+    }
+    if let Some(name) = [base(first), base(&program)].into_iter().find(|name| ELSEWHERE.contains(name)) {
+        return Some(format!("{name} runs a command inside a container or on another machine, out of sight: the user runs it"));
+    }
+    let mut real = argv.to_vec();
+    real[0] = program;
+    if let Some(why) = refusal(&real) {
+        return Some(why);
+    }
+    // Each word that names a file, or the folder a new one would go into, as the path it leads to through its links
+    let mut led = Vec::new();
+    for arg in &argv[1..] {
+        for part in [Some(arg.as_str()), arg.split_once('=').map(|(_, value)| value)].into_iter().flatten() {
+            if !part.contains('/') {
+                continue;
+            }
+            let at = std::path::Path::new("/").join(part);
+            let real = std::fs::canonicalize(&at).ok().or_else(|| {
+                let name = at.file_name()?;
+                std::fs::canonicalize(at.parent()?).ok().map(|parent| parent.join(name))
+            });
+            if let Some(real) = real {
+                led.push(real.to_string_lossy().into_owned());
+            }
+        }
+    }
+    named_path(led.iter().map(String::as_str)).map(|path| format!("it leads to {path}, which the agent may never change"))
 }
 
 /// git's subcommand: the first word after its own options, those that take a value passed over with it
@@ -264,6 +476,14 @@ const JUST_VALUES: &[(&str, usize)] = &[
     ("--list-heading", 1), ("--list-prefix", 1), ("--dotenv-filename", 1), ("--dotenv-path", 1), ("-E", 1),
     ("--timestamp-format", 1), ("--tempdir", 1),
 ];
+/// ...the other ones that take a value, which an older list left out
+const JUST_MORE_VALUES: &[&str] = &["--alias-style", "--ceiling", "--command-color", "--dump-format", "--show", "-s", "--usage",
+    "--completions", "--request"];
+/// ...those that take none
+const JUST_FLAGS: &[&str] = &["--quiet", "-q", "--dry-run", "-n", "--verbose", "-v", "--unsorted", "-u", "--list", "-l",
+    "--list-submodules", "--summary", "--dump", "--variables", "--groups", "--changelog", "--check", "--fmt", "--man",
+    "--highlight", "--no-highlight", "--no-dotenv", "--no-deps", "--yes", "--unstable", "--timestamp", "--explain", "--one",
+    "--allow-missing", "--global-justfile", "-g", "--no-aliases", "--clear-shell-args", "--help", "-h", "--version", "-V"];
 /// ...and those that change what a recipe runs, or run something else entirely: refused, whatever follows
 const JUST_RUNNERS: &[&str] = &["--command", "-c", "--shell", "--shell-arg", "--shell-command", "--set", "--evaluate",
     "--edit", "-e", "--choose", "--script"];
@@ -295,10 +515,17 @@ fn recipe_words(args: &[String]) -> Result<(Vec<String>, Option<String>), String
             } else if name.starts_with("-f") && !name.starts_with("--") {
                 justfile = Some(&arg[2..]);
             }
-            if !arg.contains('=') {
-                if let Some((_, count)) = JUST_VALUES.iter().find(|(option, _)| *option == name) {
+            if let Some((_, count)) = JUST_VALUES.iter().find(|(option, _)| *option == name) {
+                if !arg.contains('=') {
                     i += count;
                 }
+            } else if JUST_MORE_VALUES.contains(&name) {
+                if !arg.contains('=') {
+                    i += 1;
+                }
+            } else if !JUST_FLAGS.contains(&name) && !short_flags(name) {
+                // An option this list does not know may take the next word as its value, and so hide the recipe's first word
+                return Err(format!("{name} is an option of just's this list does not know: run the recipe without it"));
             }
             continue;
         }
@@ -307,6 +534,15 @@ fn recipe_words(args: &[String]) -> Result<(Vec<String>, Option<String>), String
     }
     let group = justfile.map(base).and_then(|file| file.strip_suffix(".just")).filter(|group| *group != "00-entry");
     Ok((words, group.map(str::to_lowercase)))
+}
+
+/// A cluster of just's short options that take no value (`-qn`, `-vv`), or one whose value is attached (`-f/x`, `-d/tmp`,
+/// `-E.env`, `-sname`)
+fn short_flags(name: &str) -> bool {
+    let Some(cluster) = name.strip_prefix('-').filter(|rest| !rest.starts_with('-') && !rest.is_empty()) else {
+        return false;
+    };
+    matches!(cluster.as_bytes()[0], b'f' | b'd' | b'E' | b's') || cluster.chars().all(|c| matches!(c, 'q' | 'n' | 'v' | 'u' | 'l' | 'g' | 'h' | 'V'))
 }
 
 fn ame_refusal(args: &[String]) -> Option<String> {
@@ -765,9 +1001,96 @@ mod tests {
             "/usr/libexec/amethystora-vault-net",
             "/usr/libexec/amethystora-vault-service --sync-kdf",
             "socat - UNIX-CONNECT:/run/amethystora/vault-net.sock",
+            // The old names of refused recipes (00-entry.just's aliases), which run the recipe they name
+            "ame toggle-aur on",
+            "ujust toggle-aur on",
+            "ame security-settings osprey on",
+            "ame setup-usb-protection off",
+            "ame -q setup-usb-protection off",
+            "ame setup-browser-protection off",
+            "ame setup-ransomware-protection exclude add /var/home/a/Games",
+            "ame setup-disk-unlock on-pin",
+            "ame toggle-tpm2 off",
+            "ame blocked-connections clear",
+            "ame setup-backup recovery-key",
+            "ame setup-backup exclude add /var/home/a/Documents",
+            "ame upgrade boot-guard off",
+            "ame toggle-agentic on",
+            "just --justfile /usr/share/amethystora/just/00-entry.just toggle-aur on",
+            // Protected paths in other spellings: relative from /, where the root helper runs, with // or /./, back over ..
+            "cp /var/home/a/x etc/sudoers.d/zz",
+            "cp /var/home/a/r.rules etc/polkit-1/rules.d/00-a.rules",
+            "cp /var/home/a/p /etc//pam.d/sudo",
+            "cp x /etc/./sudoers.d/a",
+            "cp x /var/home/a/../../../etc/shadow",
+            "dd of=/etc//sudoers.d/a",
+            "install --target-directory=etc/polkit-1/rules.d x",
+            // Programs that run another command, in the forms an older list missed
+            "find / -maxdepth 0 -exec sh -c id ;",
+            "find . -execdir id ;",
+            "git -c alias.u=!id u",
+            "git -C /tmp -c alias.u=!id u",
+            "git -c core.pager=id log",
+            "git -c core.sshCommand=id fetch",
+            "git -c safe.directory=* status",
+            "git --config-env=core.editor=EDITOR commit",
+            "awk BEGIN{system(\"id\")}",
+            "gawk -F: {print} /etc/passwd",
+            "python3 -Ic import(os)",
+            "python3 -uc print(1)",
+            "perl -ne print",
+            "node --eval=1",
+            "setarch x86_64 id",
+            "chrt 1 id",
+            "taskset 1 id",
+            "prlimit --nofile=1 id",
+            "time id",
+            // just's options this list does not know may hide the recipe's first word behind their value
+            "ame --command-color red agent root each",
+            "ame --ceiling / agent root each",
+            "ame --made-up red agent root each",
+            "ame -x agent root each",
         ] {
             assert!(refusal(&argv(words)).is_some(), "{words}");
         }
+    }
+
+    #[test]
+    fn reads_the_image_s_old_names() {
+        let aliases = aliases().expect("00-entry.just");
+        let target = |name: &str| aliases.iter().find(|(alias, _)| alias == name).map(|(_, words)| words.clone());
+        assert_eq!(target("toggle-aur"), Some(vec!["apps".to_string(), "aur".to_string()]));
+        assert_eq!(target("setup-backup"), Some(vec!["backup".to_string()]));
+        assert!(aliases.len() > 40, "{} aliases", aliases.len());
+    }
+
+    #[test]
+    fn root_runs_only_the_image_s_programs_and_judges_where_links_lead() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("never-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = "/usr/bin";
+        let words = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        // A plain command of the image's passes, as it does for the tools
+        assert_eq!(refusal_as_root(&words(&["cp", "/tmp/x", "/tmp/y"]), path), None);
+        // A program of the account's, or a link to one, is not the image's
+        let own = dir.join("tool");
+        std::fs::write(&own, "#!/bin/sh\n").unwrap();
+        assert!(refusal_as_root(&words(&[own.to_str().unwrap()]), path).is_some());
+        let link = dir.join("t");
+        symlink(&own, &link).unwrap();
+        assert!(refusal_as_root(&words(&[link.to_str().unwrap()]), path).is_some());
+        // A word that leads through a link of the account's into a protected place
+        let etc = dir.join("etclink");
+        symlink("/etc", &etc).unwrap();
+        let target = format!("{}/sudoers.d", etc.display());
+        assert!(refusal(&words(&["cp", "/tmp/x", &target])).is_none(), "the tools see only the words");
+        assert!(refusal_as_root(&words(&["cp", "/tmp/x", &target]), path).is_some());
+        assert!(refusal_as_root(&words(&["cp", "/tmp/x", &format!("{target}/new")]), path).is_some());
+        // ...and a program that runs a command somewhere else
+        assert!(refusal_as_root(&words(&["ssh", "localhost", "id"]), path).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -895,6 +1218,22 @@ mod tests {
             "ame desktop shortcut reset custom custom20",
             "ame desktop keyboard caps escape",
             "cat /usr/share/amethystora/vault/2fa-directory.json",
+            // ...and what the tighter rules still let through
+            "awk -f /home/a/sum.awk data.txt",
+            "gawk --file=/home/a/x.awk y",
+            "python3 -u /home/a/fix.py",
+            "find / -name core",
+            "git -c color.ui=never log",
+            "git -C /tmp -c user.name=x commit -m y",
+            "ame --list",
+            "ame -qn security status",
+            "ame --color always security status",
+            "ame --show security::status",
+            "ame blocked-connections",
+            "ame virus-scan",
+            "ame setup-backup",
+            "cp /var/home/a/x /var/home/a/y",
+            "sed -i s/a/b/ /var/home/a/notes.txt",
         ] {
             assert_eq!(refusal(&argv(words)), None, "{words}");
         }

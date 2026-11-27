@@ -60,11 +60,12 @@ pub(super) fn plant_sealed(fake: &mut Fake, vault: &mut Vault, local: &Local, co
     cipher_id
 }
 
-/// A vault whose one password was sealed by the last version, and the connection it kept (`sealed`, for that kind)
+/// A vault whose one password was sealed by the last version, and the connection it kept, which the person has turned on since (an
+/// earlier version kept `sealed` for that kind, which waits for them: `nothing_sealed_goes_until_the_person_says`)
 fn sealed_password() -> (Fake, super::merge::Connection, Vault, String) {
     let mut fake = Fake::default();
     let mut connection = connect(&mut fake).unwrap();
-    connection.kinds.insert("password".into(), "sealed".into());
+    connection.kinds.insert("password".into(), "on".into());
     let mut vault = vault_with_key();
     vault.put("password", "p1", password("Site", "person", "pw-secret", "https://a.test"));
     let local = local_of(&vault, "password", "p1");
@@ -73,25 +74,28 @@ fn sealed_password() -> (Fake, super::merge::Connection, Vault, String) {
 }
 
 #[test]
-fn a_sealed_choice_reads_as_on_everywhere() {
+fn a_sealed_choice_waits_for_the_person_and_reads_as_off_until_then() {
     let mut connection = connect(&mut Fake::default()).unwrap();
     connection.kinds.insert("key".into(), "sealed".into());
-    connection.kinds.insert("password".into(), "off".into());
+    connection.kinds.insert("password".into(), "on".into());
     connection.choices.insert("password.p1".into(), "sealed".into());
     connection.choices.insert("backup-codes.b1".into(), "sealed".into());
-    assert_eq!(connection.kind_choice("key"), "on");
-    assert_eq!((connection.choice("key", "k1"), connection.choice("password", "p1"), connection.choice("password", "p2")), ("on", "on", "off"));
-    // Where the kind says off, an item's old `sealed` is its own word, and wins as `on`
-    assert_eq!(connection.choice("backup-codes", "b1"), "on");
-    // A stored connection that says so is read the same, and says nothing of it on its way back
+    assert_eq!(connection.kind_choice("key"), "off");
+    assert_eq!((connection.choice("key", "k1"), connection.choice("password", "p1"), connection.choice("password", "p2")), ("off", "off", "on"));
+    assert!(connection.waiting("key", "k1") && connection.waiting("password", "p1") && connection.waiting("backup-codes", "b1"));
+    assert!(!connection.waiting("password", "p2"), "a kind turned on since is not waiting");
+    // An item's own word wins over its kind's: chosen on or off, it no longer waits
+    connection.choices.insert("key.k2".into(), "on".into());
+    assert!(!connection.waiting("key", "k2") && connection.choice("key", "k2") == "on");
+    // A stored connection keeps the word, and is read the same
     let stored = serde_json::to_value(&connection).unwrap();
     assert_eq!(stored["kinds"]["key"], json!("sealed"));
     let back: super::merge::Connection = serde_json::from_value(stored).unwrap();
-    assert_eq!(back.kind_choice("key"), "on");
+    assert!(back.kind_choice("key") == "off" && back.waiting("key", "k1"));
 }
 
 #[test]
-fn an_item_stored_as_sealed_goes_as_the_plain_cipher_of_an_item_set_to_on() {
+fn an_item_stored_as_sealed_sends_nothing_until_the_person_says() {
     let mut fake = Fake::default();
     let mut connection = connect(&mut fake).unwrap();
     connection.kinds.insert("password".into(), "sealed".into());
@@ -101,6 +105,12 @@ fn an_item_stored_as_sealed_goes_as_the_plain_cipher_of_an_item_set_to_on() {
     vault.put("backup-codes", "b1", backup_codes("Bank"));
     let outcome = vault.sync(&mut fake, &connection);
     assert!(outcome.problem.is_none() && outcome.report.refused_total == 0, "{:?}", outcome.report.refused);
+    assert!(live(&fake).is_empty(), "what the person said yes to was a sealed copy: no plain one goes by itself");
+    // Once the person turns them on (the Export question), they go as plain ciphers
+    connection.kinds.insert("password".into(), "on".into());
+    connection.choices.insert("backup-codes.b1".into(), "on".into());
+    let outcome = vault.sync(&mut fake, &connection);
+    assert!(outcome.problem.is_none() && outcome.report.refused_total == 0, "{:?}", outcome.report.refused);
     assert_eq!(live(&fake).len(), 2);
     for id in live(&fake) {
         let content = opened(&fake, &id).content;
@@ -108,6 +118,36 @@ fn an_item_stored_as_sealed_goes_as_the_plain_cipher_of_an_item_set_to_on() {
         assert!(content.name != SEALED_NAME);
     }
     assert!(vault.links.values().all(|link| !link.sealed));
+}
+
+#[test]
+fn nothing_sealed_goes_until_the_person_says() {
+    let (mut fake, mut connection, mut vault, note) = sealed_password();
+    connection.kinds.insert("password".into(), "sealed".into());
+    let before = fake.find(&note).unwrap().clone();
+    // The note waits as it is: not made plain, not trashed, nothing written, however many runs
+    for _ in 0..2 {
+        let outcome = vault.sync(&mut fake, &connection);
+        assert!(outcome.problem.is_none() && outcome.report.refused_total == 0, "{:?} {:?}", outcome.problem, outcome.report.refused);
+        assert_eq!(outcome.report.sealed_waiting, 1);
+        assert_eq!(live(&fake), vec![note.clone()]);
+        assert_eq!(fake.find(&note).unwrap(), &before);
+        assert!(fake.seen.iter().all(|seen| seen.method == "GET" || !seen.url.contains("/api/ciphers")), "nothing written");
+    }
+    // ...and its edit here waits too, kept in the vault
+    vault.put("password", "p1", password("Site", "person", "edited", "https://a.test"));
+    let outcome = vault.sync(&mut fake, &connection);
+    assert_eq!(outcome.report.sealed_waiting, 1);
+    assert_eq!(live(&fake), vec![note.clone()]);
+    assert_eq!(vault.value("password", "p1")["password"], json!("edited"));
+    // Turned on, it goes as its plain cipher and the note to the trash
+    connection.kinds.insert("password".into(), "on".into());
+    let outcome = vault.sync(&mut fake, &connection);
+    assert!(outcome.problem.is_none() && outcome.report.refused_total == 0, "{:?} {:?}", outcome.problem, outcome.report.refused);
+    assert!(in_trash(&fake, &note));
+    let plain = live(&fake);
+    assert_eq!(plain.len(), 1);
+    assert_eq!(opened(&fake, &plain[0]).content.password.as_deref(), Some("edited"));
 }
 
 #[test]
@@ -190,7 +230,7 @@ fn a_note_that_cannot_reach_the_trash_after_the_plain_cipher_stands_is_trashed_b
 fn an_old_sealed_note_whose_blob_is_a_file_goes_plain_too() {
     let mut fake = Fake::default();
     let mut connection = connect(&mut fake).unwrap();
-    connection.kinds.insert("certificate".into(), "sealed".into());
+    connection.kinds.insert("certificate".into(), "on".into());
     let mut vault = vault_with_key();
     let mut big = cert_local("c1", "Big", 0);
     big.value["fields"] = json!({"pad": "x".repeat(6000)});
@@ -286,7 +326,7 @@ fn a_sealed_note_of_another_vault_is_counted_and_left_alone() {
 fn an_older_copy_of_an_old_sealed_note_that_a_server_kept_is_never_taken() {
     let mut fake = Fake::default();
     let mut connection = connect(&mut fake).unwrap();
-    connection.kinds.insert("password".into(), "sealed".into());
+    connection.kinds.insert("password".into(), "on".into());
     let mut vault = vault_with_key();
     vault.put("password", "p1", password("Site", "person", "NEW-SECRET", "https://a.test"));
     let local = local_of(&vault, "password", "p1");

@@ -349,25 +349,41 @@ jobs:
           retention-days: 14
           overwrite: true
 
-  # Every job's results in one table; the one check to require
+  # Every job's results in one table; the one check to require. It runs whatever the plan did: a skipped job is a pass to a
+  # required check, so a plan that failed (a bad lab-suites line, shards.json that does not parse) must fail here instead
   report:
     name: Lab
     needs: [plan, build, lane]
-    if: always() && needs.plan.result == 'success' && needs.plan.outputs.run == 'true'
+    if: always()
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Plan
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          RUN: ${{ needs.plan.outputs.run }}
+        run: |
+          if [[ "${PLAN_RESULT}" != success ]]; then
+            echo "::error::The plan ended with ${PLAN_RESULT}, so no suite ran"
+            exit 1
+          fi
+          # A plan that chose to run nothing (Markdown alone, a merge group) passes
+          [[ "${RUN}" == true ]] || echo "Nothing to run for this change."
+
+      - if: needs.plan.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - if: needs.plan.outputs.run == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
 
       # Each job's files in a folder of its own, named after it; none when a job ended before it had any
       - name: Fetch the runs' files
+        if: needs.plan.outputs.run == 'true'
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -375,6 +391,7 @@ jobs:
           path: ${{ runner.temp }}/runs
 
       - name: Report
+        if: needs.plan.outputs.run == 'true'
         env:
           EXPECT: ${{ needs.plan.outputs.suites }}
           BUILD_RESULT: ${{ needs.build.result }}

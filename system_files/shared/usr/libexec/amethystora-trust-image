@@ -41,8 +41,19 @@ OWN="ghcr.io/$(jq -r '."image-vendor"' /usr/share/amethystora/image-info.json)"
 [[ "${REPOSITORY}" != "${OWN}" && "${REPOSITORY}" != "${OWN}/"* ]] ||
     die "Amethystora's own images are checked against Amethystora's key, and that stays as it is."
 [[ -f "${KEY}" ]] || die "There is no file ${KEY}."
-grep -q "PRIVATE KEY" "${KEY}" && die "${KEY} is a private key. Give its public half, cosign.pub, and keep this one secret."
-openssl pkey -pubin -noout -in "${KEY}" 2>/dev/null ||
+# The key read once, into a file of root's, and what is checked is what is installed: the path is opened again by nobody, so
+# a link swapped in after the checks (to a file only root may read) is never copied. Through sudo it is read as the account
+# that asked, which can read only what that account can; 64 KiB at most, which no public key comes near
+COPY="$(mktemp)"
+trap 'rm -f "${COPY}"' EXIT
+if [[ "${EUID}" -eq 0 && "${SUDO_UID:-0}" != 0 ]]; then
+    setpriv --reuid="${SUDO_UID}" --regid="${SUDO_GID:-${SUDO_UID}}" --clear-groups -- head -c 65536 -- "${KEY}" >"${COPY}" 2>/dev/null ||
+        die "${KEY} could not be read as you."
+else
+    head -c 65536 -- "${KEY}" >"${COPY}" 2>/dev/null || die "${KEY} could not be read."
+fi
+grep -q "PRIVATE KEY" "${COPY}" && die "${KEY} is a private key. Give its public half, cosign.pub, and keep this one secret."
+openssl pkey -pubin -noout -in "${COPY}" 2>/dev/null ||
     die "${KEY} is not a public key, such as the cosign.pub that cosign generate-key-pair writes."
 [[ -n "${ROOT}" || "${EUID}" -eq 0 ]] || die "It changes /etc: ame system trust-image runs it with sudo."
 
@@ -62,14 +73,14 @@ if [[ -e "${REGISTRIES}" ]] && ! grep -qxF "  ${REPOSITORY}:" "${REGISTRIES}"; t
     die "${REGISTRIES} is not for ${REPOSITORY}, and it is left as it is."
 fi
 
-install -D -m 0644 "${KEY}" "${ROOT}${KEY_PATH}"
+install -D -m 0644 "${COPY}" "${ROOT}${KEY_PATH}"
 mkdir -p "${REGISTRIES%/*}"
 printf '# The cosign signatures of %s, as sigstore attachments (ame system trust-image)\ndocker:\n  %s:\n    use-sigstore-attachments: true\n' \
     "${REPOSITORY}" "${REPOSITORY}" >"${REGISTRIES}"
 chmod 0644 "${REGISTRIES}"
 # Written beside the policy and moved over it, so that it is never half written
 NEW="$(mktemp "${POLICY}.XXXXXX")"
-trap 'rm -f "${NEW}"' EXIT
+trap 'rm -f "${COPY}" "${NEW}"' EXIT
 jq --arg repository "${REPOSITORY}" --arg key "${KEY_PATH}" '.transports.docker[$repository] = [{
         "type": "sigstoreSigned",
         "keyPath": $key,
