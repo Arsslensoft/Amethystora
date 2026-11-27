@@ -3,6 +3,7 @@
 // are put back even if GNOME Shell stops in the middle. One small file, written only when one of them changes, with
 // a copy beside it for the day the file is lost or cannot be read: nothing else knows what was taken out.
 
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 const DIR = GLib.build_filenamev([GLib.get_user_state_dir(), 'amethystora']);
@@ -13,14 +14,26 @@ const isText = value => typeof value === 'string';
 const isIndex = value => Number.isInteger(value) && value >= 0;
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 
+// Whether the schema is installed and has a fixed path, has the key and the key holds the type the record was written
+// for ('as' or 'b'): GLib ends the shell on a schema it has not got, on a relocatable one made without a path, and on a
+// key the schema lacks or a value of another type
+const holds = (record, type) => {
+    try {
+        const schema = Gio.SettingsSchemaSource.get_default()?.lookup(record.schema, true);
+        return !!schema?.get_path() && schema.has_key(record.key) && schema.get_key(record.key).get_value_type().dup_string() === type;
+    } catch {
+        return false;
+    }
+};
+
 // The shapes the records have when the tiling wrote them; a file made by hand, or by another version, may hold
 // anything, and what does not fit is left out rather than trusted
 const CHECKS = {
     taken: record => isObject(record) && isText(record.schema) && isText(record.key) &&
         Array.isArray(record.removed) && Array.isArray(record.wrote) && record.wrote.every(isText) &&
-        record.removed.every(r => isObject(r) && isText(r.accelerator) && isIndex(r.index)),
+        record.removed.every(r => isObject(r) && isText(r.accelerator) && isIndex(r.index)) && holds(record, 'as'),
     forced: record => isObject(record) && isText(record.schema) && isText(record.key) &&
-        typeof record.was === 'boolean' && typeof record.wrote === 'boolean',
+        typeof record.was === 'boolean' && typeof record.wrote === 'boolean' && holds(record, 'b'),
 };
 
 function clean(data) {

@@ -51,7 +51,7 @@ impl Http for Net {
         CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         URLS.lock().unwrap().push(request.url.clone());
         let headers: Vec<(String, String)> = request.headers.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
-        self.0.request(request.method, &request.url, &headers, &request.body).map(|(status, body)| Response { status, body }).map_err(|failure| NetFailure::from_name(failure.name()))
+        self.0.request(request.method, &request.url, &headers, &request.body).map(|(status, body)| Response { status, body, headers: Vec::new() }).map_err(|failure| NetFailure::from_name(failure.name()))
     }
 }
 
@@ -94,7 +94,7 @@ fn raw(net: &mut Net, method: &'static str, path: &str, access: &str, body: Opti
 struct Vault {
     locals: BTreeMap<(String, String), Local>,
     links: BTreeMap<String, Link>,
-    /// The vault's own key for sealed notes, kept between runs: a new one each run would seal what no later run could open
+    /// The vault's own key, which an old sealed note is read under: kept between runs
     sealing: Option<(Key, String)>,
 }
 
@@ -296,10 +296,16 @@ fn login_by_password_by_api_key_and_by_refresh() {
     // A wrong password is the server's own message, as data
     let pending = merge::prepare(&mut net, &crypto::master_key, server(), &email, b"not the password", None, None, None, merge::new_device_id()).unwrap();
     assert!(matches!(merge::finish(&mut net, &pending, &Extra::default()), Err(Problem::ServerSaid(_))));
-    // A made-up address gets made-up settings that are within bounds, and the same each time
-    let kdf_a = api::prelogin(&mut net, &server(), "nobody-at-all@example.test").unwrap();
-    let kdf_b = api::prelogin(&mut net, &server(), "nobody-at-all@example.test").unwrap();
-    assert!(kdf_a.same(&kdf_b));
+    // A made-up address gets made-up settings, the same each time. Vaultwarden picks them from a list
+    // with a key it makes at start, and one entry is PBKDF2 at 5,000 iterations: below this client's
+    // floor, so on some servers the answer is refused as too weak, and that is the same each time too
+    let kdf_a = api::prelogin(&mut net, &server(), "nobody-at-all@example.test");
+    let kdf_b = api::prelogin(&mut net, &server(), "nobody-at-all@example.test");
+    match (&kdf_a, &kdf_b) {
+        (Ok(a), Ok(b)) => assert!(a.same(b)),
+        (Err(Problem::Kdf(crypto::KdfProblem::TooWeak)), Err(Problem::Kdf(crypto::KdfProblem::TooWeak))) => {}
+        other => panic!("the made-up settings changed, or were refused for another reason: {other:?}"),
+    }
     // And what the server says of itself is only for showing
     let (name, version) = api::config(&mut net, &server()).unwrap();
     println!("login: the server calls itself {name:?} {version:?}; the settings were {pinned:?}");
@@ -530,7 +536,7 @@ fn too_many_logins_are_a_wait_and_never_a_loop() {
     println!("limit: the {attempts}th login in a row was refused with 429, with no retry by the client");
 }
 
-// --- Each kind, plain and sealed, with files (plans/vault-sync/spec-attachments.md, its appendix) ----------------------------------------
+// --- Each kind, plain, with files (plans/vault-sync/spec-attachments.md, its appendix) ----------------------------------------
 
 use amethystora_vault_core::keys::{self, KeyType};
 use amethystora_vault_core::protocol::encode as b64;
@@ -612,7 +618,7 @@ fn download(net: &mut Net, access: &str, user: &SymKey, raw: &Value) -> (String,
 
 #[test]
 #[ignore = "needs the Vaultwarden container"]
-fn every_kind_plain_and_sealed_goes_both_ways_and_files_open_as_bitwardens_own_clients_open_them() {
+fn every_kind_goes_plain_both_ways_and_files_open_as_bitwardens_own_clients_open_them() {
     let mut net = Net::new();
     let email = account(&mut net, "kindsfiles");
     let (mut connection, access) = login(&mut net, &email);
@@ -705,36 +711,6 @@ fn every_kind_plain_and_sealed_goes_both_ways_and_files_open_as_bitwardens_own_c
     let ciphers = all_ciphers(&mut net, &token);
     assert!(!cipher_by_id(&ciphers, &old)["deletedDate"].is_null());
     assert_eq!(cipher::attachments(cipher_by_id(&ciphers, &old)).len(), 1);
-    // Sealed, the whole kinds: the old ones to the trash, new ones nobody but this vault reads, files included
-    for kind in ["key", "certificate", "protected", "password"] {
-        connection.kinds.insert(kind.into(), "sealed".into());
-    }
-    let outcome = vault.sync(&mut net, &connection, &access);
-    assert!(outcome.problem.is_none() && outcome.report.refused_total == 0, "{:?}", outcome.report.refused);
-    let ciphers = all_ciphers(&mut net, &token);
-    // The plain note holds a file of the vault's, which cannot be taken off a cipher: it goes to the trash whole, the file another app
-    // added to it with it (the trash keeps it 30 days), and nothing of the plain is left in a live cipher
-    assert_eq!(live(&ciphers).len(), 7);
-    let left = cipher_by_id(&ciphers, &note_id);
-    assert!(!left["deletedDate"].is_null() && cipher::attachments(left).len() == 1, "the note with the other app's file is in the trash with it");
-    for raw in live(&ciphers) {
-        let content = cipher::open(raw, &user).unwrap().content;
-        assert_eq!(content.name, "Amethystora sealed item", "{}", content.name);
-        let notes = content.notes.unwrap();
-        assert!(notes.starts_with("amethystora-vault-sealed-1\n") && !notes.contains("BEGIN") && !notes.contains("NPM-SECRET"));
-        if !cipher::attachments(raw).is_empty() {
-            let (name, bytes) = download(&mut net, &token, &user, raw);
-            assert_eq!(name, "amethystora-sealed.bin");
-            assert!(!String::from_utf8_lossy(&bytes).contains("NPM-SECRET") && !String::from_utf8_lossy(&bytes).contains("BEGIN") && bytes.starts_with(b"AVs1"), "a blob only the vault opens");
-        }
-    }
-    // A second computer with this vault restored opens all of it
-    let mut restored = Vault { sealing: vault.sealing.as_ref().map(|(key, id)| (key.copy(), id.clone())), ..Vault::default() };
-    let outcome = restored.sync(&mut net, &connection, &access);
-    assert!(outcome.problem.is_none(), "{:?}", outcome.report.refused);
-    for (kind, id) in [("key", "k1"), ("key", "k2"), ("certificate", "c1"), ("certificate", "c2"), ("protected", "f1"), ("protected", "d1"), ("password", "p1")] {
-        assert_eq!(restored.value(kind, id), vault.value(kind, id), "{kind}.{id}");
-    }
     // Off moves every copy to the trash, and nothing is destroyed
     for kind in ["key", "certificate", "protected", "password"] {
         connection.kinds.insert(kind.into(), "off".into());
@@ -742,8 +718,11 @@ fn every_kind_plain_and_sealed_goes_both_ways_and_files_open_as_bitwardens_own_c
     let outcome = vault.sync(&mut net, &connection, &access);
     assert!(outcome.problem.is_none(), "{:?}", outcome.report.refused);
     let ciphers = all_ciphers(&mut net, &token);
-    assert!(live(&ciphers).iter().all(|raw| raw["id"] == json!(note_id)), "only what is not ours is live");
-    assert!(ciphers.len() >= 14);
+    // The note the vault made goes whole, with the file another app added to it: the trash keeps it 30 days
+    assert!(live(&ciphers).is_empty(), "nothing of ours is live");
+    let left = cipher_by_id(&ciphers, &note_id);
+    assert!(!left["deletedDate"].is_null() && cipher::attachments(left).len() == 1, "the note with the other app's file is in the trash with it");
+    assert_eq!(ciphers.len(), 8, "nothing was destroyed");
 }
 
 #[test]
@@ -825,11 +804,11 @@ fn bw_a_what_this_client_sends() {
     let (mut connection, access) = login(&mut net, &email);
     connection.kinds.insert("key".into(), "on".into());
     connection.kinds.insert("protected".into(), "on".into());
-    connection.kinds.insert("certificate".into(), "sealed".into());
+    connection.kinds.insert("certificate".into(), "on".into());
     let mut vault = Vault::default();
     add(&mut vault, key_local("k1", "Work key", "ssh", KeyType::Ed25519));
     add(&mut vault, key_local("k2", "Exchange key", "exchange", KeyType::X25519));
-    add(&mut vault, cert_local("c1", "Sealed certificate", 40));
+    add(&mut vault, cert_local("c1", "Long certificate", 40));
     add(&mut vault, file_local("f1", ".npmrc", b"//registry.example/:_authToken=NPM-SECRET\n"));
     add(&mut vault, folder_local("d1", ".config/tool"));
     vault.put("password", "p1", password_value("Site", "person", "hunter2", "https://example.test"));
@@ -864,26 +843,19 @@ fn bw_c_what_bw_read_and_wrote() {
     connection.files_read = true;
     let user = connection.key().unwrap();
     let token = access.token.to_string();
-    // What `bw` read is what was sent: each file by its digest, and the sealed ones are nothing readable
+    // What `bw` read is what was sent: each file by its digest
     let read: Value = serde_json::from_slice(&std::fs::read(dir.join("bw-read.json")).unwrap()).unwrap();
     let mut seen = 0;
     for (id, expected) in state["files"].as_object().unwrap() {
         let got = &read["files"][id];
-        if expected["name"] == json!("amethystora-sealed.bin") {
-            // `bw` opens Bitwarden's layer, and what it prints is the vault's own sealed blob, with no word of the secret
-            assert_eq!(got["sha256"], expected["sha256"], "bw read the blob that was sent");
-            assert_eq!(got["has_plaintext"], json!(false), "a sealed file shows nothing readable");
-        } else {
-            assert_eq!(got["name"], expected["name"], "{id}");
-            assert_eq!(got["sha256"], expected["sha256"], "{id}: bw opened {} byte(s)", expected["length"]);
-        }
+        assert_eq!(got["name"], expected["name"], "{id}");
+        assert_eq!(got["sha256"], expected["sha256"], "{id}: bw opened {} byte(s)", expected["length"]);
         seen += 1;
     }
     assert!(seen >= 3, "{seen}");
     // The SSH key item opens in `bw` as an SSH key with this fingerprint, and the items are what was sent
     assert_eq!(read["ssh"]["fingerprint"], state["ssh_fingerprint"]);
     assert!(read["ssh"]["private_starts"].as_str().unwrap().starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
-    assert_eq!(read["sealed_notes_readable"], json!(false), "the sealed note's text says nothing of the secret");
     // `bw` added a file to an item of ours, and made a Login. Our next change must leave the file, and take the Login in.
     let note_id = state["key_note"].as_str().unwrap();
     let before = cipher::attachments(&all_ciphers(&mut net, &token).into_iter().find(|raw| raw["id"] == json!(note_id)).unwrap());

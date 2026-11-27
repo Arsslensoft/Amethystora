@@ -23,7 +23,7 @@ administrators, who see all of it on the **Events** page.
   environment, which no file shows, has every program it starts load code from outside the system: both
   are how malware gets inside the app you type a password into without changing its files.
 
-Flatpak's and Homebrew's updates, containers, AppImages and Go's tests are allowed already.
+Flatpak's and Homebrew's updates and containers are allowed already. Programs a build runs from `/tmp` (AppImages, pip's and Go's) are not: any account can make a folder with those names, so allow the ones you use yourself with `ame security allow exec-watch` or `processes`.
 
 ## Ransomware behaviour
 

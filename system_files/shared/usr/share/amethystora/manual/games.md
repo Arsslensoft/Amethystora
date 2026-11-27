@@ -53,6 +53,52 @@ ame apps gaming launchers
 ame apps gaming off
 ```
 
+## Will it run?
+
+The commonest disappointment after moving from Windows is an online game whose anti-cheat refuses Linux. Ask before
+a long download. The answer comes from a community list of games and the state of their anti-cheat on Linux, Are We
+Anti-Cheat Yet?, whose copy is in the image: asking reads no network.
+
+```bash
+ame apps will-it-run Elden Ring     # a name, or the list's own id (elden-ring)
+```
+
+Or type `game: elden ring` in the [search](search.md#settings-windows-and-more); `ame desktop search game off` turns
+that off. When you open the installer of a game the list knows (Valorant, League of Legends, Roblox), the terminal
+says the answer before it offers anything ([Windows programs](windows-programs.md)).
+
+- **It says what the list says, and the day the entry changed.** *Supported*: it runs, because the maker turned the
+  anti-cheat on for Linux or it works under Wine and Proton as it is. *Running*: it runs without harm to online play,
+  but may need tinkering. *Planned*: the maker plans Linux support and has not yet. *Broken* and *Denied*: it does not
+  run online, or the maker has said it will not.
+- **It never says a game will run.** The list knows the anti-cheat, not your game, your graphics driver or the
+  game's own bugs, and the maker can change a game in the next update. ProtonDB is the place for how a game plays.
+- **A name that only resembles an entry is not an answer.** The list's closest entry is shown as that and nothing
+  more: ask for it by its own name. A game the list lacks gets *The list does not say*.
+- Steam, Heroic and Lutris have their own install buttons, which this cannot reach. Ask before you press them.
+
+## While you play
+
+A backup, a container upgrade or a banner in the middle of a game is what makes a computer feel unfit for gaming.
+**While you play** keeps them out of the way and gives everything back when the game ends. It is off until you turn it on
+(`ame apps gaming` offers it once), and Control's **Apps** page has the same switch:
+
+```bash
+ame desktop while-playing on     # or off
+```
+
+It reacts to a game that asks GameMode for its mode, as `gamemoderun %command%` in Steam's launch options does:
+
+- **Banners wait.** They stay in the list, and the pill says how many when the game ends. Calls, alarms and urgent
+  banners still come through.
+- **The power mode is performance,** while you are plugged in only. On the battery it is left alone.
+- **Your timed backup and the containers' upgrade wait,** six hours at most, even if the game never ends. One you start
+  yourself still runs, the system update and the whole-machine scan are never held, and what was skipped runs after.
+
+The pill shows **Playing**, and its card lists what is held. **Let them run** gives it all back while the game goes on.
+Everything also goes back when the last game ends, when GameMode leaves and when the screen locks (the unlock looks
+again). While the switch is off, nothing is listened to.
+
 ## A faster CPU scheduler for games
 
 The kernel decides which program runs on which CPU core and for how long, and its own scheduler suits nearly

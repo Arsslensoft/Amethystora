@@ -19,10 +19,12 @@ use amethystora_vault_core::store::{self, Store, Trouble};
 use super::{approval_of, base64_field, extra_of, flag, item_id, machine as files, meta_fits, must_be_open, name_of, optional_text, passphrase, read, refuse_with, text, work};
 use crate::outside::{say, Action, Person};
 use crate::peer::Peer;
-use crate::service::{Next, Service};
+use crate::service::{Next, Reuse, Service};
 
 /// The one account's CA a vault holds
 const CA_ID: &str = "ca";
+/// A signing certificate on `While open` asks again after this, rather than not until the vault closes: a yes is for the document in hand
+const SIGN_WINDOW: std::time::Duration = std::time::Duration::from_secs(2 * 60);
 const GUEST: &str = "amethystora-guest";
 /// A certificate's own name, as the table has them: what a request may ask for. A CA's profile is never requested.
 const LEAVES: [(&str, Who); 6] = [
@@ -575,7 +577,7 @@ pub fn sign_digest(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Resu
     let program = service.config.worker.clone();
     let (digest, purpose) = (digest.to_string(), purpose.to_string());
     let id_there = id.clone();
-    Ok(service.with_approval(uid, KIND_CERTIFICATE, &id_there, Action::Use, say::SIGN, false, move |service, vault| {
+    Ok(service.with_window(uid, KIND_CERTIFICATE, &id_there, Action::Use, say::SIGN, "", Reuse::For(SIGN_WINDOW), move |service, vault| {
         let held: Value = match read(service, uid, vault, KIND_CERTIFICATE, &id) {
             Ok(held) => held,
             Err(next) => return next,

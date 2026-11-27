@@ -81,6 +81,9 @@ fn what_the_review_found() {
         a_stalled_connection_does_not_starve_a_payload(&root).await;
         a_connection_that_is_not_the_pin_is_closed_when_the_phone_is_paired(&root).await;
         one_address_cannot_hold_the_unpaired_slots(&root).await;
+        one_neighbour_cannot_evict_the_phone_that_is_pairing(&root).await;
+        a_new_pairing_needs_protocol_8_and_a_fresh_request(&root).await;
+        a_phone_paired_at_protocol_7_keeps_working(&root).await;
         over_the_bus(&root).await;
     });
     let _ = std::fs::remove_dir_all(&root);
@@ -148,16 +151,25 @@ async fn takeover_of_a_pending_pairing(root: &Path) {
 // --- A phone that is called twice answers on either connection; one that only claims its id does not ------------------
 
 async fn raw_phone_with(port: u16, id: &str, name: &str, cert_pem: &str) -> Raw {
+    raw_phone_as(port, id, name, cert_pem, 8).await
+}
+
+/// A phone of the given protocol version: one that speaks 7 says nothing inside TLS
+async fn raw_phone_as(port: u16, id: &str, name: &str, cert_pem: &str, version: u32) -> Raw {
     let cert = gio::TlsCertificate::from_pem(cert_pem).unwrap();
     let der = x509::pem_to_der(cert_pem).unwrap();
     let conn = tcp(port, None).await.unwrap();
     let local = identity::Local::new(id, name, "phone");
-    net::write_all(&conn.output_stream(), local.packet(1716, true, None).to_line()).await.unwrap();
+    let mut plain = local.packet(1716, true, None);
+    plain.body.insert("protocolVersion".into(), json!(version));
+    net::write_all(&conn.output_stream(), plain.to_line()).await.unwrap();
     let base: gio::IOStream = conn.clone().upcast();
     let secured = net::secure_as_server(&base, &cert, Trust::FirstUse).await.unwrap();
-    net::write_all(&secured.tls.output_stream(), local.packet_in_tls().to_line()).await.unwrap();
     let mut reader = LineReader::new(secured.tls.input_stream());
-    net::timed(Duration::from_secs(5), reader.next(65536)).await.unwrap().unwrap();
+    if version >= 8 {
+        net::write_all(&secured.tls.output_stream(), local.packet_in_tls().to_line()).await.unwrap();
+        net::timed(Duration::from_secs(5), reader.next(65536)).await.unwrap().unwrap();
+    }
     Raw { tls: secured.tls, reader, der, _conn: conn }
 }
 
@@ -790,7 +802,8 @@ async fn one_address_cannot_hold_the_unpaired_slots(root: &Path) {
     assert!(up(&all[3]) && up(&all[4]), "the pairings that wait are kept");
     drop(third);
 
-    // The same across addresses: nine devices from nine addresses, never more than eight held, the oldest let go
+    // The same across addresses: nine devices from nine addresses, never more than eight held; a device that has just
+    // connected is not made room from, so the ninth is the one let go
     let computer = make(root, "Slots many", "laptop", false, false);
     let port = computer.port();
     let mut kept = Vec::new();
@@ -801,6 +814,111 @@ async fn one_address_cannot_hold_the_unpaired_slots(root: &Path) {
     }
     let held = many.iter().filter(|id| computer.service.device(id).is_some_and(|d| d.connected())).count();
     assert_eq!(held, limits::UNPAIRED_DEVICES);
-    assert!(!computer.service.device(&many[0]).is_some_and(|d| d.connected()), "the oldest made room for the newest");
-    assert!(computer.service.device(&many[8]).is_some_and(|d| d.connected()));
+    assert!(computer.service.device(&many[0]).is_some_and(|d| d.connected()), "the ones that came first are kept for their grace");
+    assert!(!computer.service.device(&many[8]).is_some_and(|d| d.connected()));
+}
+
+// --- One neighbour with many addresses cannot make the person's phone the one that goes -------------------------------
+
+async fn one_neighbour_cannot_evict_the_phone_that_is_pairing(root: &Path) {
+    let computer = make(root, "Neighbour", "laptop", false, false);
+    let port = computer.port();
+    // The person's phone connects and sits there until its owner presses Pair
+    let phone_id = "a".repeat(32);
+    let phone = raw_phone(port, &phone_id, "Sam phone", Some("127.0.2.1")).await.unwrap();
+    until("the phone", || computer.service.device(&phone_id).is_some_and(|d| d.connected())).await;
+    // A neighbour answers for eight addresses and keeps opening connections under new ids
+    let mut kept = Vec::new();
+    for (n, id) in ids(24).into_iter().enumerate() {
+        if let Ok(raw) = raw_phone(port, &id, "Pixel 8", Some(&format!("127.0.3.{}", 1 + n % 8))).await {
+            kept.push(raw);
+        }
+        pause(40).await;
+    }
+    assert!(computer.service.device(&phone_id).is_some_and(|d| d.connected()), "the phone is still there");
+    let held = ids(24).iter().filter(|id| computer.service.device(id).is_some_and(|d| d.connected())).count();
+    assert!(held < limits::UNPAIRED_DEVICES, "the neighbour holds {held} of {} slots", limits::UNPAIRED_DEVICES);
+    // And the person presses Pair: the request arrives and is shown
+    send(&phone, pair_request(0)).await;
+    until("the prompt of the phone that was kept", || prompt_of(&computer, &phone_id).is_some()).await;
+}
+
+#[test]
+fn the_neighbour_table_gives_one_hardware_address_to_every_address_of_a_host() {
+    let table = "IP address       HW type     Flags       HW address            Mask     Device\n\
+                 192.168.1.5      0x1         0x2         aa:bb:cc:dd:ee:01     *        wlp2s0\n\
+                 192.168.1.6      0x1         0x2         aa:bb:cc:dd:ee:01     *        wlp2s0\n\
+                 192.168.1.7      0x1         0x0         00:00:00:00:00:00     *        wlp2s0\n\
+                 192.168.1.8      0x1         0x2         not-a-mac             *        wlp2s0\n";
+    let parsed = amethystora_connect::service::parse_arp(table);
+    assert_eq!(parsed.len(), 2, "an unresolved entry and a damaged line are left out");
+    assert_eq!(parsed[&"192.168.1.5".parse().unwrap()], parsed[&"192.168.1.6".parse().unwrap()]);
+}
+
+// --- A new pairing is made at protocol 8 with a fresh request; one that exists keeps working -------------------------
+
+fn pem_for(id: &str) -> String {
+    let made = x509::generate(id, packet::now_secs()).unwrap();
+    format!("{}{}", made.certificate_pem, made.key_pem)
+}
+
+async fn a_new_pairing_needs_protocol_8_and_a_fresh_request(root: &Path) {
+    let computer = make(root, "Protocols", "laptop", false, false);
+    let port = computer.port();
+
+    // A phone that speaks protocol 7 asks: no prompt, and the person is told what to do
+    let old = "1".repeat(32);
+    let seven = raw_phone_as(port, &old, "Old phone", &pem_for(&old), 7).await;
+    until("the old phone", || computer.service.device(&old).is_some_and(|d| d.connected())).await;
+    send(&seven, pair_request(0)).await;
+    pause(400).await;
+    assert!(prompt_of(&computer, &old).is_none(), "no key to compare at protocol 7");
+    let told = computer.notices.last(&format!("info:{old}")).expect("the person is told");
+    assert!(told.body.contains("too old"), "{}", told.body);
+    assert!(!computer.device(&old).paired());
+    // And the person cannot ask it to pair either
+    assert!(computer.service.pair(&old).is_err());
+    assert!(!computer.device(&old).paired());
+    assert!(prompt_of(&computer, &old).is_none());
+
+    // A request ten minutes old is no request: the clocks are what the person is told about
+    let stale = "2".repeat(32);
+    let raw = raw_phone_as(port, &stale, "Stale phone", &pem_for(&stale), 8).await;
+    send(&raw, pair_request(-600)).await;
+    pause(400).await;
+    assert!(prompt_of(&computer, &stale).is_none());
+    assert!(computer.notices.last(&format!("info:{stale}")).is_some_and(|n| n.body.contains("two minutes")));
+
+    // Phones that speak 8 pair, with a clock a little off either way (a computer of their own: one address may ask three times a minute)
+    let computer = make(root, "Clocks a little off", "laptop", false, false);
+    let port = computer.port();
+    for (id, offset) in [("3", -(limits::PAIR_FRESH_SECS - 10)), ("4", limits::PAIR_FRESH_SECS - 10), ("6", 0)] {
+        let id = id.repeat(32);
+        let raw = raw_phone_as(port, &id, "Sam phone", &pem_for(&id), 8).await;
+        send(&raw, pair_request(offset)).await;
+        until("the prompt of a phone with a clock a little off", || prompt_of(&computer, &id).is_some()).await;
+        computer.notices.press(&prompt_of(&computer, &id).unwrap().key, "accept");
+        until("the pairing", || computer.device(&id).paired()).await;
+    }
+}
+
+async fn a_phone_paired_at_protocol_7_keeps_working(root: &Path) {
+    let computer = make(root, "Paired at 7", "laptop", false, false);
+    let port = computer.port();
+    let id = "5".repeat(32);
+    let pem = pem_for(&id);
+    let first = raw_phone_with(port, &id, "Sam phone", &pem).await;
+    send(&first, pair_request(0)).await;
+    until("the prompt before the pairing at 7", || prompt_of(&computer, &id).is_some()).await;
+    computer.notices.press(&prompt_of(&computer, &id).unwrap().key, "accept");
+    until("the pairing", || computer.device(&id).paired()).await;
+    // A pairing an earlier image made at protocol 7, as the store kept it
+    computer.service.store.borrow_mut().paired.get_mut(&id).unwrap().protocol = 7;
+    drop(first);
+    until("the phone to be gone", || !computer.device(&id).connected()).await;
+    let again = raw_phone_as(port, &id, "Sam phone", &pem, 7).await;
+    until("the phone again", || computer.device(&id).connected()).await;
+    assert!(computer.device(&id).paired());
+    send(&again, Packet::new("kdeconnect.ping", json!({ "message": "from the paired phone" }))).await;
+    until("its ping", || computer.saw("kdeconnect.ping").iter().any(|p| p.body["message"] == "from the paired phone")).await;
 }

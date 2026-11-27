@@ -54,6 +54,13 @@ const PATHS: &[&str] = &[
     // Which account of an agent a project goes through, and the sandbox that holds it (plans/done/PLAN-agent-accounts.md,
     // plans/done/PLAN-agent-sandbox.md): the person's two maps, the profiles' folders and the shells' hook, in any spelling
     "agent-profiles.json", "agent-sandbox.json", "amethystora/agent-profiles", "amethystora/agent-hook",
+    // Pulling the key powers the computer off or locks it, and its helper and unit say so by name: the person chooses the device and the mode
+    "amethystora-pull-key",
+    // Lab devices' rules, shipped and copied: only the person copies them (the helper by its own name is judged in refusal())
+    "70-amethystora-lab-devices", "usr/share/amethystora/lab-devices",
+    // What the snapshots and the backup leave out: taking a folder out of either loosens what keeps it, so only the person
+    // does it (`ame security ransomware exclude list` and `ame backup exclude list` read, and pass)
+    "amethystora-snapshot-exclude", "/etc/amethystora/snapshot-excludes", "amethystora-backup-exclude", "amethystora/backup-excludes",
 ];
 
 /// The variables that pick an agent's account or move its folders, which no command of the agent's may set in front of
@@ -114,6 +121,10 @@ pub fn refusal(argv: &[String]) -> Option<String> {
     if program == "btrfs" && argv.windows(2).any(|pair| pair[0] == "subvolume" && pair[1] == "delete") {
         return Some("it deletes a subvolume, and with it maybe a snapshot".into());
     }
+    // Lab devices' helper: giving the seat the probes, adapters and analysers is the person's; the root helper would otherwise run it
+    if program == "amethystora-lab-devices" && !matches!(argv.get(1).map(String::as_str), Some("list" | "status" | "what")) {
+        return Some("giving the person at the machine access to debug probes, serial adapters and analysers loosens a protection: the user turns it on".into());
+    }
     if program == "amethystora-raid" && argv.get(1).map(String::as_str) != Some("status") {
         return Some("pools of disks are made, changed and erased only by the user, in a terminal".into());
     }
@@ -133,6 +144,14 @@ pub fn refusal(argv: &[String]) -> Option<String> {
     // `grdctl status` alone: `status --show-credentials` prints the code
     if program == "amethystora-share-screen" && argv.get(1).map(String::as_str) != Some("status") {
         return Some("sharing the screen is the user's: it lets another computer see it".into());
+    }
+    // `ame dev`'s helpers by their own names, for what its words are refused for: a service pulls an image, runs a container and may
+    // delete its data; the graphics card check fetches an image only with --pull or --deep. Listing and the ports only read
+    if program == "amethystora-dev-services" && !matches!(argv.get(1).map(String::as_str), None | Some("list" | "ports")) {
+        return Some("a development service pulls an image, runs a container and may delete its data: the user adds, starts, stops and removes it".into());
+    }
+    if program == "amethystora-gpu-compute" && argv.iter().skip(1).any(|arg| matches!(arg.as_str(), "--pull" | "--deep")) {
+        return Some("fetching the image the graphics card check runs is the user's: the agent may run it without --pull or --deep".into());
     }
     if program == "grdctl" && !(argv.len() == 2 && argv[1] == "status") {
         return Some("GNOME's remote desktop is the user's: it lets another computer see the screen, and `status` is the only part that does not".into());
@@ -333,6 +352,8 @@ fn ame_refusal(args: &[String]) -> Option<String> {
         ["backup", "recovery-key" | "restore-from" | "other-computer" | "store", ..] => {
             Some("the backup's recovery key, its other computer and starting from it on a new computer are the user's alone".into())
         }
+        // What the backup leaves out may be read; leaving something out of it is the person's
+        ["backup", "exclude", verb, ..] if *verb != "list" => Some("what the backup leaves out is the user's to change: the agent may list it".into()),
         // Every command of the Vault is the person's: it holds what the agent must never see, and each one may prompt for them
         ["vault", ..] => Some("the Vault is the user's alone: the agent neither reads nor changes it".into()),
         // Installing a plugin, giving it more, lifting a block and going back to older code each take an administrator's approval: the agent never
@@ -376,12 +397,24 @@ fn ame_refusal(args: &[String]) -> Option<String> {
         {
             Some("the agent's own shortcuts are the user's to change".into())
         }
-        ["system", "move" | "bring-over", ..] => Some("moving a person's folders between computers is the user's, with their eyes on both screens".into()),
+        ["system", "move" | "bring-over" | "move-in", ..] => Some("moving a person's folders between computers is the user's, with their eyes on both screens".into()),
+        // Seat access to debug probes, serial adapters and logic analysers loosens what the image keeps root's: only reading which are plugged in
+        ["system", "lab-devices", rest @ ..] if rest.first() != Some(&"list") => {
+            Some("giving the person at the machine access to debug probes, serial adapters and analysers loosens a protection: the user turns it on".into())
+        }
         ["system", "raid", rest @ ..] if rest.first() != Some(&"status") => {
             Some("pools of disks are made, changed and erased only by the user, in a terminal".into())
         }
         // It decides what the computer starts, by writing to the boot partition
         ["update", "boot-guard", _, ..] => Some("going back from an update that does not start is the user's to switch".into()),
+        // A development service pulls an image, runs a container and may delete the data it holds: the person's. Listing them
+        // and the ports (and the graphics card check, which fetches only when --pull or --deep says so) only read
+        ["dev", "service", verb, ..] if *verb != "list" => {
+            Some("a development service pulls an image, runs a container and may delete its data: the user adds, starts, stops and removes it".into())
+        }
+        ["dev", "gpu", rest @ ..] if rest.iter().any(|word| matches!(*word, "--pull" | "--deep")) => {
+            Some("fetching the image the graphics card check runs is the user's: the agent may run ame dev gpu without --pull or --deep".into())
+        }
         ["security", rest @ ..] => security_refusal(rest),
         _ => None,
     }
@@ -396,6 +429,10 @@ fn security_refusal(args: &[&str]) -> Option<String> {
         ["kernel", "standard" | "strict"] | ["lockdown", "on" | "strict"] => true,
         [switch, "on"] => SECURITY_ON.contains(switch),
         ["profile", "light" | "balanced" | "thorough"] => true,
+        // Locking, or powering off, when a device is pulled tightens: turning it off and choosing the device are the person's
+        ["pull-key", "lock" | "poweroff"] => true,
+        // Which folders the snapshots leave out may be read; leaving one out, or putting one back, is the person's
+        ["ransomware", "exclude"] | ["ransomware", "exclude", "list", ..] => true,
         ["kernel-args", argument, "on"] => argument.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '=' | '-')),
         // A resolver of the list, or resuming after a pause; custom asks its servers in a terminal
         ["dns", "quad9" | "mullvad" | "cloudflare" | "google" | "resume"] => true,
@@ -420,6 +457,13 @@ mod tests {
     fn refuses_the_never_list() {
         for words in [
             "ame security duress setup",
+            "ame security ransomware exclude add /var/home/a/Games",
+            "ame security ransomware exclude remove /var/home/a/Games",
+            "sudo /usr/libexec/amethystora-snapshot-exclude add /var/home/a/Games",
+            "tee -a /etc/amethystora/snapshot-excludes",
+            "ame backup exclude add /var/home/a/Documents",
+            "ame backup exclude reset",
+            "/usr/libexec/amethystora-backup-exclude add /var/home/a/Documents",
             "git credential fill",
             "git -c credential.helper=amethystora -C /tmp credential get",
             "git-credential-amethystora get",
@@ -556,13 +600,42 @@ mod tests {
             "ame security dns pause",
             "ame security dns off",
             "ame security walk-away off",
+            "ame security pull-key off",
+            "ame security pull-key",
+            "ame security pull-key device",
+            "ame security settings pull-key off",
+            "ame security settings pull-key lock",
+            "/usr/libexec/amethystora-pull-key apply",
+            "ame system lab-devices on",
+            "/usr/libexec/amethystora-lab-devices on",
+            "amethystora-lab-devices off",
+            "amethystora-lab-devices",
+            "cp x /etc/udev/rules.d/70-amethystora-lab-devices.rules",
+            "ame system lab-devices off",
+            "ame system lab-devices",
+            "ame -q system::lab-devices on",
             "ame security settings walk-away on",
             "ame security guest-login on",
             "ame security guest-login",
             "/usr/libexec/amethystora-guest enable",
             "ame system raid create",
+            "ame dev service add postgres",
+            "amethystora-dev-services add postgres",
+            "/usr/libexec/amethystora-dev-services remove db",
+            "/usr/libexec/amethystora-dev-services start db",
+            "amethystora-gpu-compute --pull",
+            "/usr/libexec/amethystora-gpu-compute --deep --json",
+            "ame dev service start postgres",
+            "ame dev service stop postgres",
+            "ame dev service remove postgres",
+            "ame dev gpu --pull",
+            "ame dev gpu --deep --json",
+            "ame -q dev::gpu --deep",
             "ame system move receive",
             "ame system bring-over",
+            "ame system move-in",
+            "ame system move-in copy /dev/sda2 Sam",
+            "/usr/libexec/amethystora-move-in find",
             "/usr/libexec/amethystora-move send",
             "amethystora-raid create",
             "restic -r x forget --prune",
@@ -713,8 +786,16 @@ mod tests {
             "systemctl restart NetworkManager.service",
             "ame security firewall on",
             "ame security walk-away on",
+            "ame security pull-key lock",
+            "ame security pull-key poweroff",
+            "ame system lab-devices list",
+            "/usr/libexec/amethystora-lab-devices status",
+            "amethystora-lab-devices list",
             "ame security status",
             "ame security sends",
+            "ame security ransomware exclude",
+            "ame security ransomware exclude list --json",
+            "ame backup exclude list",
             "ame security scan now",
             "ame security kernel strict",
             "ame security lockdown on",
@@ -722,6 +803,16 @@ mod tests {
             "ame security kernel-args init_on_free=1 on",
             "ame security dns quad9",
             "ame system raid status",
+            "ame dev service list --json",
+            "/usr/libexec/amethystora-dev-services list --json",
+            "amethystora-dev-services ports",
+            "amethystora-dev-services",
+            "/usr/libexec/amethystora-gpu-compute --json",
+            "amethystora-gpu-compute",
+            "ame dev service",
+            "ame dev ports --json",
+            "ame dev gpu",
+            "ame dev gpu --json",
             "amethystora-if-found status",
             "ame desktop text-shortcuts off",
             "ame desktop phone codes off",
@@ -769,6 +860,11 @@ mod tests {
             "ame desktop greeting on",
             "ame update",
             "ame update boot-guard",
+            // Kits install apps from Flathub: the agent reads them, and adding or removing one is a hand-off, as `ame setup apply` is
+            "ame apps kit list",
+            "ame apps kit show electronics",
+            "ame apps kit add electronics",
+            "ame apps kit remove electronics",
             "ame",
             "just build amethystora latest main",
             "just --list",

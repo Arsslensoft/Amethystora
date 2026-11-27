@@ -7,10 +7,10 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-# Copy if it doesn't exist
-ExecStartPre=/usr/bin/bash -c "[ -x /usr/local/bin/overrides/incus ] || /usr/bin/cp /usr/bin/incus /usr/local/bin/overrides/incus"
-ExecStartPre=/usr/bin/bash -c "[ -x /usr/local/bin/overrides/incus-agent ] || /usr/bin/cp /usr/bin/incus /usr/local/bin/overrides/incus-agent"
-ExecStartPre=/usr/bin/bash -c "[ -d /usr/local/lib/overrides/incus ] || /usr/bin/cp -R /usr/bin/incus /usr/local/lib/overrides/incus"
+# Copy afresh at every start, so that an update's Incus is the one that is bound
+ExecStartPre=/usr/bin/bash -c "/usr/bin/rm -f /usr/local/bin/overrides/incus && /usr/bin/cp /usr/bin/incus /usr/local/bin/overrides/incus"
+ExecStartPre=/usr/bin/bash -c "/usr/bin/rm -f /usr/local/bin/overrides/incus-agent && /usr/bin/cp /usr/bin/incus-agent /usr/local/bin/overrides/incus-agent"
+ExecStartPre=/usr/bin/bash -c "/usr/bin/rm -rf /usr/local/lib/overrides/incus && /usr/bin/cp -R /usr/lib/incus /usr/local/lib/overrides/incus"
 # This is faster than using .mount unit. Also allows for the previous line/cleanup
 ExecStartPre=/usr/bin/mount --bind /usr/local/bin/overrides/incus /usr/bin/incus
 ExecStartPre=/usr/bin/mount --bind /usr/local/bin/overrides/incus-agent /usr/bin/incus-agent

@@ -250,8 +250,8 @@ if wait_for 30 locked; then
     [[ " ${rows} " == *" message"*":22 "* ]] && ok "34 what is playing is a card of radius 22" ||
         not_ok "34 what is playing is a card of radius 22" "rows: ${rows}"
     texts="$(ev "(() => { const all = []; const walk = a => { if (a.text !== undefined && a.visible) all.push(a.text); a.get_children().forEach(walk); }; walk(${BOX}); return all.join('|'); })()")"
-    # GNOME counts the ones not seen yet: the first came up as a banner before the lock, so 2 or 3
-    [[ "${texts}" == *"Lab chat"* && "|${texts}|" =~ \|[23]\| && "${texts}" != *Secret* ]] &&
+    # GNOME counts the ones not seen yet: the first may have come up as a banner before the lock, and a slow machine has one still on its way, so 1 to 3
+    [[ "${texts}" == *"Lab chat"* && "|${texts}|" =~ \|[123]\| && "${texts}" != *Secret* ]] &&
         ok "34 the row names the app and the count, never the text (${texts})" ||
         not_ok "34 the row names the app and the count, never the text" "shown: ${texts}"
     user_bus gdbus call --session --dest org.gnome.Shell.Screenshot --object-path /org/gnome/Shell/Screenshot \

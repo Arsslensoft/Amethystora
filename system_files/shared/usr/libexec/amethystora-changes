@@ -515,7 +515,7 @@ def update_items():
 
 def undo_update():
     print(_("This makes the version before the one that starts next. Your files stay as they are. It asks for an administrator's password."))
-    os.execvp("pkexec", ["pkexec", "/usr/bin/bootc", "rollback"])
+    os.execv("/usr/bin/pkexec", ["/usr/bin/pkexec", "/usr/bin/bootc", "rollback"])
     return False, ""
 
 

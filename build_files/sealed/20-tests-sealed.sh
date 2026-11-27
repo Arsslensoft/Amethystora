@@ -46,8 +46,9 @@ fi
 # ...and the kernel arguments of kargs.d: read-write btrfs root, the splash, no credentials from the
 # firmware or the ESP, an initramfs that halts when it fails rather than going on with the boot, the
 # hardening, no console size query, and lockdown on every image but the NVIDIA ones, as 08-hardening.sh
-# sets it. No debug shell: nothing can be added to
-# this command line on the machine, and a shell there would be root's, with the disk already unlocked.
+# sets it. No debug shell: a shell there would be root's, with the disk already unlocked. (What systemd-stub
+# appends at boot, from the firmware or a signed add-on, it measures into PCR 12, which the sealed disk
+# unlock binds.)
 for karg in rw rootflags=compress=zstd:1,subvol=root quiet rhgb systemd.import_credentials=no rd.shell=0 \
     rd.emergency=halt slab_nomerge init_on_alloc=1 page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none \
     proc_mem.force_override=ptrace systemd.tty.term.console=dumb; do
@@ -68,7 +69,34 @@ if compgen -G "${T}/usr/lib/modules/*/vmlinuz" || compgen -G "${T}/usr/lib/modul
 fi
 lsinitrd -m "/run/kernel/${KERNEL}/initramfs.img" | grep -x bootc
 lsinitrd -m "/run/kernel/${KERNEL}/initramfs.img" | grep -x amethystora-sealed
-lsinitrd "/run/kernel/${KERNEL}/initramfs.img" | grep 'initrd-root-fs.target.wants/amethystora-sealed-verity.service' >/dev/null
+lsinitrd "/run/kernel/${KERNEL}/initramfs.img" | grep 'initrd-root-fs.target.requires/amethystora-sealed-verity.service' >/dev/null
+# bootc mounts the disk's own root at /sysroot inside the image, where the check finds composefs/images
+test -d "${T}/sysroot"
+# The check passes this UKI's own command line, with its image mounted as bootc mounts it, and refuses the
+# same with one more image named after it, or with the image only under composefs/images/refs, which bootc
+# up to 1.17.4 mounted unmeasured (GHSA-g77m-w5pv-gphg; 1.17.5 also requires its root setup for
+# initrd-root-fs.target, GHSA-9889-q45r-84v7)
+GUARD="${T}/usr/lib/dracut/modules.d/90amethystora-sealed/amethystora-sealed-verity"
+G=/tmp/amethystora-guard
+MOUNTED="${DIGEST_V1:-${DIGEST}}"
+mkdir -p "${G}/physical/composefs/images/refs"
+printf '%s\n' "${CMDLINE}" >"${G}/cmdline"
+printf '9 1 0:9 / /sysroot ro - overlay composefs:%s ro,verity=require\n' "${MOUNTED}" >"${G}/mountinfo"
+touch "${G}/physical/composefs/images/${MOUNTED}"
+bash "${GUARD}" "${G}/cmdline" "${G}/mountinfo" "${G}/physical"
+printf '%s composefs.digest=v1-sha512-12:%s\n' "${CMDLINE}" "${MOUNTED}" >"${G}/cmdline"
+if bash "${GUARD}" "${G}/cmdline" "${G}/mountinfo" "${G}/physical"; then
+    exit 1
+fi
+printf '%s\n' "${CMDLINE}" >"${G}/cmdline"
+mv "${G}/physical/composefs/images/${MOUNTED}" "${G}/physical/composefs/images/refs/"
+if bash "${GUARD}" "${G}/cmdline" "${G}/mountinfo" "${G}/physical"; then
+    exit 1
+fi
+rm -rf "${G}"
+if [[ "$(printf '%s\n' 1.17.5 "${BOOTC_VERSION}" | sort -V | head -n 1)" != 1.17.5 ]]; then
+    echo "::warning::bootc ${BOOTC_VERSION} predates the fixes of GHSA-g77m-w5pv-gphg and GHSA-9889-q45r-84v7: amethystora-sealed-verity is the only check of them"
+fi
 if dracut --list-modules 2>/dev/null | grep -x tpm2-tss >/dev/null; then
     lsinitrd -m "/run/kernel/${KERNEL}/initramfs.img" | grep -x tpm2-tss
 fi

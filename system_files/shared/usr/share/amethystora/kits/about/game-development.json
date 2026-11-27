@@ -1,0 +1,46 @@
+{
+  "name": "Game development",
+  "description": "Make a game: the engine, the art, the levels and the sound.",
+  "apps": [
+    {
+      "app": "org.godotengine.Godot",
+      "name": "Godot Engine",
+      "why": "A game engine for 2D and 3D games."
+    },
+    {
+      "app": "org.blender.Blender",
+      "name": "Blender",
+      "why": "Models, rigs and animates 3D characters and scenery."
+    },
+    {
+      "app": "org.kde.krita",
+      "name": "Krita",
+      "why": "Paints textures and concept art."
+    },
+    {
+      "app": "org.inkscape.Inkscape",
+      "name": "Inkscape",
+      "why": "Draws icons and interface art that scales."
+    },
+    {
+      "app": "org.mapeditor.Tiled",
+      "name": "Tiled",
+      "why": "Builds tile-based levels and maps."
+    },
+    {
+      "app": "com.github.libresprite.LibreSprite",
+      "name": "LibreSprite",
+      "why": "Draws and animates pixel art sprites."
+    },
+    {
+      "app": "com.orama_interactive.Pixelorama",
+      "name": "Pixelorama",
+      "why": "Pixel art and animation, made with Godot."
+    },
+    {
+      "app": "org.audacityteam.Audacity",
+      "name": "Audacity",
+      "why": "Records and edits sound effects."
+    }
+  ]
+}

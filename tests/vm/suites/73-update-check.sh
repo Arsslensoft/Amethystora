@@ -48,7 +48,9 @@ if [[ -s "${FOUND}" ]]; then
             ok "the look found what is waiting: $(jq -c '{system, packages}' "${FOUND}")" || not_ok "the look's record" "$(cat "${FOUND}")"
     else
         grep -qF "${ERROR}" <<<"${OUT}" && ok "a look that could not reach the image says why: ${ERROR}" ||
-            not_ok "a failed look says why" "${OUT}"
+            not_ok "a failed look says why" "recorded: $(cat "${FOUND}")
+said: ${OUT}
+journal: $(journalctl -u amethystora-update-check.service -b --no-pager -o cat -n 12 2>&1)"
     fi
 else
     not_ok "ame update check looked, without a password" "${OUT}"
@@ -75,7 +77,10 @@ if atspi wait 120 "Waiting to be installed" >/dev/null 2>&1; then
         ok "and the layered package, from which version to which" || not_ok "the layered package" "$(atspi text 2>&1 | head -n 40)"
     atspi has "An update is waiting" >/dev/null 2>&1 && ok "the top says an update is waiting" || not_ok "the top says an update is waiting" "$(atspi text 2>&1 | head -n 20)"
 else
-    not_ok "System Updates has a section for what is waiting" "$(atspi text 2>&1 | head -n 40)"
+    not_ok "System Updates has a section for what is waiting" "$(atspi text 2>&1 | head -n 40)
+the record now: $(cat "${FOUND}" 2>&1 | cut -c1-300)
+the window said: $(user_bus journalctl --user -u vmlab-update-check-window.service -b --no-pager -o cat -n 15 2>&1 | cut -c1-240)
+rpm-ostree: $(timeout 20 rpm-ostree status 2>&1 | head -n 6)"
 fi
 # From another deployment it says nothing of this one
 jq -c '.booted = "another"' "${FOUND}" >"${FOUND}.new" && mv "${FOUND}.new" "${FOUND}" && chmod 0644 "${FOUND}"

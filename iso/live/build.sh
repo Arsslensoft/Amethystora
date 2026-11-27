@@ -36,8 +36,21 @@ mkdir -p /etc/containers/storage.rootful.conf.d
 for conf in "${vendor[@]}"; do
     printf '[storage.options]\nadditionalimagestores = []\n' >"/etc/containers/storage.rootful.conf.d/${conf##*/}"
 done
-podman pull "${BASE_IMAGE%:*}@${BASE_DIGEST}"
-podman tag "${BASE_IMAGE%:*}@${BASE_DIGEST}" "${BASE_IMAGE}"
+# The lab (lab-iso.yml) builds the live ISO of an image no registry has: LIVE_COPY_FROM names it as an archive the
+# build mounts, of the same digest. Nothing else sets it, so a published ISO's copy always comes from the registry
+if [[ -n "${LIVE_COPY_FROM:-}" ]]; then
+    [[ "${LIVE_COPY_FROM}" == oci-archive:/run/lab/* ]] || { echo "LIVE_COPY_FROM is the lab's archive, not ${LIVE_COPY_FROM}" >&2; exit 1; }
+    # An archive is unpacked into TMPDIR first, and /var/tmp is a small tmpfs in this build: the build's own disk instead
+    mkdir -p /var/lib/live-copy-tmp
+    copied="$(TMPDIR=/var/lib/live-copy-tmp podman pull -q "${LIVE_COPY_FROM}")"
+    rm -rf /var/lib/live-copy-tmp
+    [[ "$(podman image inspect --format '{{.Digest}}' "${copied}")" == "${BASE_DIGEST}" ]] ||
+        { echo "the lab's archive is not ${BASE_DIGEST}" >&2; exit 1; }
+    podman tag "${copied}" "${BASE_IMAGE}"
+else
+    podman pull "${BASE_IMAGE%:*}@${BASE_DIGEST}"
+    podman tag "${BASE_IMAGE%:*}@${BASE_DIGEST}" "${BASE_IMAGE}"
+fi
 for conf in "${vendor[@]}"; do rm "/etc/containers/storage.rootful.conf.d/${conf##*/}"; done
 rmdir --ignore-fail-on-non-empty /etc/containers/storage.rootful.conf.d
 rm -rf /run/containers/storage
@@ -94,8 +107,16 @@ if grep "bootc switch" /usr/share/anaconda/interactive-defaults.ks | grep -v -- 
     exit 1
 fi
 
+# ...and relabels what Anaconda wrote with the policy's own user: started from its window it writes as the
+# live account's, and installer.ks's label checks then failed the installation
+grep -q -- 'restorecon -F -r /etc /var' /usr/share/anaconda/interactive-defaults.ks
+
 # ...and keeps the image's firewall, without the ssh Anaconda adds by itself
 grep -qx -- "firewall --use-system-defaults" /usr/share/anaconda/interactive-defaults.ks
+
+# ...and gives the installed machine the boot splash and the keyboard chosen for its passphrase, which
+# Anaconda's bootc path leaves out
+grep -q -- 'set-kargs --sysroot=/mnt/sysimage --merge rhgb quiet .*vconsole.keymap=' /usr/share/anaconda/interactive-defaults.ks
 
 # The sealed images (:stable-sealed), which Anaconda cannot install yet, have an installer of their own:
 # a whole disk, the image downloaded from the registry, shim placed in front of systemd-boot. Amethystora's
@@ -113,10 +134,29 @@ changed='Changed by Amethystora when its live ISO is built (iso/live/build.sh)'
 { grep -rlI --null 'Fedora' /usr/share/anaconda/gnome /usr/share/applications/liveinst.desktop 2>/dev/null || true; } |
     while IFS= read -r -d '' file; do
         sed -i 's/\bFedora\b/Amethystora/g' "${file}"
-        if [[ ${file} == *.desktop || "$(head -c2 "${file}")" == '#!' ]]; then
+        # The welcome window is a GJS script since Fedora 45, where a line that starts with # is a syntax error:
+        # it never opened, and the live session started without the installer's offer
+        if [[ "$(head -n1 "${file}")" == '#!'*gjs* ]]; then
+            echo "// ${changed}" >>"${file}"
+        elif [[ ${file} == *.desktop || "$(head -c2 "${file}")" == '#!' ]]; then
             echo "# ${changed}" >>"${file}"
         fi
     done
+# ...which the session opens at its start (livesys copies it into the live account's autostart), and which still reads
+# as the language it is written in
+welcome=/usr/share/anaconda/gnome/fedora-welcome
+[[ -x ${welcome} && -e /usr/share/anaconda/gnome/org.fedoraproject.welcome-screen.desktop ]] ||
+    { echo "the live session has no welcome window that offers the installer" >&2; exit 1; }
+if [[ "$(head -n1 "${welcome}")" == '#!'*gjs* ]] && tail -n +2 "${welcome}" | grep -nE '^#'; then
+    echo "${welcome}: a # comment in a GJS script, which would keep it from opening" >&2
+    exit 1
+fi
+# The installer's offer is what a live session opens on: not the Manual's welcome page, Pick a look or the greeting
+# of a new account, which would open over it and are for the installed system's first login (the live account's
+# home is made from /etc/skel at every start)
+rm -f /usr/share/amethystora/user-setup.hooks.d/17-welcome.sh /usr/share/amethystora/user-setup.hooks.d/25-first-look.sh
+install -d /etc/skel/.local/state/amethystora
+echo '{}' >/etc/skel/.local/state/amethystora/first-look.json
 
 # liveinst takes a release package whose release starts with 0. for a pre-release, and Fedora's
 # generic-release is one (44-0.2): the web installer would show a "Pre-release" badge on a stable image
@@ -162,6 +202,47 @@ sleep-inactive-ac-type='nothing'
 sleep-inactive-battery-type='nothing'
 EOF
 glib-compile-schemas /usr/share/glib-2.0/schemas
+
+# The forensic start (the third boot menu entry, manual: forensic-start.md): units that do nothing unless the kernel's
+# command line has amethystora.forensic=1. They are in this live system alone: the system it installs is the published
+# image, pulled above, which has none of this
+install -Dpm0755 "${LIVE}/forensic/amethystora-forensic" /usr/bin/amethystora-forensic
+for unit in amethystora-forensic amethystora-forensic-session; do
+    install -Dpm0644 "${LIVE}/forensic/${unit}.service" "/usr/lib/systemd/system/${unit}.service"
+done
+install -Dpm0644 "${LIVE}/forensic/amethystora-forensic-pill.service" /usr/lib/systemd/user/amethystora-forensic-pill.service
+systemctl enable amethystora-forensic.service amethystora-forensic-session.service
+systemctl --global enable amethystora-forensic-pill.service
+for tool in blockdev dconf logger udevadm findmnt swapon; do command -v "${tool}" >/dev/null; done
+bash -n /usr/bin/amethystora-forensic
+bash "${LIVE}/forensic/test.sh" /usr/bin/amethystora-forensic
+# ...and the rule files it makes empty are there under those names in this live system (a package that renames one would leave
+# arrays, volumes or caches put together by udev)
+for rule in $(/usr/bin/amethystora-forensic overrides); do
+    [[ -e "/usr/lib/udev/rules.d/${rule}" ]] || { echo "the forensic start empties ${rule}, which this system does not have" >&2; exit 1; }
+done
+# ...whose rule udev can read and whose units systemd can load
+forensic_rules="$(mktemp)"
+/usr/bin/amethystora-forensic rules >"${forensic_rules}"
+udevadm verify "${forensic_rules}"
+rm -f "${forensic_rules}"
+systemd-analyze verify /usr/lib/systemd/system/amethystora-forensic.service /usr/lib/systemd/system/amethystora-forensic-session.service
+for unit in amethystora-forensic amethystora-forensic-session; do
+    grep -qx 'ConditionKernelCommandLine=amethystora.forensic=1' "/usr/lib/systemd/system/${unit}.service"
+done
+grep -qx 'ConditionKernelCommandLine=amethystora.forensic=1' /usr/lib/systemd/user/amethystora-forensic-pill.service
+# ...and a boot entry for it that has every argument the helper says it needs, besides the live system's own
+forensic_entry="$(grep -B1 -A2 -F 'name: "Start without touching the disks' "${LIVE}/iso.yaml")"
+[[ -n "${forensic_entry}" ]] || { echo "iso/live/iso.yaml: no forensic boot entry" >&2; exit 1; }
+forensic_linux="$(grep -E '^ +linux: ' <<<"${forensic_entry}")"
+for arg in $(/usr/bin/amethystora-forensic args) rd.live.image root=live:CDLABEL=Amethystora-Live; do
+    grep -qE " ${arg}( |\")" <<<"${forensic_linux}" || { echo "iso/live/iso.yaml: the forensic boot entry lacks ${arg}" >&2; exit 1; }
+done
+# ...and no other entry has any of it: the first two start the disks as they always were
+if grep -E '^ +linux: ' "${LIVE}/iso.yaml" | grep -vF 'amethystora.forensic=1' | grep -qE ' (fstab=0|noresume|systemd\.swap=0)'; then
+    echo "iso/live/iso.yaml: a boot entry other than the forensic one has its arguments" >&2
+    exit 1
+fi
 
 # What Titanoboa makes the ISO from (the container-native ISO contract): its label and boot menu, every
 # entry of which carries the image's kernel arguments from kargs.d, which a live boot does not read

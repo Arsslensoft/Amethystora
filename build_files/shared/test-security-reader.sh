@@ -5,6 +5,9 @@
 # is run. Nothing here writes outside a temporary folder.
 
 set -euo pipefail
+# The stack the watcher's service has (systemd's 8 MiB): Python 3.14 measures the stack, not a count, before json
+# goes deeper, so with the larger one of a build host's container (GitHub's runners) the deep file below parses
+ulimit -S -s 8192 2>/dev/null || true
 
 READER=/usr/libexec/amethystora-security-reader
 T="$(realpath "$(mktemp -d)")"
@@ -124,6 +127,55 @@ jq -se '(map(.id) | unique | length) == length
     and any(.[]; (.text | test("lets Claude Code use tools without asking in /p")) and .level == "quiet")
     and all(.[]; .allow | startswith("'"${H}"'/"))' <<<"${OUT}" >/dev/null || fail "agent-config's ids, levels or entries: ${OUT}"
 [[ "$(jq -r .id <<<"${OUT}")" == "$(as_account agent-config | jq -r .id)" ]] || fail "agent-config's ids are not stable"
+
+# --- What the tools read past the first bytes of a file, and files of a shape nobody expected ------------------
+
+H2="${T}/home2"
+as_home() {
+    local home="$1"
+    shift
+    setpriv --reuid=4600 --regid=4600 --clear-groups -- /usr/bin/env -i HOME="${home}" USER=bob PATH=/usr/bin:/usr/sbin \
+        LANG=C.UTF-8 "${READER}" "$@"
+}
+mkdir -p "${H2}/.local/lib/python3.14/site-packages" "${H2}/.ssh/config.d" "${H2}/.claude" "${H2}/.codex" \
+    "${H2}/.config/opencode" "${H2}/.gemini/extensions/"$'bad\xff'
+# Python runs every import line of a .pth file, wherever in the file it is; a file past what is read is said
+{ head -c 70000 /dev/zero | tr '\0' '#'; printf '\nimport os\n'; } >"${H2}/.local/lib/python3.14/site-packages/late.pth"
+{ head -c 4300000 /dev/zero | tr '\0' '#'; printf '\nimport sys\n'; } >"${H2}/.local/lib/python3.14/site-packages/huge.pth"
+# SSH's Include, git's includeIf, and the files they name, inside the home
+printf 'Include config.d/*\nInclude /etc/ssh/ssh_config.d/*.conf\n' >"${H2}/.ssh/config"
+printf 'Host y\n  ProxyCommand nc evil 22\n' >"${H2}/.ssh/config.d/x"
+printf '[includeIf "gitdir:~/work/"]\n\tpath = ~/.gitconfig-work\n[includeIf "gitdir:/other/"]\n\tpath = /etc/passwd\n' >"${H2}/.gitconfig"
+printf '[core]\n\tfsmonitor = touch %s/ran-work\n' "${T}" >"${H2}/.gitconfig-work"
+# A setting file over what is read, with a hook in it; two hooks that differ only past the 300 characters shown
+{ printf '{"pad": "'; head -c 1100000 /dev/zero | tr '\0' 'x'; printf '", "hooks": {"PreToolUse": [{"hooks": [{"command": "late"}]}]}}'; } \
+    >"${H2}/.claude/settings.local.json"
+LONG="$(head -c 400 /dev/zero | tr '\0' 'a')"
+printf '{"permissions": 5, "hooks": {"PreToolUse": [{"hooks": [{"command": "%s1"}]}, {"hooks": [{"command": "%s2"}]}]}}' "${LONG}" "${LONG}" \
+    >"${H2}/.claude/settings.json"
+# Values of the wrong type, JSON nested too deeply, and a name that is not UTF-8
+printf 'projects = 5\nmcp_servers = 3\nnotify = ["notify-send", "x"]\n' >"${H2}/.codex/config.toml"
+{ printf '{"hooks": '; head -c 100000 /dev/zero | tr '\0' '['; head -c 100000 /dev/zero | tr '\0' ']'; printf '}'; } >"${H2}/.codex/hooks.json"
+echo '{"mcp": 5, "plugin": 7, "permission": 3}' >"${H2}/.config/opencode/opencode.json"
+echo '{"name": "odd"}' >"${H2}/.gemini/extensions/"$'bad\xff'"/gemini-extension.json"
+chown -R 4600:4600 "${H2}"
+
+OUT="$(as_home "${H2}" dev-hooks)" || fail "dev-hooks failed on a long file or an include"
+[[ ! -e "${T}/ran-work" ]] || fail "reading a conditional include ran it"
+for want in 'late.pth runs code at every start of Python: import os' 'huge.pth is too long to be read in full' \
+    'config.d/x runs a command when SSH connects: ProxyCommand nc evil' 'gitconfig-work sets core.fsmonitor to touch'; do
+    grep -qF -- "${want}" <<<"${OUT}" || fail "dev-hooks did not find \"${want}\": ${OUT}"
+done
+grep -qF -- '/etc/passwd' <<<"${OUT}" && fail "dev-hooks read a file outside the home: ${OUT}"
+OUT="$(as_home "${H2}" agent-config)" || fail "agent-config failed on a file of the wrong shape"
+for want in 'settings.local.json is too long to be read in full' 'codex/hooks.json could not be read to the end: nested too deeply' \
+    'runs a command when a turn ends: notify-send x' 'gemini/extensions/' 'is an extension Gemini CLI loads: odd'; do
+    grep -qF -- "${want}" <<<"${OUT}" || fail "agent-config did not find \"${want}\": ${OUT}"
+done
+jq -se '[.[] | select(.text | test("runs a command on PreToolUse: a"))] | length == 2 and (map(.id) | unique | length) == 2
+    and all(.[]; (.text | length) < 400 and (.allow | test(" #[0-9a-f]{16}$")))' <<<"${OUT}" >/dev/null ||
+    fail "two hooks that differ past 300 characters have one id: ${OUT}"
+
 
 # --- app-permissions ----------------------------------------------------------------------------------------
 

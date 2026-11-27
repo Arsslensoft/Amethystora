@@ -1,0 +1,41 @@
+{
+  "name": "Electronics",
+  "description": "Draw schematics, lay out circuit boards, simulate circuits and program microcontrollers.",
+  "apps": [
+    {
+      "app": "org.kicad.KiCad",
+      "name": "KiCad",
+      "why": "Schematics, circuit boards and a 3D view of the board."
+    },
+    {
+      "app": "org.librepcb.LibrePCB",
+      "name": "LibrePCB",
+      "why": "A simpler circuit board editor, with libraries of its own."
+    },
+    {
+      "app": "cc.arduino.IDE2",
+      "name": "Arduino IDE",
+      "why": "Writes programs and uploads them to Arduino and compatible boards."
+    },
+    {
+      "app": "io.github.ra3xdh.qucs_s",
+      "name": "Qucs-S",
+      "why": "Simulates circuits with the SPICE engines."
+    },
+    {
+      "app": "org.qelectrotech.QElectroTech",
+      "name": "QElectroTech",
+      "why": "Electrical wiring and control diagrams."
+    },
+    {
+      "app": "io.github.gtkwave.GTKWave",
+      "name": "GTKWave",
+      "why": "Shows the waveforms a digital simulation writes."
+    },
+    {
+      "app": "org.openscad.OpenSCAD",
+      "name": "OpenSCAD",
+      "why": "Makes enclosures and brackets from a few lines of code."
+    }
+  ]
+}

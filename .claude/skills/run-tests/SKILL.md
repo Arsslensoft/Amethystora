@@ -125,8 +125,14 @@ git push origin --delete "test/${sha}"     # when done
 ```
 
 A branch build publishes nothing (`PUBLISH` in `reusable-build.yml`): it checks the build and `20-tests.sh`
-only. The VM suites then wait for a local build, or for the image `main` publishes after the user pushes
-(tag it `localhost/amethystora:latest` in the lab, then `run.sh disk` and `run.sh test`).
+only. The VM suites then run on GitHub too, in the Lab workflow, which builds the branch and spreads the suites over
+runners of their own (`tests/vm/README.md`, On GitHub):
+
+```bash
+gh workflow run Lab --repo arsslensoft/amethystora --ref "test/${sha}" -f suites=NN,NN   # no suites: every suite
+gh run view RUN_ID --repo arsslensoft/amethystora --log-failed | tail -n 200
+gh run download RUN_ID --repo arsslensoft/amethystora --pattern 'lab-run-*'   # logs, screenshots, journals
+```
 
 ## Keeping the suites growing
 

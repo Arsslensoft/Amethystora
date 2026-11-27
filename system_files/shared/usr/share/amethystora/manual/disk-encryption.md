@@ -27,10 +27,13 @@ disk of their own made to look like yours, and Secure Boot would see nothing cha
 here, and the report's **Disk unlock** check warns about a TPM key set up without one, as earlier versions allowed.
 
 On a [sealed image](streams.md#sealed-images) the programs that ask for the disk key are inside the signed kernel image,
-so they cannot be swapped for others that would keep it. The PIN is still asked for there: Secure Boot does not see
-which disk the signed system starts from, or the settings in `/etc` on it, and a disk of someone else's made to look
-like yours would start the same system with theirs. Updates keep it working as long as Amethystora's key does not
-change.
+so they cannot be swapped for others that would keep it, and the TPM also keeps the key when anything was added to that
+image's own kernel arguments, which the firmware and signed add-ons can do at boot. The PIN is still asked for there:
+Secure Boot does not see which disk the signed system starts from, or the settings in `/etc` on it, and a disk of
+someone else's made to look like yours would start the same system with theirs. That stops someone who takes the
+computer, not someone who gives it back with such a disk, whose settings could ask for the PIN. Updates keep it working
+as long as Amethystora's key does not change. A key set up before this check was added is replaced by running
+`ame security disk-unlock` again.
 
 ### A password on the boot menu
 

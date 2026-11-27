@@ -732,7 +732,7 @@ grep -qx "gsettings set org.gnome.shell.extensions.amethystora-ui.quit frozen-di
 grep -qxF 'gsettings set org.gnome.shell.extensions.amethystora-ui.privacy shield "attention"' "${LOG}"
 grep -qx "gsettings set org.gnome.shell.extensions.amethystora-ui.privacy network-apps true" "${LOG}"
 grep -qx "flatpak install --system --noninteractive flathub org.gnome.Maps" "${LOG}"
-grep -qx "brew install --formula fd someone/tools/lint" "${LOG}"
+grep -qx "brew install --formula fd" "${LOG}"
 grep -qx "gsettings set org.gnome.desktop.wm.keybindings close \['<Super>c'\]" "${LOG}"
 grep -qx "gsettings set ${TILING} window-gap 20" "${LOG}"
 grep -qx "gsettings set ${TILING} animation-time 0.5" "${LOG}"
@@ -748,6 +748,21 @@ grep -qxF "gsettings set ${DOCK} folders {\"Writing\":[\"org.gnome.Nautilus.desk
 grep -q "${DOCK} stacks" "${LOG}" && false
 grep -qE "workspace-colors|cycle-width-steps" "${LOG}" && false
 grep -qE "uninstall|untap|reset|rm " "${LOG}" && false
+# A file adds no Homebrew tap, and installs only plain names from Homebrew's own taps: not one from a tap, not a
+# path, not a formula file, with --yes as without
+: >"${LOG}"
+jq '.brew.taps += ["evil/tap"] | .brew.formulae = ["fd", "evil.rb", "dir/x.rb", "someone/tools/lint"] | .brew.casks = ["x.json"]' \
+    "${FILE}" >"${T}/tap.json"
+out="$("${SETUP}" apply --yes "${T}/tap.json")"
+grep -qx "brew install --formula fd" "${LOG}"
+grep -qE "brew tap|--cask|evil|x\.rb|lint" "${LOG}" && false
+grep -qF "a Homebrew tap is not added from a file" <<<"${out}"
+[[ "$(grep -cF "is not a plain name from Homebrew's own taps" <<<"${out}")" == 4 ]]
+# A file that names less than the machine has says how much it leaves alone, unless it is a kit (ame apps kit add), which
+# names only what it adds: the line is about the rest of the machine, which a kit never speaks of
+echo '{"version": 1, "flatpaks": {"system": [{"app": "org.gnome.Calculator", "origin": "flathub"}]}}' >"${T}/small.json"
+grep -q "^Left as they are: " <<<"$("${SETUP}" apply --yes "${T}/small.json")"
+grep -q "^Left as they are" <<<"$(AMETHYSTORA_SETUP_KIT=1 "${SETUP}" apply --yes "${T}/small.json")" && false
 # --remove asks first, which takes a terminal: without one, nothing is taken away
 : >"${LOG}"
 "${SETUP}" apply --yes --remove "${T}/more.json" </dev/null >/dev/null 2>&1 && false
@@ -766,6 +781,8 @@ for bad in '{"version": 1, "token": "x"}' '{"version": 2}' \
     '{"version": 1, "flatpaks": {"system": [{"app": "--from=https://example.com/x.flatpakref", "origin": "flathub"}]}}' \
     '{"version": 1, "brew": {"taps": ["https://example.com/tap.git"]}}' \
     '{"version": 1, "brew": {"formulae": ["someone/tools/thing"]}}' \
+    '{"version": 1, "theme": "nord\n"}' \
+    '{"version": 1, "settings": {"dock": {"stacks": ["~/a\nb"]}}}' \
     '{"version": 1, "brew": {"taps": ["someone/other"], "casks": ["someone/tools/thing"]}}' \
     '{"version": 1, "containers": [{"name": "x", "template": "debian", "packages": ["-o APT::Update::Pre-Invoke::=x"]}]}' \
     '{"version": 1, "settings": {"tiling": {"enabled": false}}}' \

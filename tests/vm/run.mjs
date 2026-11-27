@@ -4,15 +4,18 @@
 // (/vm/runs/last): run.log, one log per stage and per suite, a screenshot after each suite, the guest's
 // journal, results.json, and summary.md, which it prints last.
 //
-//   node run.mjs [all | build | disk | test | plan] [--keep] [--image IMAGE] [--tag TAG] [--suites NN,NN...]
-//                [--parallel N [--reuse]] [--memory MB]
+//   node run.mjs [all | build | disk | test | plan | ready] [--keep] [--image IMAGE] [--tag TAG] [--suites NN,NN...]
+//                [--skip NN,NN...]
+//                [--parallel N [--reuse]] [--memory MB] [--json]
+//   node run.mjs report DIR [--expect NAME,...]
 //
 // all (the default) does the three in turn and stops at the first that fails; the others do one, from what
 // the last run left. --keep leaves the VMs running afterwards, for a closer look over MCP. The exit status is
 // 0 only when everything that ran passed. VMLAB_NAME (default test) names the run's image tag, disks and VMs,
 // so that two sessions' runs do not take each other's. --image builds amethystora-dx, or either with -nvidia-open or
 // -nvidia-lts, instead of amethystora; --tag builds that stream (beta, which can be on the next Fedora) instead of
-// latest; --suites runs only the suites with those numbers or names (11, 11-dock-screens).
+// latest; --suites runs only the suites with those numbers or names (11, 11-dock-screens), and --skip leaves those out
+// (the Lab workflow's run of every suite leaves out the long ones, which Lab (long suites) runs a runner each).
 //
 // --parallel N runs the suites in N VMs at once. VM NAME starts on the disk, runs the suites shards.json calls prep
 // (the boot, the first-run setup, the sign-in), waits for the first boot's Flatpaks and powers itself off: that is
@@ -23,6 +26,11 @@
 // installer disk; the screens suites are one unit, on NAME-screens, also from the ready state. plan prints the
 // lanes and runs nothing. --memory gives every VM but the screens one that much memory (default 4096). --reuse
 // starts from the ready state an earlier run made on the same disk, when there is one, instead of making it again.
+//
+// For the Lab workflow (.github/workflows/lab.yml), which runs each lane on a runner of its own: plan --json prints the
+// lanes for its matrix, planned as if the ready state were made before any of them starts; ready makes only the ready
+// state, which its build job hands to the lanes; and report DIR [--expect NAME,...] puts every results.json under DIR
+// (a folder per job) into one table, counting a suite of --expect that has none as not run.
 //
 // A suite is a bash script run as root in the guest, beside lib.sh: one "ok - ...", "not ok - ..." or
 // "skip - ..." line per check, and exit status 0 only when it passed. Exit status 100 asks for a reboot:
@@ -57,8 +65,10 @@ if (!/^amethystora(-dx)?(-nvidia-(open|lts))?$/.test(BUILD)) throw new Error(`ru
 const TAG = option('--tag') || 'latest';
 if (!/^(latest|beta|stable)$/.test(TAG)) throw new Error(`run.mjs: no stream ${TAG}`);
 const ONLY = option('--suites')?.split(',');
+const SKIP = option('--skip')?.split(',').filter(Boolean);
 // A suite by its number (every suite of it) or by its whole name, with or without .sh
-const only = (f) => !ONLY || ONLY.some((o) => o === f.slice(0, 2) || o === f || `${o}.sh` === f);
+const named = (list, f) => list.some((o) => o === f.slice(0, 2) || o === f || `${o}.sh` === f);
+const only = (f) => (!ONLY || named(ONLY, f)) && !(SKIP && named(SKIP, f));
 const BUILT = `localhost/${BUILD}:${TAG}`;
 // What `just build` tags, kept under the run's own name at once, which the disks are made from
 const IMAGE = `localhost/amethystora-run:${NAME}`;
@@ -75,6 +85,10 @@ const USB_DEVICES = {
   stick: { driver: 'usb-storage', serial: 'VMLAB-STICK-1', port: '2' },
   keyboard: { driver: 'usb-kbd', port: '3' },
   stick2: { driver: 'usb-storage', serial: 'VMLAB-STICK-2', port: '4' },
+  // An FTDI serial adapter (0403:6001, ttyUSB0 in the guest), its other end nowhere (78-lab-devices.sh)
+  // It is a full-speed device, which the controller takes on its first four ports only (5 to 8 are USB 3), so it has the
+  // second stick's port: no suite plugs both
+  serial: { driver: 'usb-serial', chardev: true, port: '4' },
 };
 // The lab's disk passphrase, and the PIN a suite enrols the TPM with, both handed to systemd-cryptsetup as
 // credentials so that nobody has to type them (next_boot can have one typed instead). The PIN goes under both of
@@ -101,6 +115,7 @@ const keep = process.argv.includes('--keep');
 const PARALLEL = option('--parallel') === undefined ? 0 : Number(option('--parallel'));
 if (!Number.isInteger(PARALLEL) || PARALLEL < 0 || PARALLEL > 12) throw new Error('run.mjs: --parallel is 1 to 12');
 if (stage === 'plan' && !PARALLEL) throw new Error('run.mjs: plan needs --parallel N');
+const JSON_PLAN = process.argv.includes('--json');
 const REUSE = process.argv.includes('--reuse');
 const MEMORY = option('--memory') === undefined ? undefined : Number(option('--memory'));
 if (MEMORY !== undefined && !(Number.isInteger(MEMORY) && MEMORY >= 2048)) throw new Error('run.mjs: --memory is MB, 2048 or more');
@@ -110,8 +125,8 @@ const machineOf = (machine) => (typeof machine === 'string' ? MACHINES[machine] 
 // How a suite's lines start in the log: with the VM's name when several run at once
 const lane = (m) => (m.lane ? `[${m.vm}] ` : '   ');
 
-// A plan writes nothing: no run folder, and /vm/runs/last left to the run it names
-const RUN = stage === 'plan' ? '' : `/vm/runs/${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}${NAME === 'test' ? '' : `-${NAME}`}`;
+// A plan and a report write nothing: no run folder, and /vm/runs/last left to the run it names
+const RUN = ['plan', 'report'].includes(stage) ? '' : `/vm/runs/${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}${NAME === 'test' ? '' : `-${NAME}`}`;
 if (RUN) {
   fs.mkdirSync(RUN, { recursive: true });
   const LAST = NAME === 'test' ? '/vm/runs/last' : `/vm/runs/last-${NAME}`;
@@ -310,9 +325,30 @@ async function typePassphrase(vm) {
   prompts.set(vm, asked());
 }
 
+// Until flatpak-preinstall has ended, an hour at most, said in the log when it had not. A start taken with the first
+// boot's Flatpaks half in installs the rest while GNOME starts, and the account's shell then registers so slowly that
+// GDM puts its greeter in front: the boot after suite 30's first phase came up with no session in 4 runs of 2026-11.
+// The Flatpaks are asked about in short calls: the guest's helper answers one caller at a time
+async function flatpaksIn(m, retries = false) {
+  // Installing; one waiting to try again (no network: a suite's own doing) installs nothing meanwhile, and only the
+  // ready state waits for it, so as not to be kept with apps missing
+  const running = retries ? /^(running|start|start-pre|start-post|auto-restart|auto-restart-queued)$/ : /^(running|start|start-pre|start-post)$/;
+  const now = await guest(m.vm, 'systemctl show -P SubState flatpak-preinstall.service', 20);
+  if (now && !running.test(now)) return;
+  const began = Date.now();
+  for (const until = Date.now() + 3600000; Date.now() < until; await sleep(15000)) {
+    // Its sub-state: it stays active (exited) once done. No answer is no answer, not the end
+    const state = await guest(m.vm, 'systemctl show -P SubState flatpak-preinstall.service', 20);
+    if (state && !running.test(state)) break;
+  }
+  say(`${lane(m)}flatpak-preinstall ${await guest(m.vm, 'systemctl show -P ActiveState,SubState flatpak-preinstall.service | paste -sd/', 20)} after ${minutes(began)}; ` +
+    `${await guest(m.vm, 'flatpak list --app --columns=application | wc -l', 30)} apps`);
+}
+
 async function reboot(machine) {
   const m = machineOf(machine);
   const { vm } = m;
+  await flatpaksIn(m);
   // A power cycle, when the phase asked for one
   let request = null;
   try {
@@ -331,6 +367,8 @@ async function reboot(machine) {
     // ...or to power it off: started again once QEMU has ended, as a person presses the power button
     await agent(vm, { op: 'exec', command: `rm -f ${NEXT_BOOT}` }, 10);
     say(`${lane(m)}the machine powers itself off`);
+    // USB devices the phase asked to have pulled out (usb_next) go now: the power off is what pulling one does (77-pull-key.sh)
+    await usb(vm);
     const off = new RegExp(`^${vm}: stopped`, 'm');
     for (const began = Date.now(); !off.test((await call('vm_list')).content[0].text); await sleep(5000)) {
       if (Date.now() - began > 900000) throw new Error('the VM did not power itself off within 15 minutes');
@@ -381,10 +419,18 @@ async function reboot(machine) {
   for (let tries = 0; await sessionExpected(vm) && !(await session(vm, 240)); tries++) {
     if (tries === 2) throw new Error('the test account got no session after three boots');
     say(`${lane(m)}no session after this boot: powering the VM off and on again`);
-    // What PID 1 and plymouthd wait on, which the power cycle loses: the evidence for the stall
-    fs.writeFileSync(`${RUN}/stalled-boot-${m.lane ? `${vm}-` : ''}${tries + 1}.txt`, await guest(vm, 'cat /proc/1/stack; ' +
+    // What PID 1 and plymouthd wait on, which the power cycle loses: the evidence for the stall. The journal is
+    // written to disk first (journald keeps it in memory for minutes), so that the next boot's `journalctl -b -1`
+    // still has the whole boot; and what GDM, logind and AccountsService said, which is where a session goes missing
+    fs.writeFileSync(`${RUN}/stalled-boot-${m.lane ? `${vm}-` : ''}${tries + 1}.txt`, await guest(vm, 'journalctl --sync; ' +
+      'cat /proc/1/stack; ' +
       'for p in $(pidof plymouthd); do echo "plymouthd $p $(grep ^State /proc/$p/status)"; cat /proc/$p/stack; done; ' +
-      'journalctl -b -o short-monotonic --no-pager _PID=1 | grep -v " audit" | tail -n 15', 60));
+      'journalctl -b -o short-monotonic --no-pager _PID=1 | grep -v " audit" | tail -n 15; echo "== sessions"; ' +
+      'loginctl list-sessions --no-legend; loginctl show-user tester 2>&1 | grep -E "^(State|Sessions|Display)="; ' +
+      'echo "== GDM, logind, AccountsService"; journalctl -b -o short-monotonic --no-pager -u gdm -u systemd-logind ' +
+      '-u accounts-daemon | grep -v " audit" | tail -n 40; echo "== the sessions and shells"; journalctl -b -o short-monotonic ' +
+      '--no-pager _COMM=gdm-session-wor _COMM=gnome-shell _COMM=gnome-session-s | tail -n 40; ' +
+      'echo "== failed and still starting"; systemctl list-units --no-legend --state=failed --state=activating', 60));
     await call('vm_stop', { name: vm, force: true });
     await start(machine, request ? { ...request, type_passphrase: false } : {});
     await call('vm_wait', { name: vm, timeout_s: 900 });
@@ -403,6 +449,7 @@ async function screenNext(vm) {
 
 // USB devices plugged out, then in, as a phase that ended with 101 asked (usb_next), before the next one
 let drives = 0;
+let chardevs = 0;
 async function usb(vm) {
   let request = null;
   try {
@@ -423,6 +470,12 @@ async function usb(vm) {
       const node = `vmlab-drive-${++drives}`;
       await qmp(vm, 'blockdev-add', { driver: 'null-co', 'node-name': node, size: 64 * 1024 * 1024, 'read-zeroes': true });
       Object.assign(args, { drive: node, serial: device.serial });
+    }
+    if (device.chardev) {
+      const id = `vmlab-chardev-${++chardevs}`;
+      // A ring buffer: QEMU attaches a usb-serial only once its other end is open, which a null one never is
+      await qmp(vm, 'chardev-add', { id, backend: { type: 'ringbuf', data: { size: 65536 } } });
+      args.chardev = id;
     }
     await qmp(vm, 'device_add', args);
   }
@@ -468,6 +521,14 @@ async function giveCaptionsModel(vm) {
   captionsGiven.add(vm);
 }
 
+// tests/vm/known-failures: a line "SUITE :: the start of a check's words", for a check that fails on every machine the lab runs
+// on (a pointer or a drawing that depends on the hardware) until a person has looked at it on one. Reported, never silent
+const KNOWN = fs.existsSync(`${HERE}/known-failures`)
+  ? fs.readFileSync(`${HERE}/known-failures`, 'utf8').split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.trim() && !l.startsWith('#'))
+    .map((l) => l.split(' :: ')).filter((p) => p.length === 2).map(([s, t]) => [s.trim(), t.trim()])
+  : [];
+const isKnown = (suiteName, line) => KNOWN.some(([s, t]) => suiteName === s && line.replace(/^not ok - /, '').startsWith(t));
+
 async function suite(machine, name) {
   const m = machineOf(machine);
   const { vm } = m;
@@ -478,7 +539,7 @@ async function suite(machine, name) {
   for (let phase = 1; ; phase++) {
     await install(vm);
     const env = `SUITE_PHASE=${phase} VMLAB_PASSPHRASE=${PASSPHRASE} VMLAB_TPM_PIN=${TPM_PIN} VMLAB_PROMPTS=${prompts.get(vm) ?? ''}` +
-      ` VMLAB_MENU_EDIT=${menuEdits.get(vm) ?? ''}`;
+      ` VMLAB_MENU_EDIT=${menuEdits.get(vm) ?? ''} VMLAB_RECORD_ONLY=${process.env.VMLAB_RECORD_ONLY ?? ''}`;
     prompts.delete(vm);
     menuEdits.delete(vm);
     const answer = await agent(vm, { op: 'exec', command: `${env} bash ${GUEST_DIR}/${name}`, timeout: 1800 }, 1800);
@@ -503,16 +564,20 @@ async function suite(machine, name) {
   }
   const lines = output.split('\n');
   const failures = [];
+  const known = [];
   lines.forEach((line, i) => {
     if (!line.startsWith('not ok')) return;
     // A failure with the indented lines that explain it
     const detail = [];
     for (let j = i + 1; j < lines.length && lines[j].startsWith('  '); j++) detail.push(lines[j]);
-    failures.push([line, ...detail].join('\n'));
+    // One that tests/vm/known-failures names is reported and does not fail the suite
+    (isKnown(name, line) ? known : failures).push([line, ...detail].join('\n'));
   });
   const result = {
     suite: name,
-    passed: rc === 0 && failures.length === 0,
+    // A suite ends with status 1 when a check failed: it passes when every check that failed is a known one
+    passed: failures.length === 0 && (rc === 0 || (rc === 1 && known.length > 0)),
+    known,
     exit: rc,
     ok: lines.filter((l) => l.startsWith('ok')).length,
     skipped: lines.filter((l) => l.startsWith('skip')).length,
@@ -546,7 +611,22 @@ async function onMachine(m, names, results, journal, ready = false) {
   }
   for (const name of names) {
     try {
-      results.push(await suite(m, name));
+      let result = await suite(m, name);
+      // A suite that failed is run once more on the same machine: on a runner a session now and then does not come up, a
+      // key press is late. It passes only if the second run passes, and the summary says it was the second (VMLAB_NO_RETRY=1 for none)
+      if (!result.passed && !process.env.VMLAB_NO_RETRY) {
+        say(`${lane(m)}${name}: failed, once more`);
+        const first = result;
+        // From a session that is up: a suite that failed may have left the shell stalled or the account signed out
+        try {
+          await agent(vm, { op: 'exec', timeout: 600, command: 'id -u tester >/dev/null 2>&1 || exit 0; systemctl restart gdm; for i in $(seq 100); do [ "$(loginctl show-user tester -p State --value 2>/dev/null)" = active ] && pgrep -u tester -x gnome-shell >/dev/null && break; sleep 5; done; sleep 30' }, 600);
+        } catch {
+          // The machine does not answer: the suite's own run says so
+        }
+        result = await suite(m, name);
+        result.retried = first.failures;
+      }
+      results.push(result);
     } catch (error) {
       results.push(couldNot(name, m, error.message));
       say(`${lane(m)}${name}: could not run: ${error.message}`);
@@ -585,10 +665,14 @@ const kindOf = (f) => suiteHead(f).match(/^# vmlab-vm: (installer|screens)$/m)?.
 const cost = (f) => SHARDS.minutes[f] ?? SHARDS.default_minutes;
 const inOrder = (names) => [...names].sort().filter((f) => !comesLast(f)).concat([...names].sort().filter(comesLast));
 
+// The suites the ready state is made with, in the order they run
+const prepSuites = () => fs.readdirSync(SUITES).filter((f) => SHARDS.prep.includes(f) && kindOf(f) === 'default').sort();
+
 // The lanes: the prep suites first, on VM NAME, then every other suite, as units (one suite, or every screens suite
 // together), longest first onto the lane that would end soonest. The installer's suites need no ready state, so
 // they are placed first and run while the prep VM gets it ready; nothing else starts before the prep has ended.
-function planLanes(n) {
+// With prepElsewhere (the Lab workflow) the ready state is made before every lane, so that no lane waits for it.
+function planLanes(n, prepElsewhere = false) {
   const all = fs.readdirSync(SUITES).filter((f) => /^\d\d-.+\.sh$/.test(f)).sort();
   const wanted = only;
   const units = all.filter((f) => wanted(f) && kindOf(f) !== 'screens' && !SHARDS.prep.includes(f))
@@ -596,8 +680,8 @@ function planLanes(n) {
   const screens = all.filter((f) => wanted(f) && kindOf(f) === 'screens');
   if (screens.length) units.push({ kind: 'screens', suites: screens, minutes: screens.reduce((t, f) => t + cost(f), 0) });
   const needsReady = units.some((u) => u.kind !== 'installer') || all.some((f) => wanted(f) && SHARDS.prep.includes(f));
-  const prep = needsReady ? all.filter((f) => SHARDS.prep.includes(f) && kindOf(f) === 'default') : [];
-  const prepMinutes = needsReady && !(REUSE && reusable()) ? SHARDS.prep_minutes : 0;
+  const prep = needsReady ? prepSuites() : [];
+  const prepMinutes = needsReady && !prepElsewhere && !(REUSE && reusable()) ? SHARDS.prep_minutes : 0;
   const lanes = Array.from({ length: n }, (_, i) => ({ lane: i + 1, minutes: i === 0 ? prepMinutes : 0, kinds: new Set(), units: [] }));
   const place = (list) => {
     for (const u of list.sort((a, b) => b.minutes - a.minutes || a.suites[0].localeCompare(b.suites[0]))) {
@@ -631,20 +715,23 @@ function printPlan(p) {
   }
 }
 
+// The Lab workflow's plan: whether its build job makes the ready state, the lanes that have suites (the matrix of its
+// lane jobs: which disks each needs, and its suites, which it runs with test --parallel 1 --reuse --suites), and every
+// suite it runs, for the report
+function planJson(p) {
+  const lanes = p.lanes.map((l) => ({ lane: l.lane, minutes: l.minutes, suites: [...l.installer, ...l.default, ...l.screens].join(','),
+    installer: l.installer.length > 0, ready: l.default.length + l.screens.length > 0 })).filter((l) => l.suites);
+  const suites = [...p.prep, ...lanes.flatMap((l) => l.suites.split(','))];
+  return { ready: p.prep.length > 0, installer: lanes.some((l) => l.installer), lanes, suites: suites.join(',') };
+}
+
 // The prep VM, its suites run, kept as the ready state: once the first boot's Flatpaks are in (taken half done,
 // every start installs them again, and the account's shell then starts so slowly that GDM locks the session), and
 // powered off from inside (the power button has GNOME lock the session, and a start from it came up locked). The
 // Flatpaks are asked about in short calls: the guest's helper answers one caller at a time.
 async function readyState(m) {
   say(`${lane(m)}waiting for the first boot's Flatpaks (flatpak-preinstall) before keeping the ready state`);
-  const began = Date.now();
-  for (const until = Date.now() + 3600000; Date.now() < until; await sleep(15000)) {
-    // Its sub-state: it stays active (exited) once done. No answer is no answer, not the end
-    const state = await guest(m.vm, 'systemctl show -P SubState flatpak-preinstall.service', 20);
-    if (state && !/^(running|start|start-pre|start-post|auto-restart|auto-restart-queued)$/.test(state)) break;
-  }
-  say(`${lane(m)}flatpak-preinstall ${await guest(m.vm, 'systemctl show -P ActiveState,SubState flatpak-preinstall.service | paste -sd/', 20)} after ${minutes(began)}; ` +
-    `${await guest(m.vm, 'flatpak list --app --columns=application | wc -l', 30)} apps`);
+  await flatpaksIn(m, true);
   await agent(m.vm, { op: 'exec', command: '(sleep 1; systemctl poweroff) >/dev/null 2>&1 &' }, 30).catch(() => {});
   const off = new RegExp(`^${m.vm}: stopped`, 'm');
   for (const until = Date.now() + 300000; !off.test((await call('vm_list')).content[0].text); await sleep(2000)) {
@@ -735,23 +822,70 @@ async function testParallel() {
   return passed;
 }
 
+// The ready state alone, as --parallel makes it, for VMs on other machines to start from (the Lab workflow's build
+// job): the prep suites on VM NAME, the first boot's Flatpaks in, powered off. Kept only when every prep suite passed.
+async function ready() {
+  const began = Date.now();
+  const results = [];
+  fs.rmSync(READY, { force: true });
+  const made = await onMachine({ ...MACHINES.default, lane: 0 }, prepSuites(), results, 'journal-prep', true);
+  fs.writeFileSync(`${RUN}/results.json`, `${JSON.stringify(results, null, 2)}\n`);
+  const passed = made && results.every((r) => r.passed);
+  if (!passed) fs.rmSync(READY, { force: true });
+  stages.push({ stage: 'ready', passed, time: minutes(began), results });
+  return passed;
+}
+
+// The suites' results as a table, with the VM each ran on when vm, then every failure with its reasons
+function table(results, vm) {
+  const head = ['Suite', 'Result', 'ok', 'not ok', 'skipped', 'Time', ...(vm ? ['VM'] : [])];
+  const lines = ['', `| ${head.join(' | ')} |`, `|${' --- |'.repeat(head.length)}`];
+  for (const r of results) {
+    lines.push(`| ${[r.suite, r.passed ? `passed${r.retried ? ' on the second run' : ''}${r.known?.length ? ` (${r.known.length} known)` : ''}` : (r.retried ? '**failed twice**' : '**failed**'), r.ok, r.failures.length, r.skipped, r.time, ...(vm ? [r.vm] : [])].join(' | ')} |`);
+  }
+  for (const r of results.filter((x) => x.retried?.length)) {
+    lines.push('', `## ${r.suite}: the first run's failures`, '', '```', ...r.retried, '```');
+  }
+  for (const r of results.filter((x) => x.known?.length)) {
+    lines.push('', `## ${r.suite}: known failures (tests/vm/known-failures)`, '', '```', ...r.known, '```');
+  }
+  for (const r of results.filter((x) => !x.passed)) {
+    lines.push('', `## ${r.suite} (exit ${r.exit})`, '', '```', ...(r.failures.length ? r.failures : ['(no "not ok" line: see its log)']), '```');
+  }
+  return lines;
+}
+
+// The Lab workflow's results, one folder per job under DIR, as one table: the job's folder names the VM. True only when
+// there are results and every suite passed, a suite of --expect without one counting as failed
+function report(dir) {
+  const results = [];
+  const walk = (folder, job) => {
+    for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+      const where = path.join(folder, entry.name);
+      if (entry.isDirectory()) walk(where, job ?? entry.name);
+      else if (entry.name === 'results.json') results.push(...JSON.parse(fs.readFileSync(where, 'utf8')).map((r) => ({ ...r, vm: `${job}: ${r.vm}` })));
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  for (const name of (option('--expect') || '').split(',').filter((s) => s && !results.some((r) => r.suite === s))) {
+    results.push(couldNot(name, { vm: '-' }, 'no result: its job did not finish'));
+  }
+  results.sort((a, b) => a.suite.localeCompare(b.suite));
+  const failed = results.filter((r) => !r.passed).length;
+  console.log([`# Lab: ${results.length - failed} of ${results.length} suites passed`, ...table(results, true)].join('\n'));
+  return results.length > 0 && failed === 0;
+}
+
 function summary() {
   const lines = [`# Test run ${path.basename(RUN)}`, '', `Commit: ${git('log', '-1', '--format=%h %s')}`, ''];
   for (const s of stages) {
     if (s.stage === 'prune' || s.stage === 'tag') continue;
     lines.push(`- ${s.stage}: ${s.passed ? 'passed' : '**FAILED**'} (${s.time})`);
   }
-  const tested = stages.find((s) => s.stage === 'test');
+  const tested = stages.find((s) => s.results);
   if (tested) {
     for (const l of tested.lanes || []) lines.push(`- lane ${l.lane}: ${l.time}, ${l.suites} suites`);
-    const vm = tested.lanes ? ['VM'] : [];
-    lines.push('', `| ${['Suite', 'Result', 'ok', 'not ok', 'skipped', 'Time', ...vm].join(' | ')} |`, `|${' --- |'.repeat(6 + vm.length)}`);
-    for (const r of tested.results) {
-      lines.push(`| ${[r.suite, r.passed ? 'passed' : '**failed**', r.ok, r.failures.length, r.skipped, r.time, ...(vm.length ? [r.vm] : [])].join(' | ')} |`);
-    }
-    for (const r of tested.results.filter((x) => !x.passed)) {
-      lines.push('', `## ${r.suite} (exit ${r.exit})`, '', '```', ...(r.failures.length ? r.failures : ['(no "not ok" line: see its log)']), '```');
-    }
+    lines.push(...table(tested.results, Boolean(tested.lanes)));
   }
   lines.push('', `Files: ${RUN}`);
   const text = `${lines.join('\n')}\n`;
@@ -760,9 +894,11 @@ function summary() {
 }
 
 if (stage === 'plan') {
-  printPlan(planLanes(PARALLEL));
+  if (JSON_PLAN) console.log(JSON.stringify(planJson(planLanes(PARALLEL, true))));
+  else printPlan(planLanes(PARALLEL));
   process.exit(0);
 }
+if (stage === 'report') process.exit(report(process.argv[3] || '.') ? 0 : 1);
 // The lab's own files from the commit under test, so that the MCP server is the one this run used
 for (const name of ['agent.py', 'lab.mjs', 'make-disk.sh', 'server.mjs']) {
   fs.copyFileSync(`${HERE}/${name}`, `/opt/amethystora-vm/${name}`);
@@ -772,5 +908,6 @@ let ok = true;
 if (stage === 'all' || stage === 'build') ok = await build();
 if (ok && (stage === 'all' || stage === 'disk')) ok = await disk();
 if (ok && (stage === 'all' || stage === 'test')) ok = await test();
+if (stage === 'ready') ok = await ready();
 summary();
 process.exit(ok ? 0 : 1);

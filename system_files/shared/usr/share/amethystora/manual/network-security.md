@@ -91,9 +91,9 @@ place, so choose one you trust.
   whether a network reaches the internet.
 - A network can claim a whole domain, such as `com`, with its search domains, and every name in it would then be asked
   of its own servers, in plain text. So while encrypted DNS is on, the search domains that a Wi-Fi or wired network
-  handed out (its DHCP domain name and search list, or a router advertisement) are taken off it within a few seconds of
-  connecting, except names only a network has (`.local`, `.lan`, `.home`, `.home.arpa`, `.internal`, `.intranet`,
-  `.private`, `.corp`, `.localdomain`). A VPN's or Tailscale's domains are never touched. To keep one a network hands
+  handed out (its DHCP domain name and search list, or a router advertisement) are taken off it as soon as systemd-resolved
+  has them, when a network connects and again when its lease changes, except names only a network has (`.local`, `.lan`,
+  `.home`, `.home.arpa`, `.internal`, `.intranet`, `.private`, `.corp`, `.localdomain`). A VPN's or Tailscale's domains are never touched. To keep one a network hands
   out, say it yourself in that connection's DNS search domains (in Settings, or `ipv4.dns-search` and
   `ipv6.dns-search`), written with a `~` in front to send only its names there (`~corp.example.com`), or plain to also
   complete short names. `resolvectl domain` shows what each network has now.

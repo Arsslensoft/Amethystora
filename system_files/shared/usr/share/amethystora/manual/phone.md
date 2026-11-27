@@ -32,6 +32,9 @@ paired yet. Pairing shows the same key on both screens; accept only if they matc
    **Compare them.** If they are the same, the phone in your hand is the one asking: accept on both sides.
 3. The request lapses after thirty seconds, with a count beside the key. Nothing here answers for you, and a phone
    you do not recognise has **Reject**.
+4. A phone whose app is too old to pair safely, or whose clock is more than two minutes off this computer's, is not
+   paired; a notification says which. Update the app, or set the clock, and ask again. A phone already paired keeps
+   working.
 
 ### Unpairing and looking again
 

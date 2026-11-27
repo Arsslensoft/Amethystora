@@ -97,7 +97,7 @@ theme *ARGS:
             [[ $# == 2 || $# == 3 ]] || { echo "usage: ame desktop theme import FILE [NAME]"; exit 64; }
             info="$("${helper}" read "$2")" || exit 3
             name="$(own_name "${3:-$(jq -r .name <<<"${info}")}")"
-            file="${2##*/}"
+            file="$(/usr/libexec/amethystora-security-text "${2##*/}")"
             kind="$(jq -r .format <<<"${info}")"
             read_lines="$(jq -r .read <<<"${info}")"
             left_lines="$(jq -r .left_out <<<"${info}")"
@@ -106,7 +106,7 @@ theme *ARGS:
             echo "$(eval_gettext "Colour lines read: \${read_lines}. Other lines left out: \${left_lines}.")"
             picture="$(jq -r '.picture // empty' <<<"${info}")"
             if [[ -n "${picture}" ]]; then
-                picture="${picture##*/}"
+                picture="$(/usr/libexec/amethystora-security-text "${picture##*/}")"
                 echo "$(eval_gettext "The picture beside it becomes its wallpaper: \${picture}")"
             fi
             checks "${info}"
@@ -1176,6 +1176,35 @@ get-through VALUE="":
             ;;
         *)
             echo "usage: ame desktop get-through on|off"
+            exit 64
+            ;;
+    esac
+
+# While you play: while a game is registered with GameMode (gamemoderun, Steam's launch option), banners wait, the power mode is
+# performance on mains and your timed backup and the containers' upgrade wait, six hours at most; all of it goes back when the game
+# ends (VALUE: on or off; without it, it flips). Off by default.
+[positional-arguments]
+while-playing VALUE="":
+    #!/usr/bin/bash
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source gettext.sh
+    schema=org.gnome.shell.extensions.amethystora-ui.power
+    value="${1:-}"
+    if [[ -z "${value}" ]]; then
+        if [[ "$(gsettings get "${schema}" while-playing)" == true ]]; then value=off; else value=on; fi
+    fi
+    case "${value}" in
+        on)
+            gsettings set "${schema}" while-playing true
+            echo "$(gettext "While a game is registered with GameMode, banners wait, the power mode is performance when you are plugged in, and your timed backup and the containers' upgrade wait, six hours at most. Calls, alarms and urgent banners still come through, and the system update is not held. All of it goes back when the game ends, or at Let them run in the pill.")"
+            ;;
+        off)
+            gsettings set "${schema}" while-playing false
+            echo "$(gettext "Nothing waits for a game: banners, the power mode and the backup go on as they do the rest of the time.")"
+            ;;
+        *)
+            echo "usage: ame desktop while-playing on|off"
             exit 64
             ;;
     esac
@@ -4055,7 +4084,7 @@ dock *ARGS:
 # reminders into Notes, Control's settings, the manual, open windows, the clipboard after clip:, the agent row, Glance
 # on a file, the words people already know, files by what is remembered of them, and, offered and off, Firefox's
 # bookmarks, Notes while it is unlocked, files by meaning and your photos by what is in them after `photo:` (WHAT: answers, times,
-# reminders, timers, settings, manual, windows, clipboard, agent, glance, old-words, remembered, plugins, bookmarks, notes, meaning, photos or put-away; STATE: on or off). Without STATE it says what WHAT is; without WHAT, all of them
+# reminders, timers, settings, manual, windows, clipboard, agent, glance, old-words, remembered, plugins, bookmarks, notes, meaning, photos, game or put-away; STATE: on or off). Without STATE it says what WHAT is; without WHAT, all of them
 [positional-arguments]
 search WHAT="" STATE="":
     #!/usr/bin/bash
@@ -4063,9 +4092,9 @@ search WHAT="" STATE="":
     # shellcheck source=/dev/null
     source gettext.sh
     schema=org.gnome.shell.extensions.amethystora-ui.search
-    parts=(answers times reminders timers put-away settings manual windows clipboard agent glance old-words remembered plugins bookmarks notes meaning photos)
+    parts=(answers times reminders timers put-away settings manual windows clipboard agent glance old-words remembered plugins bookmarks notes meaning photos game)
     usage() {
-        echo "usage: ame desktop search [answers|times|reminders|timers|put-away|settings|manual|windows|clipboard|agent|glance|old-words|remembered|plugins|bookmarks|notes|meaning|photos] [on|off]"
+        echo "usage: ame desktop search [answers|times|reminders|timers|put-away|settings|manual|windows|clipboard|agent|glance|old-words|remembered|plugins|bookmarks|notes|meaning|photos|game] [on|off]"
         exit 2
     }
     state_of() {
@@ -4098,6 +4127,7 @@ search WHAT="" STATE="":
         notes) title="$(gettext "Notes")" ;;
         meaning) title="$(gettext "Files by meaning")" ;;
         photos) title="$(gettext "Your photos, by what is in them")" ;;
+        game) title="$(gettext "Will it run?")" ;;
         *) usage ;;
     esac
     # Photos need a model that is downloaded once, and a vault to keep what is worked out in (R7-63)

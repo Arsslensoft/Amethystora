@@ -112,6 +112,37 @@ fn source_of(ip: IpAddr) -> IpAddr {
     }
 }
 
+/// Who a connection comes from, for the limit on unpaired devices: the hardware address the kernel holds for an IPv4 address
+/// (a host that answers for several addresses is one), else the address as `source_of` has it
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Hardware([u8; 6]),
+    Address(IpAddr),
+}
+
+/// The IPv4 addresses of the kernel's neighbour table (`/proc/net/arp`) with their hardware addresses, the unresolved ones left out
+pub fn parse_arp(text: &str) -> HashMap<std::net::Ipv4Addr, [u8; 6]> {
+    text.lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let ip = fields.first()?.parse().ok()?;
+            let parts: Vec<u8> = fields.get(3)?.split(':').map(|p| u8::from_str_radix(p, 16)).collect::<Result<_, _>>().ok()?;
+            let mac: [u8; 6] = parts.try_into().ok()?;
+            (mac != [0; 6]).then_some((ip, mac))
+        })
+        .collect()
+}
+
+/// Reads the neighbour table once; the function it returns says which source an address is
+fn sources() -> impl Fn(IpAddr) -> Source {
+    let table = parse_arp(&std::fs::read_to_string("/proc/net/arp").unwrap_or_default());
+    move |ip| match source_of(ip) {
+        IpAddr::V4(v4) => table.get(&v4).map_or(Source::Address(IpAddr::V4(v4)), |mac| Source::Hardware(*mac)),
+        other => Source::Address(other),
+    }
+}
+
 /// What the account's settings say
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
@@ -1018,9 +1049,10 @@ impl Service {
         // When the slots are full the oldest unpaired connection with no pairing waiting makes room, so that a phone that
         // sits connected and silent is kept as long as nobody needs its place; with none to close, this one is let go
         if !paired {
-            let source = source_of(opened.peer.0);
-            while self.unpaired_from(source, &id) >= limits::UNPAIRED_PER_SOURCE {
-                if !self.evict_unpaired(&id, Some(source)) {
+            let of = sources();
+            let source = of(opened.peer.0);
+            while self.unpaired_from(source, &id, &of) >= limits::UNPAIRED_PER_SOURCE {
+                if !self.evict_unpaired(&id, Some((source, &of))) {
                     self.log(&format!("{id}: too many unpaired devices from {}; let go", opened.peer.0));
                     opened.close();
                     return;
@@ -1114,14 +1146,15 @@ impl Service {
     }
 
     /// Devices that are not paired with a connection open from this source, other than `except`
-    fn unpaired_from(&self, source: IpAddr, except: &str) -> usize {
+    fn unpaired_from(&self, source: Source, except: &str, of: &dyn Fn(IpAddr) -> Source) -> usize {
         let devices = self.devices.borrow();
-        devices.values().filter(|d| d.id != except && !d.paired() && d.st.borrow().links.iter().any(|l| !l.is_closed() && source_of(l.peer.0) == source)).count()
+        devices.values().filter(|d| d.id != except && !d.paired() && d.st.borrow().links.iter().any(|l| !l.is_closed() && of(l.peer.0) == source)).count()
     }
 
     /// Closes the connections of the unpaired device whose newest one is the oldest, and that has no pairing going on
-    /// (from one source only, when `from` says so). False when there is none.
-    fn evict_unpaired(&self, except: &str, from: Option<IpAddr>) -> bool {
+    /// (from one source only, when `from` says so; otherwise only one whose newest connection is older than `UNPAIRED_GRACE`, so
+    /// that a phone the person has just brought is not the one that makes room for another source's). False when there is none.
+    fn evict_unpaired(&self, except: &str, from: Option<(Source, &dyn Fn(IpAddr) -> Source)>) -> bool {
         let victim = {
             let devices = self.devices.borrow();
             devices
@@ -1131,7 +1164,11 @@ impl Service {
                     let st = d.st.borrow();
                     let open: Vec<&Rc<Link>> = st.links.iter().filter(|l| !l.is_closed()).collect();
                     let newest = open.iter().map(|l| l.since).max()?;
-                    (st.machine.is_idle() && from.is_none_or(|s| open.iter().any(|l| source_of(l.peer.0) == s))).then(|| (newest, d.clone()))
+                    let wanted = match from {
+                        Some((s, of)) => open.iter().any(|l| of(l.peer.0) == s),
+                        None => newest.elapsed() >= limits::UNPAIRED_GRACE,
+                    };
+                    (st.machine.is_idle() && wanted).then(|| (newest, d.clone()))
                 })
                 .min_by_key(|(newest, _)| *newest)
                 .map(|(_, d)| d)
@@ -1317,7 +1354,15 @@ impl Service {
             if outs.is_err() {
                 st.pairing_link = None;
             }
-            outs.map_err(|r| ApiError::unavailable(&format!("{r:?}")))?
+            match outs {
+                Ok(outs) => outs,
+                Err(r) => {
+                    if r == Refusal::OlderProtocol {
+                        self.older_protocol_notice(&dev);
+                    }
+                    return Err(ApiError::unavailable(&format!("{r:?}")));
+                }
+            }
         };
         self.run_outs(&dev, Some(&link), outs);
         Ok(())
@@ -1454,14 +1499,26 @@ impl Service {
                     self.raise(Notice {
                         key: format!("info:{}", dev.id),
                         summary: tr("Pairing failed"),
-                        body: tr("The clocks of this computer and the phone differ by more than half an hour. Set both to the right time and try again."),
+                        body: tr("The clocks of this computer and the phone differ by more than two minutes. Set both to the right time and try again."),
                         icon: Some("dialog-warning-symbolic".into()),
                         urgent: true,
                         ..Notice::default()
                     });
                 }
+                Out::OlderProtocol => self.older_protocol_notice(dev),
             }
         }
+    }
+
+    fn older_protocol_notice(&self, dev: &Rc<Device>) {
+        self.raise(Notice {
+            key: format!("info:{}", dev.id),
+            summary: tr("Pairing failed"),
+            body: tr("The app on the phone is too old to pair safely. Update it and try again."),
+            icon: Some("dialog-warning-symbolic".into()),
+            urgent: true,
+            ..Notice::default()
+        });
     }
 
     /// A paired device talks over connections that present its pin and no others: any other connection under its id, made
@@ -1559,18 +1616,13 @@ impl Service {
     fn pairing_prompt(&self, dev: &Rc<Device>, key: &str, outgoing: bool, deadline: i64) {
         let name = dev.name();
         let shown = format!("{} {}", &key[..4], &key[4..]);
-        let older = dev.st.borrow().protocol < 8;
         let computer = identity::is_computer(&dev.st.borrow().kind);
-        let mut body = match (outgoing, computer) {
+        let body = match (outgoing, computer) {
             (true, false) => trf("Key {key}. Compare it with the key on the phone, and cancel if they differ.", &[("key", &shown)]),
             (false, false) => trf("Key {key}. Compare it with the key on the phone, and accept only if they are the same.", &[("key", &shown)]),
             (true, true) => trf("Key {key}. Compare it with the key on the other computer, and cancel if they differ.", &[("key", &shown)]),
             (false, true) => trf("Key {key}. Compare it with the key on the other computer, and accept only if they are the same.", &[("key", &shown)]),
         };
-        if older {
-            body.push('\n');
-            body.push_str(&tr("This phone uses an older version of the protocol, which protects the pairing less well."));
-        }
         let actions = if outgoing {
             vec![("cancel".to_string(), tr("Cancel"))]
         } else {

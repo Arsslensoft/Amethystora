@@ -269,7 +269,8 @@ impl Http for NetHttp {
         let answer = self.exchange(&json!({"v": 1, "op": "request", "method": request.method, "url": request.url, "headers": headers, "body": &*body}))?;
         let status = answer.get("status").and_then(Value::as_u64).and_then(|status| u16::try_from(status).ok()).ok_or(NetFailure::Unreachable)?;
         let body = base64::engine::general_purpose::STANDARD.decode(answer.get("body").and_then(Value::as_str).unwrap_or("")).map_err(|_| NetFailure::Unreachable)?;
-        Ok(Response { status, body: Zeroizing::new(body) })
+        let headers = answer.get("headers").and_then(Value::as_array).into_iter().flatten().filter_map(|pair| Some((pair.get(0)?.as_str()?.to_ascii_lowercase(), pair.get(1)?.as_str()?.to_string()))).take(16).collect();
+        Ok(Response { status, body: Zeroizing::new(body), headers })
     }
 }
 
@@ -283,6 +284,11 @@ fn probe(path: &Path, origin: &str, cancel: Arc<Cancel>) -> Result<Value, NetFai
 /// The master key. PBKDF2 is made here; Argon2, which takes up to a gigabyte, is made by a short-lived child of this very program,
 /// so that the service that holds every account's keys never grows by it, and what it took goes back to the system with the child.
 /// The password goes to the child on its standard input, never as an argument or in the environment.
+/// Bitwarden's master key for a Compatible account's one-time enrolment on the Kemlock API: the same child as a Bitwarden login uses
+pub(crate) fn derive_for_kemlock(exe: &Path, password: &[u8], email: &str, kdf: &Kdf) -> Result<Zeroizing<[u8; 32]>, KdfProblem> {
+    derive_in(exe, password, email, kdf)
+}
+
 fn derive_in(exe: &Path, password: &[u8], email: &str, kdf: &Kdf) -> Result<Zeroizing<[u8; 32]>, KdfProblem> {
     if kdf.kind != 1 {
         return crypto::master_key(password, email, kdf);
@@ -312,6 +318,9 @@ pub fn kdf_child() -> ExitCode {
         return ExitCode::FAILURE;
     }
     let Ok(request) = serde_json::from_slice::<Value>(&text) else { return ExitCode::FAILURE };
+    if request.get("kemlock") == Some(&json!(true)) {
+        return crate::sync_kemlock::kdf_child(&request);
+    }
     let password = request.get("password").and_then(Value::as_str).and_then(|text| base64::engine::general_purpose::STANDARD.decode(text).ok()).map(Zeroizing::new);
     let (Some(password), Some(email), Some(kdf)) = (password, request.get("email").and_then(Value::as_str), request.get("kdf").and_then(|kdf| serde_json::from_value::<Kdf>(kdf.clone()).ok())) else { return ExitCode::FAILURE };
     match crypto::master_key(&password, email, &kdf) {
@@ -358,6 +367,8 @@ struct User {
     /// A problem that waits for a person: no run starts by itself until one is made
     stopped: Option<Value>,
     approved: Option<Approved>,
+    /// A Kemlock login that sent its email code and keeps what it needs until the code is typed
+    kem_pending: Option<(String, String, Box<amethystora_vault_core::kemlock::sync::signin::Pending>)>,
 }
 
 /// What follows a run the service started itself, on the loop
@@ -375,6 +386,8 @@ pub struct Hub {
     pub debounce: Duration,
     /// The program that makes Argon2 keys: this service's own binary
     pub kdf_child: PathBuf,
+    /// What a Kemlock run's thread hands the loop to keep (a new refresh token) before it uses it
+    pub persists: crate::sync_kemlock::Persists,
     /// How long a run may take, from its first request
     pub run_limit: Duration,
     users: HashMap<u32, User>,
@@ -395,6 +408,7 @@ impl Default for Hub {
             interval: INTERVAL,
             debounce: DEBOUNCE,
             kdf_child: PathBuf::from("/proc/self/exe"),
+            persists: Default::default(),
             run_limit: RUN_LIMIT,
             users: HashMap::new(),
             busy: HashMap::new(),
@@ -531,12 +545,17 @@ pub fn tick(service: &mut Service, now: Instant) {
 
 // --- The connection and the vault's items -----------------------------------------------------------------------------------
 
-fn load_connection(store: &mut Store) -> Option<Connection> {
+pub(crate) fn load_connection(store: &mut Store) -> Option<Connection> {
     let value = store.get(KIND_CONNECTION, CONNECTION_ID).ok()?;
-    serde_json::from_value(value).ok()
+    let mut connection: Connection = serde_json::from_value(value).ok()?;
+    // Sealed sync is gone: what an earlier version stored as `sealed` is `on`, and the next save says so
+    for choice in connection.kinds.values_mut().chain(connection.choices.values_mut()).filter(|choice| *choice == "sealed") {
+        *choice = "on".to_string();
+    }
+    Some(connection)
 }
 
-fn save_connection(store: &mut Store, connection: &Connection) -> Result<(), Trouble> {
+pub(crate) fn save_connection(store: &mut Store, connection: &Connection) -> Result<(), Trouble> {
     let value = serde_json::to_value(connection).map_err(|_| Trouble::Disk)?;
     store.put(KIND_CONNECTION, CONNECTION_ID, "account", &Value::Null, Approval::Never, &value).map(|_| ())
 }
@@ -585,7 +604,7 @@ fn gather(store: &mut Store, connection: &Connection) -> Gathered {
 }
 
 /// The links of one shard: none if there is no such item, and an error if there is one that does not read
-fn read_shard(store: &mut Store, shard: char) -> Result<Vec<Link>, ()> {
+pub(crate) fn read_shard(store: &mut Store, shard: char) -> Result<Vec<Link>, ()> {
     let id = shard.to_string();
     if store.entry(KIND_LINK, &id).is_none() {
         return Ok(Vec::new());
@@ -640,11 +659,26 @@ fn prepare_run(service: &mut Service, uid: u32, manual: bool, accept: bool) -> R
     let closes = service.closes_so_far(uid);
     let full = service.sync.users.get(&uid).is_some_and(|user| user.full) || manual;
     let access = service.sync.users.get_mut(&uid).and_then(|user| user.access.take());
+    let kept = service.sync.persists.kept_for(uid);
     let Some(store) = service.first_open(uid) else { return Err(Refusal::Closed) };
-    let Some(connection) = load_connection(store) else { return Err(Refusal::Refused) };
+    let Some(mut connection) = load_connection(store) else { return Err(Refusal::Refused) };
+    // A refresh token the connection could not take when it was given (the vault closed on the run): written now that the vault is open, over the
+    // spent one it holds
+    let mut written = false;
+    let kept = match (kept, connection.kemlock.as_ref()) {
+        (Some((device, refresh)), Some(state)) if state.device_id == device && connection.api_key.is_none() => Some(refresh),
+        _ => None,
+    };
+    if let Some(refresh) = kept {
+        connection.refresh = Some(refresh.to_string());
+        written = save_connection(store, &connection).is_ok();
+    }
     let Gathered { links, locals, unreadable, links_unreadable } = gather(store, &connection);
     let sealing = Some((store.key().copy(), store.id().to_string()));
     let writer = store.batch_writer();
+    if written {
+        service.sync.persists.forget(uid);
+    }
     let Some(busy) = service.sync.take_busy(uid) else {
         // Put the token back: this run did not start
         if let Some(user) = service.sync.users.get_mut(&uid) {
@@ -658,6 +692,7 @@ fn prepare_run(service: &mut Service, uid: u32, manual: bool, accept: bool) -> R
     let cancel = service.sync.start_running(uid);
     let limit = service.sync.run_limit;
     let held = busy.clone();
+    let persist = connection.kemlock.as_ref().map(|state| service.sync.persists.persister(uid, closes, state.device_id.clone()));
     let job = move || -> Done {
         let _held = held;
         let now_ms = merge::now_ms();
@@ -670,8 +705,13 @@ fn prepare_run(service: &mut Service, uid: u32, manual: bool, accept: bool) -> R
             Ok(http) => http,
             Err(failure) => return Box::new(Ran::Net(failure)),
         };
-        let input = Input { connection, access, links, locals, sealing, accept, full, now_ms, local_unreadable: unreadable, links_unreadable, retry_files: manual };
-        let outcome = merge::run(&mut http, &worker, input);
+        let outcome = if let Some(persist) = persist {
+            let input = amethystora_vault_core::kemlock::sync::engine::Input { connection, access, links, locals, accept, full, now_ms, local_unreadable: unreadable, links_unreadable };
+            amethystora_vault_core::kemlock::sync::engine::run(&mut http, &worker, input, &*persist)
+        } else {
+            let input = Input { connection, access, links, locals, sealing, accept, full, now_ms, local_unreadable: unreadable, links_unreadable, retry_files: manual };
+            merge::run(&mut http, &worker, input)
+        };
         let files = write_files(&writer, &outcome.groups);
         Box::new(Ran::Done(Box::new(Finished { outcome, files })))
     };
@@ -693,6 +733,8 @@ struct Finish {
     files_read: Option<bool>,
     /// What the run left on the server to be cleaned up, as it stands
     pending: Option<Vec<Leftover>>,
+    /// What a run on Kemlock's API keeps in its connection
+    kemlock: Option<amethystora_vault_core::kemlock::sync::state::News>,
 }
 
 /// A run's groups waiting for the loop: put in place a slice at a time, each only if the items it was decided from are still as
@@ -744,7 +786,7 @@ fn finish_run(service: &mut Service, uid: u32, closes: u64, done: Done, busy: Ar
     if service.first_open(uid).is_none_or(|store| !is_connected(store)) {
         return refused("not-connected");
     }
-    let mut finish = Finish { problem: None, report: json!({}), refresh: None, revision: None, access: None, churn: 0, accepted: false, purge: Vec::new(), no_files: None, files_read: None, pending: None };
+    let mut finish = Finish { problem: None, report: json!({}), refresh: None, revision: None, access: None, churn: 0, accepted: false, purge: Vec::new(), no_files: None, files_read: None, pending: None, kemlock: None };
     let mut groups = VecDeque::new();
     match *ran {
         Ran::Waiting => {
@@ -772,6 +814,7 @@ fn finish_run(service: &mut Service, uid: u32, closes: u64, done: Done, busy: Ar
             finish.no_files = Some(outcome.no_files.take());
             finish.files_read = Some(outcome.files_read);
             finish.pending = Some(std::mem::take(&mut outcome.pending));
+            finish.kemlock = outcome.kemlock.take();
             // By shard, so that a slice touches few of the sixteen items the links are in; the order within a cipher is kept
             let mut together: Vec<(Group, Vec<Option<BatchItem>>)> = outcome.groups.drain(..).zip(files).collect();
             together.sort_by_key(|(group, _)| merge::shard_of(&group.cipher));
@@ -861,6 +904,12 @@ fn put_in_place(service: &mut Service, applying: &mut Applying) -> bool {
     }
     if !items.is_empty() && store.commit_batch(items).is_err() {
         applying.full = true;
+        // A link says its items are here: the slice's links stay as they were, so that no cipher is taken for gone from the vault
+        // whose items did not land, and its groups are counted as skipped
+        let failed = linked.len();
+        applying.applied = applying.applied.saturating_sub(failed);
+        applying.skipped_groups += failed;
+        applying.skipped.extend(linked.drain(..).map(|(cipher, _)| cipher));
     }
     // The links that changed, written with the items they go with: sixteen items at most, whatever the number of ciphers
     let changed: BTreeSet<char> = linked.iter().map(|(cipher, _)| merge::shard_of(cipher)).collect();
@@ -900,7 +949,8 @@ fn conclude(service: &mut Service, applying: &mut Applying) -> Value {
     let Some(finish) = applying.finish.take() else { return json!({"ok": false}) };
     let interval = service.sync.interval;
     let now = Instant::now();
-    let Finish { problem, mut report, refresh, revision, access, churn, accepted, purge, no_files, files_read, pending } = finish;
+    let Finish { problem, mut report, refresh, revision, access, churn, accepted, purge, no_files, files_read, pending, kemlock } = finish;
+    let skipped_any = applying.skipped_groups > 0 || applying.full;
     report["applied"] = json!(applying.applied);
     report["skipped"] = json!(applying.skipped_groups);
     if applying.full {
@@ -935,6 +985,13 @@ fn conclude(service: &mut Service, applying: &mut Applying) -> Value {
             connection.refresh = Some(refresh.to_string());
         }
         connection.record(churn, accepted, merge::now_ms());
+        if let (Some(mut news), Some(state)) = (kemlock, connection.kemlock.as_mut()) {
+            // A group that was not put in place leaves its item's news to a later look: the cursor stays where it was
+            if skipped_any {
+                news.cursor = None;
+            }
+            state.apply(news);
+        }
         if let Some(no_files) = no_files {
             connection.no_files = no_files;
         }
@@ -1053,6 +1110,8 @@ struct Attempt {
     ca: Option<String>,
     pin: Option<String>,
     reconnect: bool,
+    /// `kemlock` or `bitwarden`: which API, when the person chose; none lets the server's own answer decide
+    backend: Option<&'static str>,
 }
 
 fn attempt(body: &Value) -> Result<Attempt, Value> {
@@ -1071,7 +1130,7 @@ fn attempt(body: &Value) -> Result<Attempt, Value> {
     let two_factor = match body.get("two_factor") {
         None | Some(Value::Null) => None,
         Some(factor) => {
-            let provider = factor.get("provider").and_then(Value::as_u64).and_then(|n| u8::try_from(n).ok()).filter(|n| matches!(n, 0 | 1 | 3)).ok_or_else(bad)?;
+            let provider = factor.get("provider").and_then(Value::as_u64).and_then(|n| u8::try_from(n).ok()).filter(|n| matches!(n, 0 | 1 | 3 | 8)).ok_or_else(bad)?;
             Some((provider, Zeroizing::new(text(factor, "code", 64).ok_or_else(bad)?.to_string()), factor.get("remember") == Some(&json!(true))))
         }
     };
@@ -1103,6 +1162,12 @@ fn attempt(body: &Value) -> Result<Attempt, Value> {
         ca,
         pin,
         reconnect: body.get("reconnect") == Some(&json!(true)),
+        backend: match body.get("backend").and_then(Value::as_str) {
+            None => None,
+            Some("kemlock") => Some("kemlock"),
+            Some("bitwarden") => Some("bitwarden"),
+            Some(_) => return Err(bad()),
+        },
     })
 }
 
@@ -1116,6 +1181,10 @@ enum Step {
     /// The email code was asked for, or a new device's code asked for again
     Sent,
     Connected(Box<(Connection, Access)>),
+    /// Kemlock's own API answered: what its sign-in made
+    Kemlock(Box<amethystora_vault_core::kemlock::sync::signin::Connected>),
+    /// A Kemlock login that sent the email's code
+    Email(Box<amethystora_vault_core::kemlock::sync::signin::Pending>),
     Problem(Problem),
 }
 
@@ -1171,6 +1240,20 @@ fn start_connect(service: &mut Service, peer: &Rc<Peer>, attempt: Attempt) -> Ne
         let (ca, pin) = (attempt.ca.clone().or_else(|| old.as_ref().and_then(|old| old.ca.clone())), attempt.pin.clone().or_else(|| old.as_ref().and_then(|old| old.pin.clone())));
         let (keep_ca, keep_pin) = (ca.clone(), pin.clone());
         let server = attempt.server.clone();
+        // What a Kemlock sign-in starts from: an earlier one's pin and device, or the Bitwarden connection's identifier
+        let kem_old = old.as_ref().and_then(|old| old.kemlock.clone());
+        let kem_pinned = kem_old.as_ref().map(|state| state.params());
+        let kem_device = kem_old.as_ref().map(|state| state.device_id.clone());
+        let kem_opaque = kem_old.as_ref().is_some_and(|state| state.opaque_seen);
+        let kem_bitwarden = old.as_ref().and_then(|old| if old.kemlock.is_some() { old.kemlock.as_ref().and_then(|state| state.bitwarden_device.clone()) } else { Some(old.device.clone()) });
+        let kem_pending = match &attempt.two_factor {
+            Some((1, _, _)) => service.sync.users.get_mut(&uid).and_then(|user| user.kem_pending.take()).filter(|(address, email, _)| *address == attempt.server.address && *email == attempt.email).map(|(_, _, pending)| pending),
+            _ => None,
+        };
+        let (kem_email, kem_address) = (attempt.email.clone(), attempt.server.address.clone());
+        let backend = attempt.backend;
+        // Which API the connection being replaced was on, if there is one: a connection stays on its own unless the person chooses the other
+        let was_kemlock = old.as_ref().map(|old| old.kemlock.is_some());
         let job = move || -> Step {
             let _busy = busy;
             let mut http = match NetHttp::open(&net, &server, keep_ca.as_deref(), keep_pin.as_deref(), cancel, Instant::now() + limit) {
@@ -1178,6 +1261,26 @@ fn start_connect(service: &mut Service, peer: &Rc<Peer>, attempt: Attempt) -> Ne
                 Err(failure) => return Step::Problem(Problem::Net(failure)),
             };
             let Attempt { server, email, password, api_key, confirmed, two_factor, new_device, email_code, resend_device, .. } = attempt;
+            // A new connection goes by the server's own word: a Kemlock Server is signed in to on its own, a Vaultwarden or Bitwarden as ever. A
+            // connection that exists stays on its API: a Kemlock one never falls back to Bitwarden's login because a question failed (which would
+            // send the master password's Bitwarden hash, the one thing its no-downgrade record is there to stop), and a Bitwarden one moves to
+            // Kemlock's own items only when the person chose `kemlock`.
+            let kemlock = match (backend, was_kemlock) {
+                (Some("bitwarden"), _) => false,
+                (Some(_), _) | (None, Some(true)) => true,
+                (None, Some(false)) => false,
+                (None, None) => api_key.is_none() && crate::sync_kemlock::discover(&mut http, &server).is_some(),
+            };
+            if kemlock {
+                let Ok(text) = std::str::from_utf8(&password) else { return Step::Problem(Problem::BadResponse) };
+                let second = two_factor.as_ref().and_then(|(provider, code, _)| Some((amethystora_vault_core::kemlock::sync::signin::method_of(*provider)?, code.as_str())));
+                let attempt = crate::sync_kemlock::KemAttempt { server: &server, email: &email, password: text, confirmed, second, send_email: email_code, pinned: kem_pinned, device_id: kem_device.as_deref(), bitwarden_device: kem_bitwarden.as_deref(), opaque_seen: kem_opaque, pending: kem_pending };
+                return match crate::sync_kemlock::connect(&mut http, attempt, &exe) {
+                    crate::sync_kemlock::KemStep::Connected(connected) => Step::Kemlock(connected),
+                    crate::sync_kemlock::KemStep::Email(pending) => Step::Email(pending),
+                    crate::sync_kemlock::KemStep::Problem(problem) => Step::Problem(problem),
+                };
+            }
             let derive = |password: &[u8], email: &str, kdf: &Kdf| derive_in(&exe, password, email, kdf);
             let pending = match merge::prepare(&mut http, &derive, server.clone(), &email, &password, confirmed, pinned.as_ref(), api_key, device) {
                 Ok(pending) => pending,
@@ -1209,6 +1312,11 @@ fn start_connect(service: &mut Service, peer: &Rc<Peer>, attempt: Attempt) -> Ne
             }
             match step {
                 Step::Sent => Next::ok(),
+                Step::Email(pending) => {
+                    service.sync.users.entry(uid).or_default().kem_pending = Some((kem_address, kem_email, pending));
+                    Next::ok()
+                }
+                Step::Kemlock(connected) => kemlock_connected(service, uid, *connected, &kem_address, &kem_email, ca, pin),
                 Step::Problem(problem) => Next::Answer(problem_answer(&problem)),
                 Step::Connected(connected) => {
                     let (mut connection, access) = *connected;
@@ -1218,6 +1326,12 @@ fn start_connect(service: &mut Service, peer: &Rc<Peer>, attempt: Attempt) -> Ne
                             return Next::Answer(refused("other-account"));
                         }
                         connection.choices = old.choices.clone();
+                        // What was linked on Kemlock's API is nothing on this one: a link to an id this server has no cipher for reads as gone
+                        if old.kemlock.is_some() {
+                            for shard in merge::SHARDS.chars() {
+                                let _ = store.remove(KIND_LINK, &shard.to_string());
+                            }
+                        }
                     }
                     connection.ca = ca;
                     connection.pin = pin;
@@ -1232,11 +1346,56 @@ fn start_connect(service: &mut Service, peer: &Rc<Peer>, attempt: Attempt) -> Ne
                     user.full = true;
                     user.manual = true;
                     user.due = Some(Instant::now());
-                    Next::Answer(json!({"ok": true, "connected": true, "address": address, "email": email}))
+                    Next::Answer(json!({"ok": true, "connected": true, "backend": "bitwarden", "address": address, "email": email}))
                 }
             }
         }))
     })())
+}
+
+/// A Kemlock sign-in made: the connection, over a Bitwarden connection of the same account if there was one (its items are moved by
+/// the first run), saved, and the first run asked for
+fn kemlock_connected(service: &mut Service, uid: u32, connected: amethystora_vault_core::kemlock::sync::signin::Connected, address: &str, email: &str, ca: Option<String>, pin: Option<String>) -> Next {
+    let Some(store) = service.first_open(uid) else { return Next::refuse(Refusal::Closed) };
+    let enrolled = connected.enrolled;
+    let Ok(server) = Server::from_address(address) else { return Next::Answer(refused("not-an-address")) };
+    let old = load_connection(store);
+    let now_ms = merge::now_ms();
+    let device = old.as_ref().map_or_else(merge::new_device_id, |old| old.device.clone());
+    let (mut connection, access) = crate::sync_kemlock::connection_from(connected, &server, email, device, now_ms);
+    let mut moving = false;
+    if let Some(old) = &old {
+        if old.user_id != connection.user_id {
+            return Next::Answer(refused("other-account"));
+        }
+        let mut links = Vec::new();
+        for shard in merge::SHARDS.chars() {
+            if let Ok(mut found) = read_shard(store, shard) {
+                links.append(&mut found);
+            }
+        }
+        crate::sync_kemlock::carry_over(&mut connection, old, &links, now_ms);
+        // Bitwarden's links are of no use here: the first run pairs the vault's items with Kemlock's own
+        if old.kemlock.is_none() {
+            moving = true;
+            for shard in merge::SHARDS.chars() {
+                let _ = store.remove(KIND_LINK, &shard.to_string());
+            }
+        }
+    }
+    connection.ca = ca;
+    connection.pin = pin;
+    if let Err(trouble) = save_connection(store, &connection) {
+        return Next::trouble(trouble);
+    }
+    let user = service.sync.users.entry(uid).or_default();
+    user.access = Some(access);
+    user.stopped = None;
+    user.approved = None;
+    user.full = true;
+    user.manual = true;
+    user.due = Some(Instant::now());
+    Next::Answer(json!({"ok": true, "connected": true, "backend": "kemlock", "address": connection.address, "email": connection.email, "enrolled": enrolled, "moved": moving}))
 }
 
 fn status_next(service: &mut Service, peer: &Rc<Peer>, _body: &Value) -> Next {
@@ -1255,6 +1414,8 @@ fn status_next(service: &mut Service, peer: &Rc<Peer>, _body: &Value) -> Next {
         Ok(Next::Answer(json!({
             "ok": true,
             "connected": true,
+            "backend": if connection.kemlock.is_some() { "kemlock" } else { "bitwarden" },
+            "moved": connection.kemlock.as_ref().and_then(|state| state.moved.as_ref()).map(|record| json!({"started_ms": record.started_ms, "finished_ms": record.finished_ms})),
             "address": connection.address,
             "email": connection.email,
             "linked": linked,
@@ -1306,30 +1467,57 @@ fn off_next(service: &mut Service, peer: &Rc<Peer>, _body: &Value) -> Next {
         Ok(Next::approve(Action::Use, say::SYNC_OFF, "", move |service, peer| {
             let uid = peer.uid;
             service.sync.stop_running(uid);
-            let Some(store) = service.first_open(uid) else { return Next::refuse(Refusal::Closed) };
-            for shard in merge::SHARDS.chars() {
-                let _ = store.remove(KIND_LINK, &shard.to_string());
+            // A Kemlock connection signs its device out on the server first, best effort: whatever the server answers, it ends
+            if let Some(connection) = service.first_open(uid).and_then(load_connection).filter(|connection| connection.kemlock.is_some()) {
+                let net = service.sync.net.clone();
+                let job = move || {
+                    if let Ok(mut http) = NetHttp::open(&net, &connection.server(), connection.ca.as_deref(), connection.pin.as_deref(), Cancel::new(), Instant::now() + Duration::from_secs(60)) {
+                        crate::sync_kemlock::sign_out(&mut http, &connection);
+                    }
+                };
+                return Next::slow(job, move |service, peer, ()| end_connection(service, peer.uid));
             }
-            match store.remove(KIND_CONNECTION, CONNECTION_ID) {
-                Ok(()) | Err(Trouble::NotFound) => {}
-                Err(trouble) => return Next::trouble(trouble),
-            }
-            service.sync.users.remove(&uid);
-            Next::ok()
+            end_connection(service, uid)
         }))
     })())
 }
 
-/// What an item does in sync: `on` (its kind's default for the kinds that sync), `off`, or `sealed` (a secure note only this
-/// vault opens). Sending an item is a person's approved choice, and so is taking it off the server: the second moves its copy
-/// there to the trash.
+/// The connection and its links go, and nothing on either side
+fn end_connection(service: &mut Service, uid: u32) -> Next {
+    let Some(store) = service.first_open(uid) else { return Next::refuse(Refusal::Closed) };
+    for shard in merge::SHARDS.chars() {
+        let _ = store.remove(KIND_LINK, &shard.to_string());
+    }
+    match store.remove(KIND_CONNECTION, CONNECTION_ID) {
+        Ok(()) | Err(Trouble::NotFound) => {}
+        Err(trouble) => return Next::trouble(trouble),
+    }
+    service.sync.users.remove(&uid);
+    Next::ok()
+}
+
+/// The word a person gave for what an item or a kind does: `on` or `off`. A request for `sealed` gets the refusal that says it is gone.
+fn choice_of(body: &Value) -> Result<String, Next> {
+    match text(body, "choice", 8) {
+        Some(choice @ ("on" | "off")) => Ok(choice.to_string()),
+        Some("sealed") => Err(Next::Answer(refused("sealed-gone"))),
+        _ => Err(Next::refuse(Refusal::BadRequest)),
+    }
+}
+
+/// What an item does in sync: `on` (its kind's default for the kinds that sync) or `off`. Sending an item is a person's approved
+/// choice, and so is taking it off the server: the second moves its copy there to the trash. `sealed` was a third choice once and is
+/// refused now, in a word of its own.
 fn choose_next(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Next {
     answer_or((|| {
         let uid = peer.uid;
         need_first(service, uid)?;
         let kind = text(body, "kind", 32).ok_or(Refusal::BadRequest)?.to_string();
         let id = text(body, "id", 64).ok_or(Refusal::BadRequest)?.to_string();
-        let choice = text(body, "choice", 8).filter(|choice| matches!(*choice, "on" | "off" | "sealed")).ok_or(Refusal::BadRequest)?.to_string();
+        let choice = match choice_of(body) {
+            Ok(choice) => choice,
+            Err(next) => return Ok(next),
+        };
         if !kinds::may_sync(&kind) || !amethystora_vault_core::protocol::valid_id(&id) {
             return Ok(Next::Answer(refused("not-syncable")));
         }
@@ -1361,28 +1549,37 @@ fn choose_next(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Next {
                 Err(trouble) => Next::trouble(trouble),
             }
         };
-        Ok(Next::approve(if off { Action::Use } else { Action::Export }, if off { say::SYNC_ITEM_OFF } else { say::SYNC_ITEM }, &entry.name, apply))
+        let kemlock = service.first_open(uid).and_then(load_connection).is_some_and(|connection| connection.kemlock.is_some());
+        let message = match (off, kemlock) {
+            (true, false) => say::SYNC_ITEM_OFF,
+            (false, false) => say::SYNC_ITEM,
+            (true, true) => say::SYNC_ITEM_OFF_KEM,
+            (false, true) => say::SYNC_ITEM_KEM,
+        };
+        Ok(Next::approve(if off { Action::Use } else { Action::Export }, message, &entry.name, apply))
     })())
 }
 
-/// What a whole kind does in sync: `off`, `on` (plain: Bitwarden's own encryption alone, which every app of the account opens) or
-/// `sealed`. It covers every item of the kind, those set to ask every time and those added later included, and one question is asked for
-/// all of them: to send, an export of them; to stop, a use. An item's own choice still wins over it.
+/// What a whole kind does in sync: `off` or `on` (Bitwarden's own encryption alone, which every app of the account opens; a kind
+/// Bitwarden has no type for goes as a plain note). It covers every item of the kind, those set to ask every time and those added later
+/// included, and one question is asked for all of them: to send, an export of them; to stop, a use. An item's own choice still wins over it.
 fn kind_next(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Next {
     answer_or((|| {
         let uid = peer.uid;
         need_first(service, uid)?;
         let word = text(body, "kind", 32).ok_or(Refusal::BadRequest)?;
-        let choice = text(body, "choice", 8).filter(|choice| matches!(*choice, "on" | "off" | "sealed")).ok_or(Refusal::BadRequest)?.to_string();
+        let choice = match choice_of(body) {
+            Ok(choice) => choice,
+            Err(next) => return Ok(next),
+        };
         let Some((_, kind)) = kinds::ALL.iter().find(|(name, kind)| *name == word || *kind == word).copied() else { return Ok(Next::Answer(refused("not-syncable"))) };
         let Some(store) = service.first_open(uid) else { return Err(Refusal::Closed) };
-        if load_connection(store).is_none() {
-            return Ok(Next::Answer(refused("not-connected")));
-        }
-        let message = match choice.as_str() {
-            "off" => say::SYNC_KIND_OFF,
-            "on" => say::SYNC_KIND_ON,
-            _ => say::SYNC_KIND_SEALED,
+        let Some(connection) = load_connection(store) else { return Ok(Next::Answer(refused("not-connected"))) };
+        let message = match (choice == "off", connection.kemlock.is_some()) {
+            (true, false) => say::SYNC_KIND_OFF,
+            (false, false) => say::SYNC_KIND_ON,
+            (true, true) => say::SYNC_KIND_OFF_KEM,
+            (false, true) => say::SYNC_KIND_ON_KEM,
         };
         let off = choice == "off";
         let apply = move |service: &mut Service, peer: &Rc<Peer>| {

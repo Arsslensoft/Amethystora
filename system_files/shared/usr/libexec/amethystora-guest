@@ -16,10 +16,11 @@
 # What makes it forget, and keeps it to the login screen:
 #   - the home is a tmpfs (var-home-amethystora\x2dguest.mount) that the guest's user manager requires and is part
 #     of: mounted before the session starts, unmounted when the manager stops at logout;
-#   - logind ends every process of the guest's at logout (logind.conf.d), and cleanup deletes what it left in /tmp,
-#     /var/tmp, /dev/shm and its own journal files;
+#   - logind ends every process of the guest's at logout (logind.conf.d), and cleanup, run at its logout and again before
+#     the next login, deletes what it left in /tmp, /var/tmp, /dev/shm and its own journal files, and has the system
+#     services forget what it asked of them (its AccountsService record, print jobs, saved networks, paired Bluetooth devices);
 #   - the empty password is taken at the graphical login only: the authselect feature with-guest-login (built by
-#     08-hardening.sh) refuses the account in system-auth (sudo, su, the text consoles, polkit) and in password-auth
+#     08-hardening.sh) refuses the account in system-auth (sudo, su, the text consoles, polkit, passwd) and in password-auth
 #     for every service but gdm-password; sshd also denies it by name.
 # The account is a standard one: not an administrator, and Parental Controls can be set on it as on any other.
 
@@ -165,9 +166,13 @@ status() {
 # look already seen, so that a visitor goes straight to the desktop
 prepare() {
     need_root
-    local uid gid
+    local uid gid paired
     uid="$(uid_of)"
     gid="$(gid_of)"
+    # What a session that did not end cleanly left, before the next visitor can see it
+    cleanup
+    # No password at every visit, whatever the last one did
+    passwd -d "${USER_NAME}" >/dev/null || { echo "amethystora-guest: could not clear the guest's password." >&2; return 1; }
     mountpoint -q "${HOME_DIR}" || { echo "${HOME_DIR} is not mounted: the guest does not log in." >&2; return 1; }
     # The guest never lingers (polkit refuses it too): a lingering manager would keep this home and never run cleanup
     rm -f "${ROOT}/var/lib/systemd/linger/${USER_NAME}"
@@ -177,20 +182,75 @@ prepare() {
     echo yes >"${HOME_DIR}/.config/gnome-initial-setup-done"
     install -o "${uid}" -g "${gid}" -m 0600 /dev/null "${HOME_DIR}/.local/state/amethystora/first-look.json"
     echo '{"guest": true}' >"${HOME_DIR}/.local/state/amethystora/first-look.json"
+    # The Bluetooth devices paired before the guest comes in, which its logout leaves alone
+    if paired="$(bluetooth_paired)"; then
+        install -d -m 0700 "${BLUETOOTH_BEFORE%/*}"
+        install -m 0600 /dev/null "${BLUETOOTH_BEFORE}"
+        [[ -z "${paired}" ]] || echo "${paired}" >"${BLUETOOTH_BEFORE}"
+    fi
 }
 
-# What the guest left outside its home, once its user manager has stopped: its files in the shared temporary folders,
-# and its own journal files
+# Bluetooth devices that are paired now. BlueZ keeps no owner for a pairing, so what the guest paired is what is there at
+# its logout and was not at its login: the list taken then is root's, in /run (so a restart forgets it), and a logout that finds
+# none (BlueZ not running at the login) forgets nothing.
+BLUETOOTH_BEFORE="${ROOT}/run/amethystora/guest/bluetooth"
+bluetooth_paired() {
+    systemctl is-active --quiet bluetooth.service || return 1
+    timeout 10 bluetoothctl devices Paired | awk '$1 == "Device" { print $2 }'
+    [[ "${PIPESTATUS[0]}" -eq 0 ]]
+}
+
+# What the guest left outside its home, once its user manager has stopped (and again as the next one starts, which a crash
+# or a power cut leaves undone): its files in the shared temporary folders, its own journal files, and what it asked
+# system services to keep for it, each through the service's own command
 cleanup() {
     need_root
-    local uid
+    local uid mounts target path file uuid paired address
     uid="$(uid_of)"
     [[ "${uid}" =~ ^[0-9]+$ ]] || return 0
     rm -f "${ROOT}/var/lib/systemd/linger/${USER_NAME}"
+    # A FUSE mount of the guest's in a shared temporary folder outlives the program that served it and hides what is under it
+    mapfile -t mounts < <(findmnt -lJ -o TARGET,FSTYPE,FS-OPTIONS | jq -r --arg option "user_id=${uid}" '.filesystems[] |
+        select((.fstype | startswith("fuse")) and (.["fs-options"] | split(",") | index($option)) and
+            (.target | test("^(/tmp|/var/tmp|/dev/shm)/"))) | .target')
+    for target in "${mounts[@]}"; do
+        umount -l -- "${target}" || echo "amethystora-guest: could not unmount ${target}" >&2
+    done
     find /tmp /var/tmp /dev/shm -xdev -mindepth 1 -user "${uid}" -delete 2>/dev/null
     # The journal keeps what an account's programs logged in a file of its own, user-UID: closed, then deleted
     journalctl --rotate >/dev/null 2>&1
     find /var/log/journal -mindepth 2 -maxdepth 2 -name "user-${uid}[@.]*" -delete 2>/dev/null
+    # The name, picture and language the guest gave itself, which the login screen shows
+    path="$(busctl --system call org.freedesktop.Accounts /org/freedesktop/Accounts org.freedesktop.Accounts FindUserById x "${uid}" |
+        awk -F'"' '{ print $2 }')"
+    if [[ "${path}" == /org/freedesktop/Accounts/* ]]; then
+        { busctl --system call org.freedesktop.Accounts "${path}" org.freedesktop.Accounts.User SetRealName s Guest &&
+            busctl --system call org.freedesktop.Accounts "${path}" org.freedesktop.Accounts.User SetIconFile s "" &&
+            busctl --system call org.freedesktop.Accounts "${path}" org.freedesktop.Accounts.User SetLanguage s ""; } >/dev/null ||
+            echo "amethystora-guest: could not reset the guest's record in AccountsService" >&2
+    fi
+    # Its print jobs, held ones too, with their files: asked only when the spool holds a job, since cancel starts CUPS
+    if compgen -G "/var/spool/cups/c[0-9]*" >/dev/null; then
+        cancel -a -x -u "${USER_NAME}" || echo "amethystora-guest: could not cancel the guest's print jobs" >&2
+    fi
+    # The network connections it saved for itself alone
+    for file in /etc/NetworkManager/system-connections/*.nmconnection /run/NetworkManager/system-connections/*.nmconnection; do
+        [[ -f "${file}" ]] && grep -qxF "permissions=user:${USER_NAME}:;" "${file}" || continue
+        uuid="$(sed -n 's/^uuid=//p' "${file}")"
+        nmcli connection delete uuid "${uuid}" >/dev/null || echo "amethystora-guest: could not delete a connection of the guest's" >&2
+    done
+    # The Bluetooth devices it paired
+    if [[ -e "${BLUETOOTH_BEFORE}" ]]; then
+        if paired="$(bluetooth_paired)"; then
+            while read -r address; do
+                [[ -n "${address}" ]] && ! grep -qxF "${address}" "${BLUETOOTH_BEFORE}" || continue
+                timeout 10 bluetoothctl remove "${address}" >/dev/null || echo "amethystora-guest: could not forget a Bluetooth device" >&2
+            done <<<"${paired}"
+        else
+            echo "amethystora-guest: could not list the Bluetooth devices" >&2
+        fi
+        rm -f "${BLUETOOTH_BEFORE}"
+    fi
     return 0
 }
 

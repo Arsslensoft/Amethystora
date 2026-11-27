@@ -98,6 +98,9 @@ LIVE_DISK=""
 CHOICES=()
 while read -r name size model; do
     [[ "${name}" == "${LIVE_DISK}" || "${name}" == "${LIVE}" ]] && continue
+    # The model is what the disk's maker wrote: it reaches the terminal cleaned
+    model="$(/usr/libexec/amethystora-security-text --max 80 -- "${model}" 2>/dev/null)" ||
+        model="$(printf '%s' "${model}" | LC_ALL=C tr -d '\000-\037\177')"
     CHOICES+=("${name}  $(numfmt --to=iec "${size}")  ${model}")
 done < <(lsblk -dbnpo NAME,SIZE,MODEL,TYPE | awk '$NF == "disk" { $NF = ""; print }')
 [[ ${#CHOICES[@]} -gt 0 ]] || fail "No disk to install on was found."

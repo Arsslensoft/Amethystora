@@ -15,8 +15,9 @@
 # features need.
 #
 # This file runs after both and before 73-seat-late.rules, which turns the uaccess tag into a grant, and only ever
-# takes a grant away.
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="16c0|3297|03eb|31e3", IMPORT{program}="/usr/bin/python3 /usr/libexec/amethystora-hid-vendor-only %S%p"
+# takes a grant away. Every other maker's keyboards are dealt with in 72-amethystora-keyboards-not-shared.rules, which
+# has to sort after the game controller files (71-*-gdu.rules) that this one sorts before.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="16c0|3297|03eb|31e3", IMPORT{program}="/usr/bin/python3 -I /usr/libexec/amethystora-hid-vendor-only %S%p"
 # Wooting's update mode: a bootloader, not a keyboard
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2402|2403", ENV{AMETHYSTORA_HID_VENDOR_ONLY}="1"
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="31e3", ATTRS{idProduct}=="1[23][0-3]f", ENV{AMETHYSTORA_HID_VENDOR_ONLY}="1"

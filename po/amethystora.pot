@@ -52,7 +52,7 @@ msgid "${title}: ${COMMAND} (${reason})"
 msgstr ""
 
 #. Translators: the state of a check in the terminal, in a column seven letters wide: keep it short
-#: usr/libexec/amethystora-security-status
+#: usr/libexec/amethystora-security-status usr/libexec/amethystora-gpu-compute
 msgid "ok"
 msgstr ""
 
@@ -727,6 +727,15 @@ msgid "Fedora Workstation's zone lets in every port from 1025 up, from every net
 msgstr ""
 
 #: usr/libexec/amethystora-security-status
+#, sh-format
+msgid "The running firewall lets in more than its saved settings do: ${EXTRA_LIST}"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "Put it back to its saved settings with:"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
 msgid "Firewall is on the amethystora zone: nothing incoming that a desktop does not need"
 msgstr ""
 
@@ -760,6 +769,19 @@ msgstr ""
 
 #: usr/libexec/amethystora-security-status
 msgid "Name yours with:"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "Full rights without a password"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+#, sh-format
+msgid "These accounts are in the empower group, which polkit lets do anything without asking: ${EMPOWER}"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "Take an account out of it with:"
 msgstr ""
 
 #: usr/libexec/amethystora-security-status
@@ -944,6 +966,13 @@ msgstr ""
 #, sh-format
 msgid "The home folders are snapshotted every hour. The latest is from ${AT}"
 msgstr ""
+
+#: usr/libexec/amethystora-security-status
+#, sh-format
+msgid "${LEFT_OUT} folder is left out of them. See which with:"
+msgid_plural "${LEFT_OUT} folders are left out of them. See which with:"
+msgstr[0] ""
+msgstr[1] ""
 
 #: usr/libexec/amethystora-security-status usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/backupdisk.js usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/today/getting.js
 msgid "Backups"
@@ -1273,6 +1302,18 @@ msgstr ""
 
 #: usr/libexec/amethystora-security-status
 msgid "Turned on for the external screens' brightness in quick settings: ddcutil talks to the screens over these buses, which can also reach other chips of the graphics card. Take it back with:"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status usr/libexec/amethystora-control-list usr/share/amethystora/just/system.just
+msgid "Lab devices"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "The person at the machine can open debug probes, USB serial adapters and logic analysers"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "Turned on for flashing and debugging tools: a probe reads and writes the memory of the board it is connected to, and a serial adapter is a modem's too. Take it back with:"
 msgstr ""
 
 #: usr/libexec/amethystora-security-status usr/libexec/amethystora-hardening
@@ -1684,6 +1725,34 @@ msgstr ""
 
 #: usr/libexec/amethystora-security-status usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/privacy/shield.js
 msgid "USB protection"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status usr/libexec/amethystora-security-config usr/share/amethystora/just/security.just
+msgid "Pull the key"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "Lock the screen, or power the computer off, when a USB device you choose is pulled out"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "It is turned on but no device is chosen, or the rule that watches it is not the one made for it, so pulling a device does nothing"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "The screen locks when the USB device you chose is pulled out"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "The lock screen is turned off for this whole computer, so locking does nothing"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "The screen locks when the USB device you chose is pulled out, in every account that has not turned its lock screen off"
+msgstr ""
+
+#: usr/libexec/amethystora-security-status
+msgid "The computer powers off when the USB device you chose is pulled out"
 msgstr ""
 
 #: usr/libexec/amethystora-security-status usr/share/amethystora/just/security.just usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/privacy/shield.js
@@ -3938,6 +4007,14 @@ msgid "What each plugin that asks for search last printed, when you type its pre
 msgstr ""
 
 #: usr/libexec/amethystora-control-list usr/share/amethystora/just/desktop.just usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/providers.js
+msgid "Will it run?"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Type game: and a game's name to see what a community list says of its anti-cheat on Linux, from a copy in this system."
+msgstr ""
+
+#: usr/libexec/amethystora-control-list usr/share/amethystora/just/desktop.just usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/providers.js
 msgid "Bookmarks"
 msgstr ""
 
@@ -5532,6 +5609,14 @@ msgid "Heroic, for Epic, GOG and Amazon, and Lutris, for games from anywhere els
 msgstr ""
 
 #: usr/libexec/amethystora-control-list
+msgid "While you play"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "While a game is registered with GameMode, banners wait, the power mode is performance when you are plugged in, and your timed backup and the containers' upgrade wait, six hours at most. Everything goes back when the game ends."
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
 msgid "Its container is running."
 msgstr ""
 
@@ -5597,6 +5682,30 @@ msgstr ""
 
 #: usr/libexec/amethystora-control-list
 msgid "Sites in a window of their own, with a launcher in the app grid."
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "In it:"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Installed here:"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Show…"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Kits"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Apps for a line of work"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Each kit is the apps people in one line of work use, from Flathub. Adding one shows the apps first, asks, and changes nothing else."
 msgstr ""
 
 #: usr/libexec/amethystora-control-list
@@ -6497,6 +6606,22 @@ msgid "Your folders and bookmarks from the disk of another computer you plugged 
 msgstr ""
 
 #: usr/libexec/amethystora-control-list
+msgid "Move in…"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "No Windows disk was found."
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Move in from Windows"
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "The Documents, Pictures, Music, Videos and Desktop of a Windows account, from its disk. The disk is only read, never changed; a BitLocker disk asks for its recovery key, which is not kept; a file you already have is never replaced."
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
 msgid "Two copies"
 msgstr ""
 
@@ -6740,6 +6865,10 @@ msgstr ""
 
 #: usr/libexec/amethystora-control-list
 msgid "Reads the health of the system's disk each hour, leaving it asleep if it sleeps, and says once if it begins to fail."
+msgstr ""
+
+#: usr/libexec/amethystora-control-list
+msgid "Debug probes, USB serial adapters and logic analysers given to you, the person at the machine, so that flashing and debugging tools open them without a password. They are root's as the image ships."
 msgstr ""
 
 #: usr/libexec/amethystora-control-list
@@ -7293,11 +7422,19 @@ msgid "Locks the screen when your paired phone has left for a minute and nobody 
 msgstr ""
 
 #: usr/libexec/amethystora-security-config
+msgid "Locks the screen, or powers the computer off, when the USB device you chose is pulled out. Plugging it back in unlocks nothing. Choose the device with ame security pull-key device; it must be allowed while USB protection is on."
+msgstr ""
+
+#: usr/libexec/amethystora-security-config
 msgid "Osprey sends the address of every site you open to Osprey Project LLC, in California, and on from there to its providers, without the query string and without your address. Amethystora does not make it: it is GPL-3.0, and you install it from your browser's own store, where it can be removed like any other extension."
 msgstr ""
 
 #: usr/libexec/amethystora-security-config
 msgid "Each event you ask about goes to your AI agent's maker with what the agent then reads on this machine: file names, program names and command lines, some of them other accounts'. The event is written partly by whatever it is about, so the agent is told to treat it as data and never to change anything."
+msgstr ""
+
+#: usr/libexec/amethystora-security-config
+msgid "Any pull counts, whoever makes it and whatever the reason: a knocked cable, a loose plug, a hub that resets. Locking costs you your screen until you sign in again. Powering off loses what is not saved, and if the disk is not encrypted it only stops anyone using the computer: the disk can still be read. The device's serial number is no secret, so this is a tether and not a key: plugging the device back in unlocks nothing, and a device with the same number would count as it. Choose a device that no program can make leave the bus: a plain USB stick or a security key, not a phone or a development board, which a program of your account may reset, and that would lock every session or power the computer off. Lock relies on the lock screen: where it is turned off (an account's setting, or the whole machine's), locking does nothing."
 msgstr ""
 
 #: usr/libexec/amethystora-security-config
@@ -7865,7 +8002,7 @@ msgstr ""
 msgid "This takes the private folder away, with its encrypted copy and its password. Type REMOVE to go on:"
 msgstr ""
 
-#: usr/libexec/amethystora-private-folder usr/libexec/amethystora-plugins
+#: usr/libexec/amethystora-private-folder usr/libexec/amethystora-plugins usr/libexec/amethystora-kit
 msgid "Nothing was removed."
 msgstr ""
 
@@ -7966,6 +8103,11 @@ msgstr ""
 #: usr/libexec/amethystora-windows-program
 #, sh-format
 msgid "This is ${name}, which is known not to run with Wine on Linux, usually because of its anti-cheat, its licence checks or a driver of its own. A Windows virtual machine is what runs it: the developer image comes with virtual machines (amethystora-manual developer)."
+msgstr ""
+
+#: usr/libexec/amethystora-windows-program
+#, sh-format
+msgid "This is ${name}."
 msgstr ""
 
 #: usr/libexec/amethystora-windows-program
@@ -8167,6 +8309,71 @@ msgstr ""
 #: usr/libexec/amethystora-clean-copy
 #, sh-format
 msgid "$count copy could not be saved in its folder."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+msgid "The list of games is not here, or cannot be read."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+msgid "The list of games could not be read."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "The list says it runs on Linux: its maker turned the anti-cheat on there, or the anti-cheat works under Wine and Proton as it is."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "The list says it runs on Linux without harm to online play, but may need some tinkering first."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "The list says its maker plans to support Linux, and has not yet."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "The list says it does not run online on Linux, because of its anti-cheat."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "The list says its maker has said it will not turn its anti-cheat on for Linux."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "The list does not say."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+#, sh-format
+msgid "Anti-cheat: ${list}"
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+msgid "The list names no anti-cheat for it."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+#, sh-format
+msgid "The list changed this entry on ${changed}."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+msgid "The list gives no date for this entry."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+#, sh-format
+msgid "This copy of the list is from ${updated}. It knows the anti-cheat, not how the game runs on this computer."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+#, sh-format
+msgid "It has no entry named ${shown}."
+msgstr ""
+
+#: usr/libexec/amethystora-will-it-run
+#, sh-format
+msgid "The closest entry in the list is ${cname} (id ${cid}), which is not an answer for ${shown}. Ask for it by its name to see its entry."
 msgstr ""
 
 #: usr/libexec/amethystora-start-times
@@ -8765,7 +8972,7 @@ msgstr ""
 
 #: usr/libexec/amethystora-gpu-check
 #, sh-format
-msgid "${TARGET} is Amethystora with NVIDIA's driver for it, which this image does not have. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with a key of this machine's own, which the kernel trusts only with Secure Boot on. Nothing changes unless you switch."
+msgid "${TARGET} is Amethystora with NVIDIA's driver for it, which this image does not have. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with the key of the project that builds the image's kernel modules, which the kernel trusts only once it is enrolled with Secure Boot on. Nothing changes unless you switch."
 msgstr ""
 
 #: usr/libexec/amethystora-gpu-check
@@ -8774,7 +8981,7 @@ msgstr ""
 
 #: usr/libexec/amethystora-gpu-check
 #, sh-format
-msgid "Its card is a GeForce 900 or 10 series, or as old: ${TARGET} carries the driver that drives it, the last NVIDIA makes for it. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with a key of this machine's own, which the kernel trusts only with Secure Boot on. Nothing changes unless you switch."
+msgid "Its card is a GeForce 900 or 10 series, or as old: ${TARGET} carries the driver that drives it, the last NVIDIA makes for it. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with the key of the project that builds the image's kernel modules, which the kernel trusts only once it is enrolled with Secure Boot on. Nothing changes unless you switch."
 msgstr ""
 
 #: usr/libexec/amethystora-gpu-check
@@ -8788,7 +8995,7 @@ msgstr ""
 
 #: usr/libexec/amethystora-gpu-check
 #, sh-format
-msgid "It runs ${IMAGE}, which carries NVIDIA's driver. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with a key of this machine's own, which the kernel trusts only with Secure Boot on. ${TARGET} has no NVIDIA driver and keeps lockdown on. Nothing changes unless you switch."
+msgid "It runs ${IMAGE}, which carries NVIDIA's driver. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with the key of the project that builds the image's kernel modules, which the kernel trusts only once it is enrolled with Secure Boot on. ${TARGET} has no NVIDIA driver and keeps lockdown on. Nothing changes unless you switch."
 msgstr ""
 
 #: usr/libexec/amethystora-gpu-check
@@ -8797,7 +9004,7 @@ msgstr ""
 
 #: usr/libexec/amethystora-gpu-check
 #, sh-format
-msgid "It runs ${IMAGE}, whose driver cannot drive it: the open driver nouveau, in ${TARGET}, does. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with a key of this machine's own, which the kernel trusts only with Secure Boot on. ${TARGET} keeps lockdown on. Nothing changes unless you switch."
+msgid "It runs ${IMAGE}, whose driver cannot drive it: the open driver nouveau, in ${TARGET}, does. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with the key of the project that builds the image's kernel modules, which the kernel trusts only once it is enrolled with Secure Boot on. ${TARGET} keeps lockdown on. Nothing changes unless you switch."
 msgstr ""
 
 #: usr/libexec/amethystora-gpu-check
@@ -9126,12 +9333,17 @@ msgid "Without it, each account shows a letter on a colour, and nothing is asked
 msgstr ""
 
 #: usr/libexec/amethystora-sends
-msgid "Amethystora Vault's sync"
+#, sh-format
+msgid "While the vault is open, what it holds that syncs (every kind unless you turned one off: passwords, authenticator codes, backup codes, keys, certificates and protected files, which go as the item's own file up to 16 MiB) is sent to the Kemlock Server at ${SYNC_ADDRESS}, encrypted with the account's key, and the account's changes are fetched, on opening, after a change and every 15 minutes. The server sees how many items there are, of which kind, how long each is and when it changed."
 msgstr ""
 
 #: usr/libexec/amethystora-sends
 #, sh-format
-msgid "While the vault is open, what it holds that syncs (passwords, authenticator codes and backup codes, and keys, certificates and protected files where you chose it, plain or sealed, with files for what is larger than a note) is sent to ${SYNC_ADDRESS}, encrypted with the account's key, and the account's changes are fetched, on opening, after a change and every 15 minutes. The server sees how many items there are, of which kind, how long each is and when it changed."
+msgid "While the vault is open, what it holds that syncs (passwords, authenticator codes and backup codes, and keys, certificates and protected files where you chose it, with files for what is larger than a note) is sent to ${SYNC_ADDRESS}, encrypted with the account's key, and the account's changes are fetched, on opening, after a change and every 15 minutes. The server sees how many items there are, of which kind, how long each is and when it changed."
+msgstr ""
+
+#: usr/libexec/amethystora-sends
+msgid "Amethystora Vault's sync"
 msgstr ""
 
 #: usr/libexec/amethystora-sends
@@ -9354,6 +9566,11 @@ msgstr ""
 
 #: usr/libexec/amethystora-plugins
 msgid "  A host it may reach is a way for anything it knows to leave this computer."
+msgstr ""
+
+#: usr/libexec/amethystora-plugins
+#, sh-format
+msgid "  It may send up to ${amount} an hour to it (1 MiB is usual)."
 msgstr ""
 
 #: usr/libexec/amethystora-plugins
@@ -9581,7 +9798,7 @@ msgstr ""
 msgid "No plugin that is on takes files."
 msgstr ""
 
-#: usr/libexec/amethystora-plugins
+#: usr/libexec/amethystora-plugins usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/plugins/tile.js
 msgid "Plugin"
 msgstr ""
 
@@ -9633,6 +9850,54 @@ msgstr ""
 
 #: usr/libexec/amethystora-pill
 msgid "There is no such pill. Start it with: ame pill start NAME"
+msgstr ""
+
+#: usr/libexec/amethystora-kit
+#, sh-format
+msgid "There is no kit called ${name}. ame apps kit list names them."
+msgstr ""
+
+#. Translators: said after an app's name, when it is installed on this computer already
+#: usr/libexec/amethystora-kit
+msgid "installed"
+msgstr ""
+
+#: usr/libexec/amethystora-kit
+#, sh-format
+msgid "${total} app, ${here} of them installed here"
+msgid_plural "${total} apps, ${here} of them installed here"
+msgstr[0] ""
+msgstr[1] ""
+
+#: usr/libexec/amethystora-kit
+#, sh-format
+msgid "Add what is missing with: ame apps kit add ${name}"
+msgstr ""
+
+#: usr/libexec/amethystora-kit
+msgid "This installs the apps above that this computer does not have, from Flathub, and changes nothing else. It takes nothing away."
+msgstr ""
+
+#: usr/libexec/amethystora-kit
+msgid "None of this kit's apps is installed here."
+msgstr ""
+
+#: usr/libexec/amethystora-kit
+msgid "Removing asks about each app, which needs a terminal."
+msgstr ""
+
+#: usr/libexec/amethystora-kit
+msgid "These apps of the kit are installed. You are asked about each one. An app another kit or you installed is asked about too, and one you keep stays as it is. An app's data goes to the trash, and ame apps undo-uninstall brings it back until the trash is emptied."
+msgstr ""
+
+#: usr/libexec/amethystora-kit
+#, sh-format
+msgid "Remove ${label} (${app})?"
+msgstr ""
+
+#: usr/libexec/amethystora-kit
+#, sh-format
+msgid "${app} could not be removed."
 msgstr ""
 
 #: usr/libexec/amethystora-text-shortcuts
@@ -10447,7 +10712,7 @@ msgstr ""
 msgid "That is no longer on the list."
 msgstr ""
 
-#: usr/libexec/amethystora-bring-over
+#: usr/libexec/amethystora-bring-over usr/libexec/amethystora-move-in
 msgid "The list of disks could not be read."
 msgstr ""
 
@@ -10459,7 +10724,7 @@ msgstr ""
 msgid "This format cannot be read here."
 msgstr ""
 
-#: usr/libexec/amethystora-bring-over
+#: usr/libexec/amethystora-bring-over usr/libexec/amethystora-move-in
 #, python-brace-format
 msgid "The disk would not open: {why}"
 msgstr ""
@@ -10468,7 +10733,7 @@ msgstr ""
 msgid "The disk did not unlock."
 msgstr ""
 
-#: usr/libexec/amethystora-bring-over
+#: usr/libexec/amethystora-bring-over usr/libexec/amethystora-move-in
 msgid "The disk mounted, but not where it was said to."
 msgstr ""
 
@@ -10508,11 +10773,11 @@ msgstr ""
 msgid "Your bookmarks are in {path}: import that file in your browser."
 msgstr ""
 
-#: usr/libexec/amethystora-bring-over apps/move/src/main.rs
+#: usr/libexec/amethystora-bring-over usr/libexec/amethystora-move-in apps/move/src/main.rs
 msgid "[Y/n]"
 msgstr ""
 
-#: usr/libexec/amethystora-bring-over apps/move/src/main.rs
+#: usr/libexec/amethystora-bring-over usr/libexec/amethystora-move-in apps/move/src/main.rs
 msgid "[y/N]"
 msgstr ""
 
@@ -10524,7 +10789,7 @@ msgstr ""
 msgid "Disks you plugged in that look like another computer's. They are mounted read-only."
 msgstr ""
 
-#: usr/libexec/amethystora-bring-over apps/move/src/main.rs
+#: usr/libexec/amethystora-bring-over usr/libexec/amethystora-move-in apps/move/src/main.rs
 msgid "Which one? Its number:"
 msgstr ""
 
@@ -10570,6 +10835,579 @@ msgstr ""
 
 #: usr/libexec/amethystora-bring-over
 msgid "Done. A name already here was kept as it was."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "This computer cannot ask the disk service to unlock the disk."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "An administrator's password is needed to open this disk, and it was not given."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "That key did not open the disk."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "That is not a disk a Windows system could be on."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "This disk is already unlocked, and not read-only. Lock it first (in Files, or with udisksctl lock), and run this again."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "This disk is encrypted with BitLocker. Run ame system move-in in a terminal to type its recovery key."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "This disk is encrypted with BitLocker. Type its 48-digit recovery key; nothing shows as you type, and it is kept nowhere."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "The unlocked disk is not read-only, so it was left alone."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "This disk is mounted so that it can be written to, not by the desktop. Unmount it first, and run this again."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "This disk is mounted by the desktop so that it can be written to, so it was left as it is. Run ame system move-in, which says so and mounts it read-only for the copy, or unmount it first."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "The desktop's mount of this disk is busy, so it was left as it was. Close what is using it, and run this again."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "The desktop's mount of this disk could not be put back. Mount it again in Files if you want it open."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "from Windows"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "from Windows {number}"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "There are too many files here with that name already."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "Moving in from Windows: {folder}"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "Moving in from Windows"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{percent}% of {size}"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "What is chosen ({size}) does not fit here with a gigabyte to spare. Choose fewer folders, or free some space."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "There is no room left. Free some space and run this again: it carries on where it stopped."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "Copied {files} files ({size})."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{count} of them have the name of a file you already had here, so each is beside it, as NAME (from Windows). Nothing was replaced."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{count} were here already, from an earlier run or by hand, and were left as they are."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{count} files are only in OneDrive: Windows never downloaded them, so they are not on this disk. They are still in your OneDrive."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{count} folders of Windows have the name of a file you have here, so what is in them was not copied. Rename that file, and run this again."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{count} folders here are links that lead out of your home, so what Windows has in the folders of that name was not copied there."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{count} files could not be read, and were passed over. Run this again to try them once more."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{name} is not you. Windows does not keep anyone out of an account's folder on this computer, so it can be read, and it will be copied into your home. Go on only if {name} agreed."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "The desktop mounted this disk so that it can be written to. To be sure nothing is written, it is unmounted and mounted again read-only for the copy, and mounted as it was when this is done. If something is using it, it is left as it is."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "Go on?"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "This needs a terminal, with a person at it."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "No disk that could hold Windows was found. If it is in another computer, take it out and plug it into this one, then run this again."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "Disks that could hold Windows. They are only read, never written."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "(BitLocker)"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "There is no Windows system on this disk."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "No Windows account here is named like yours. Ask an administrator of this computer to move you in."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "Whose files? Its number:"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "Copy {name}'s files?"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "There are no Documents, Pictures, Music, Videos or Desktop folders in that account."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "Copy {folder} ({size}, {files} files)?"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+#, python-brace-format
+msgid "{count} more are only in OneDrive and are left."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "A file you already have here is never replaced: the copy goes beside it. You can stop with Ctrl+C and run this again to carry on."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "locked by BitLocker"
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "That account is not there, or is not one this person may copy: only an administrator copies an account that is not their own."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "Nothing was copied."
+msgstr ""
+
+#: usr/libexec/amethystora-move-in
+msgid "Stopped. Run it again to carry on where it stopped."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "usage: ame dev service add [NAME [AS]] [--port N] [--at-login]"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "Services you can add: ame dev service add NAME [AS]"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "There is no service called {name}. ame dev service add lists them."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "A service's name is lowercase letters, digits and dashes, and starts with a letter."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} is already there. ame dev service list shows it; ame dev service remove {name} takes it away."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "A port is a number from 1024 to 65535."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "Port {port} is taken: ame dev ports says by what."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "The volume {volume} still holds the data of a {other} service that was called {name}, which {this} cannot use. Delete it with podman volume rm {volume}, or call this one something else."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} is made, from {title}. Nothing runs yet: ame dev service start {name}"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "It keeps the password it had before, since the data it made still holds it."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "It starts when you log in."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "Port {port} is its own: the usual one was taken."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "usage: ame dev service start|stop|remove AS"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "There is no service called {name} here. ame dev service list shows them."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "The first start pulls {image}, about {size} MB."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "The first start pulls {image}."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "It did not start. journalctl --user -u {unit} says why."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} runs."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "  Its password is in {path}"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "It did not stop. systemctl --user status {unit} says why."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} is stopped."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} keeps its data in the volume {volume}."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "Delete it too? That cannot be undone. Type DELETE to delete it; anything else keeps it."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} and its data are gone."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} is gone, but podman could not say whether it has data in the volume {volume}, so the password is kept in {path}. Look with podman volume ls; podman volume rm {volume} deletes it."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} is gone. Its data is kept in the volume {volume}, and its password in {path}: ame dev service add makes it again with both."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "To delete the data: podman volume rm {volume}"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "{name} is gone."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "No service yet. ame dev service add lists the ones you can add."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "at login"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "by hand"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "    password: {path}"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "Nothing listens."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "PORT"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "ADDRESS"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "WHAT"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "every address"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid "container {name}"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+#, python-brace-format
+msgid ", the service {name}"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "another account, or the system"
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "This is for your own account: it never runs as root."
+msgstr ""
+
+#: usr/libexec/amethystora-dev-services
+msgid "usage: ame dev service add [NAME [AS]] [--port N] [--at-login] | start|stop|remove AS | list [--json]"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "The driver {driver} drives the card."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "This image has no NVIDIA driver for this card: {image} does."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "The driver did not load."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "The card is driven by {driver}, which cannot compute here."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "No driver took the card."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "nvidia-smi does not see the card, though the driver is loaded."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "nvidia-smi sees {count} card."
+msgid_plural "nvidia-smi sees {count} cards."
+msgstr[0] ""
+msgstr[1] ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "The CDI description for podman is there: nvidia.com/gpu=all."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "The CDI description podman needs for the card is missing. The image writes it at every start (nvidia-cdi-refresh.service): if this stays after the command below, that is a fault of the image, and ame report says it."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "The kernel made no render node for the card."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "Your account cannot open {node}. Fedora's rule gives every account the render nodes, so a rule of your own changed it."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "The render node {node} opens for your account."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "There is no /dev/kfd, the device ROCm computes through: the card is one ROCm does not drive, or the amdgpu driver has no compute for it."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "Your account cannot open /dev/kfd. Fedora's rule gives every account it (group render, mode 0666), so a rule of your own changed it."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "A container is not tried yet: it runs {image}, which is not here, and is about {size} MB to fetch."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "Fetch {image}, about {size} MB, by its digest? [y/N]"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "Nothing was fetched, so a container was not tried."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "The image could not be fetched: {why}"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "A container does not see the card the way the host does{why}."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "A container sees the same {count} card as the host, through nvidia.com/gpu=all."
+msgid_plural "A container sees the same {count} cards as the host, through nvidia.com/gpu=all."
+msgstr[0] ""
+msgstr[1] ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "A computation ran on the card, in a container, and came back right."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "A computation in a container failed: {why}"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "ROCm in a container finds no GPU{why}."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "ROCm in a container lists the GPU: {agents}."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "A computation test is not built for AMD: the listing above is as far as this goes."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "A container opens the render node: {nodes}."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "A container cannot open the render node{why}."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "A computation test is not built for Intel: the render node opening is as far as this goes."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "The image the container step runs is not listed in this install."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "usage: ame dev gpu [--pull] [--deep] [--json]"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "This is for your own account: containers run as you, so it never runs as root."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "The only graphics device here is {name}, a display with nothing to compute on."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "No graphics card was found on this machine."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "{maker}: {names}"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "FAILED"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "not tried"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "not built"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+#, python-brace-format
+msgid "             Fix: {command}"
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "A container can use the card."
+msgstr ""
+
+#: usr/libexec/amethystora-gpu-compute
+msgid "Nothing failed, but the container step has not run: ame dev gpu --pull runs it."
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-logo-menu@arsslensoft.github.io/extension.js
@@ -10858,6 +11696,18 @@ msgid "the game in gamescope, full screen"
 msgstr ""
 
 #: usr/share/amethystora/just/apps.just
+msgid "While a game runs with gamemoderun, banners can wait, the power mode can be performance when you are plugged in, and your timed backup and the containers' upgrade can wait, six hours at most. All of it goes back when the game ends. Calls, alarms and urgent banners still come through."
+msgstr ""
+
+#: usr/share/amethystora/just/apps.just
+msgid "Turn on While you play?"
+msgstr ""
+
+#: usr/share/amethystora/just/apps.just
+msgid "Turned on. ame desktop while-playing off turns it off."
+msgstr ""
+
+#: usr/share/amethystora/just/apps.just
 msgid "Install which?"
 msgstr ""
 
@@ -10910,6 +11760,11 @@ msgstr ""
 
 #: usr/share/amethystora/just/apps.just
 msgid "Remove Android, with every app and everything saved in it?"
+msgstr ""
+
+#: usr/share/amethystora/just/apps.just
+#, sh-format
+msgid "${data} is not a folder inside your home, so it was left alone. Remove it yourself if it is Android's."
 msgstr ""
 
 #: usr/share/amethystora/just/apps.just
@@ -11007,6 +11862,10 @@ msgstr ""
 
 #: usr/share/amethystora/just/apps.just
 msgid "Note: Some of these take a while to load, we'll keep working on it."
+msgstr ""
+
+#: usr/share/amethystora/just/apps.just
+msgid "Homebrew belongs to another account on this computer, so the command line tools cannot be installed from this one."
 msgstr ""
 
 #: usr/share/amethystora/just/apps.just
@@ -11650,6 +12509,14 @@ msgstr ""
 
 #: usr/share/amethystora/just/desktop.just
 msgid "At 20% the pill offers power saving alone."
+msgstr ""
+
+#: usr/share/amethystora/just/desktop.just
+msgid "While a game is registered with GameMode, banners wait, the power mode is performance when you are plugged in, and your timed backup and the containers' upgrade wait, six hours at most. Calls, alarms and urgent banners still come through, and the system update is not held. All of it goes back when the game ends, or at Let them run in the pill."
+msgstr ""
+
+#: usr/share/amethystora/just/desktop.just
+msgid "Nothing waits for a game: banners, the power mode and the backup go on as they do the rest of the time."
 msgstr ""
 
 #: usr/share/amethystora/just/desktop.just
@@ -15071,6 +15938,48 @@ msgid "Off. Apps that need a place guess or ask you."
 msgstr ""
 
 #: usr/share/amethystora/just/security.just
+msgid "No USB device with a serial number of its own is plugged in. Plug in the one to tie to this computer, then run this again. A hub, and a device without a serial number, cannot be told from others of its make."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "Choose a device that no program can make leave the bus: a plain USB stick or a security key, not a phone or a development board. A program of your account that can reset the device you choose can lock every session, or power the computer off, without anyone pulling it."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "Which USB device is pulled out to lock or power off?"
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+#, sh-format
+msgid "Watching ${id}."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "USB protection is on: this device has to be allowed, or it is blocked when it is plugged in and there is nothing to pull. ame security usb allow does that."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "It does nothing until it is on: ame security pull-key lock, or poweroff."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "Pulling the device out does nothing now."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "Power off ends everything at once, in order but without waiting for an app that holds the shutdown back, so what is not saved is lost."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "Turn it on, knowing that?"
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+#, sh-format
+msgid "On: ${action}. Pulling out ${device} does it."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
 msgid "The security watcher is turned off, so nothing new is looked for. ame security settings turns it on."
 msgstr ""
 
@@ -15587,7 +16496,7 @@ msgid "What this does: the TPM hands over the key only while Secure Boot is on a
 msgstr ""
 
 #: usr/share/amethystora/just/security.just
-msgid "This machine is sealed: its initramfs is inside the UKI that the enrolled key signs, so it cannot be rewritten without the machine refusing to start it. But neither PCR measures the disk the system starts from, nor /etc on it: someone with a disk of their own made to look like this one starts this same signed system on it, with their own settings, and without a PIN the TPM would hand that system the key. So it is set up only with a PIN here too."
+msgid "This machine is sealed: its initramfs is inside the UKI that the enrolled key signs, so it cannot be rewritten without the machine refusing to start it. The key is also bound to PCR 12, which changes when anything is added to the UKI's own kernel command line: the firmware's strings and add-ons signed by a key the boot loader trusts can add to it, and the system would start with what they add. But no PCR measures the disk the system starts from, nor /etc on it: someone with a disk of their own made to look like this one starts this same signed system on it, with their own settings, and without a PIN the TPM would hand that system the key. So it is set up only with a PIN here too. That stops someone who takes the machine, not someone who gives it back with such a disk: their settings can ask for the PIN and keep it once you type it."
 msgstr ""
 
 #: usr/share/amethystora/just/security.just
@@ -15624,6 +16533,28 @@ msgstr ""
 
 #: usr/share/amethystora/just/security.just
 msgid "Done. It takes effect at the next boot."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "Leaving a folder out of the hourly snapshots saves the disk space they keep for what changes in it, such as games, containers and virtual machines. From now on, what changes in it is not kept: ransomware that encrypts it can be undone only from a backup."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "The snapshots already taken keep the folder as it was, for up to two weeks. The folder becomes a subvolume of its own, which takes no space but a moment, and nothing may use it meanwhile: close the apps that do first."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+#, sh-format
+msgid "Leave ${folder} out of the hourly snapshots?"
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+msgid "The folder becomes a plain folder again, and the next snapshot keeps it. Nothing may use it meanwhile: close the apps that do first."
+msgstr ""
+
+#: usr/share/amethystora/just/security.just
+#, sh-format
+msgid "Snapshot ${folder} again?"
 msgstr ""
 
 #: usr/share/amethystora/just/security.just
@@ -16141,6 +17072,42 @@ msgid "It may wake the computer again."
 msgstr ""
 
 #: usr/share/amethystora/just/system.just
+msgid "Lab devices are off: debug probes, USB serial adapters and logic analysers are root's."
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
+msgid "Lab devices are on."
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
+msgid "No device the lab devices rules cover is plugged in."
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
+msgid "They are root's until you turn them on: ame system lab-devices on."
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
+msgid "This gives you, the person at the machine, and the apps that may reach devices, the following when they are plugged in. Other accounts and SSH get none of it."
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
+msgid "A debug probe reads and writes the memory of the board it is connected to, firmware included, and a program that opens a serial adapter can talk to whatever is on its other end: it is a modem's too. Software-defined radios and many analysers need nothing of this: the system gives them already."
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
+msgid "Give them to the person at the machine?"
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
+msgid "On. A device plugged in now may need to be plugged in again."
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
+msgid "Off. The devices are root's again, once they are plugged in again."
+msgstr ""
+
+#: usr/share/amethystora/just/system.just
 msgid "Powerstat is not available"
 msgstr ""
 
@@ -16556,11 +17523,23 @@ msgid "A program calling itself $(program) asks to send every one of your $(item
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the server it syncs with, sealed so that only this vault opens them. Those set to ask every time are included. A copy already there in another form is moved to the trash, or the fields the vault wrote are taken out of it."
+msgid "A program calling itself $(program) asks to stop syncing every one of your $(item), which moves their copies on the server to the trash of the server, or takes the fields the vault wrote out of a copy that holds anything else."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "A program calling itself $(program) asks to stop syncing every one of your $(item), which moves their copies on the server to the trash of the server, or takes the fields the vault wrote out of a copy that holds anything else."
+msgid "A program calling itself $(program) asks to send “$(item)” to the Kemlock Server Amethystora Vault syncs with, as an item the Kemlock apps open, encrypted on this computer with the keys of the account."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "A program calling itself $(program) asks to stop syncing “$(item)”. Its copy on the Kemlock Server Amethystora Vault syncs with is removed if the vault made it, and stays there as it is if a Kemlock app made it."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "A program calling itself $(program) asks to send every one of your $(item) in Amethystora Vault, and every one added later, to the Kemlock Server it syncs with, as items the Kemlock apps open, encrypted on this computer with the keys of the account. Those set to ask every time are included."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "A program calling itself $(program) asks to stop syncing every one of your $(item). Their copies on the Kemlock Server Amethystora Vault syncs with are removed where the vault made them, and stay there as they are where a Kemlock app made them."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -16806,7 +17785,7 @@ msgid "${tool}: not installed"
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "What this vault holds that syncs becomes items in that account, encrypted with the account's own key, and the account's changes come back. Passwords, authenticator codes and backup codes go as plain items that Bitwarden's apps open; keys, certificates and protected files go only when you choose it, plain or sealed (a note only this vault opens). The server learns how many items there are, of which kind, how long each is and when it changed. The account's key is kept in this vault, so whoever opens this vault can reach that whole account. A dedicated account for the vault is the better choice. It works with Bitwarden and Vaultwarden accounts, and is not Bitwarden."
+msgid "What this vault holds that syncs becomes items in that account, encrypted with the account's own key, and the account's changes come back. On a Kemlock Server every kind goes as the Kemlock apps' own items, keys, certificates and protected files included, unless you turn a kind off. On a Vaultwarden or Bitwarden server, passwords, authenticator codes and backup codes go as plain items that Bitwarden's apps open, and keys, certificates and protected files only when you choose it, as a plain secure note or SSH key item where Bitwarden has no type for them. The server learns how many items there are, of which kind, how long each is and when it changed. The account's key is kept in this vault, so whoever opens this vault can reach that whole account. A dedicated account for the vault is the better choice. It works with Kemlock, Bitwarden and Vaultwarden accounts, and is not Bitwarden."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -16814,7 +17793,7 @@ msgid "Email address of the account: "
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "Log in with the personal API key (it asks for no code) or the master password? Type key or password: "
+msgid "Log in with the personal API key (Vaultwarden and Bitwarden only; it asks for no code) or the master password? Type key, or press Enter for the password: "
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -16864,7 +17843,36 @@ msgid "This account's key is made with only ${n} rounds, which is far fewer than
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
-msgid "Which second step? Type authenticator, email or yubikey: "
+#, sh-format
+msgid "This account's key is made with ${m} MiB and ${n} passes, which is less than Kemlock's own 64 MiB and 3, and makes the master password easier to guess. Type yes to go on: "
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Which second step? Type authenticator, email, yubikey or recovery: "
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Recovery code (it turns off the account's second steps): "
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This is a Kemlock Server, and the vault synced with its own API: every kind of item goes, and the Kemlock apps open them."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This account was made through Bitwarden's API, so the Bitwarden hash of its master password was sent to the server once, to give the account its Kemlock keys. From now on the password signs in to both."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The vault's items were moved from their Bitwarden copies to Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This vault syncs with this server through Bitwarden's API. Moving to the Kemlock API writes the vault's items there as Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more, so Bitwarden's apps and browser extension will not see what changes from now on."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Type yes to move to the Kemlock API: "
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -16917,6 +17925,10 @@ msgstr ""
 
 #: usr/share/amethystora/just/vault.just
 msgid "That key was made so that it cannot leave the vault."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Sealed sync is gone: an item syncs plain or not at all. Choose on or off."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -17039,11 +18051,108 @@ msgid "Items of the vault did not read: ${n}. Nothing is sent to the server whil
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
+msgid "The server did not answer like a Kemlock Server."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This Kemlock Server is too old for the vault: it lacks what signing in needs."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server is set up under another address than the one given, so it would refuse every request. Give it the address it was set up with."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server ended this sign-in. Connect again."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server refused the vault's proof of who is asking. Check this computer's clock, and that the address is the one the server is set up under."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server kept refusing the request's nonce. Try again later."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This account signs in with single sign-on, which the vault does not do."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server refused this account: it may be disabled, or being deleted."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The master password is wrong, or this is not the server the account was set up on."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This account was made through Bitwarden's API and its only second step is not an authenticator app. Sign in to its web vault once first."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The account's keys on the server do not check out. Nothing was kept."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server's signed list of items does not verify. Nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server's signed list of items is older than one the vault saw. A server giving an old copy back is what that is, so nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server's signed list names an item that the server no longer has. Nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The server gave back an older copy of an item than the vault knew. Nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "An item that was deleted came back with no signed list naming it. Nothing was changed."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Items that no signed list names have waited for a day. If they are yours, accept them with: ame vault sync now accept"
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This server keeps files in a storage bucket, which the vault does not use."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "What was moved did not read back as it was sent. The vault will send what differs again."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "The second step was refused. The code may be wrong or already used."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "This vault was changed on two servers at once. Open it in the Kemlock app to settle it."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+#, sh-format
+msgid "This account's key is made with only ${m} MiB and ${n} passes, which is less than Kemlock's default."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
 msgid "What the vault keeps of its sync did not read. Turn sync off and connect again."
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
 msgid "No server is connected."
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Kind of server: Kemlock Server, through its own API"
+msgstr ""
+
+#: usr/share/amethystora/just/vault.just
+msgid "Kind of server: Vaultwarden or Bitwarden"
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -17091,12 +18200,7 @@ msgstr ""
 
 #: usr/share/amethystora/just/vault.just
 #, sh-format
-msgid "Sent plain, as Bitwarden's apps open it: ${what}"
-msgstr ""
-
-#: usr/share/amethystora/just/vault.just
-#, sh-format
-msgid "Sent sealed, a note only this vault opens: ${what}"
+msgid "Sent: ${what}"
 msgstr ""
 
 #: usr/share/amethystora/just/vault.just
@@ -19016,6 +20120,58 @@ msgstr ""
 msgid "Received in all"
 msgstr ""
 
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Installing your apps · %d of %d"
+msgid_plural "Installing your apps · %d of %d"
+msgstr[0] ""
+msgstr[1] ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Your apps try again soon"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Your apps wait for the internet"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Your apps are ready"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Show the apps"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Installing your apps"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "The apps Amethystora comes with are on their way from Flathub: %d of %d is in. Each shows in the app grid as it arrives, and you can use the computer meanwhile."
+msgid_plural "The apps Amethystora comes with are on their way from Flathub: %d of %d are in. Each shows in the app grid as it arrives, and you can use the computer meanwhile."
+msgstr[0] ""
+msgstr[1] ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Waiting for the internet"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "The last try did not finish. It starts again by itself, less often each time: there is nothing to do."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "The apps Amethystora comes with install from Flathub as soon as the computer is online. Connect to a network in the top bar's menu."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "Everything Amethystora comes with is installed."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/apps.js
+msgid "The screen can go dark. The computer stays awake until they are in, then sleeps as usual."
+msgstr ""
+
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/battery.js usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/battery.js
 msgid "%s left"
 msgstr ""
@@ -19289,6 +20445,10 @@ msgid "Quiet while presenting"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/hold.js
+msgid "Quiet while you play"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/hold.js
 msgid "Quiet until %s"
 msgstr ""
 
@@ -19322,6 +20482,10 @@ msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/hold.js
 msgid "you present"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/hold.js
+msgid "you play"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/hold.js
@@ -20180,7 +21344,7 @@ msgid "of %s, rings at %s"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
-msgid "Ready · quick restart"
+msgid "Ready · soft reboot"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
@@ -20192,11 +21356,15 @@ msgid "A new version is ready"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
-msgid "A quick restart: the system's programs restart, the computer does not. Save your work first."
+msgid "A soft reboot finishes it: your apps close and the login screen is back in a few seconds, on the new version. The computer itself does not restart. Save your work first."
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
 msgid "The computer restarts to finish it. Save your work first."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
+msgid "Soft reboot"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/pill/update.js
@@ -20604,6 +21772,38 @@ msgstr[1] ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/flat.js
 msgid "Closing"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/playing.js
+msgid "Playing"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/playing.js
+msgid "Playing: banners and background work are waiting"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/playing.js
+msgid "Banners wait. Calls, alarms and urgent ones still come through."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/playing.js
+msgid "The power mode is on performance while you are plugged in."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/playing.js
+msgid "The power mode is left alone on the battery."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/playing.js
+msgid "Your timed backup and the containers’ upgrade wait, for six hours at most. The system update does not, and one you start yourself still runs."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/playing.js
+msgid "Let them run"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/playing.js
+msgid "Playing a game"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/power/slept.js usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/quick/battery.js
@@ -21460,6 +22660,26 @@ msgstr ""
 msgid "Picture"
 msgstr ""
 
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "Anti-cheat: %s"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "The list changed this entry on %s."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "Enter opens the manual"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "The closest entry in the list is %s, which is not an answer. Ask for it by its name."
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/games.js
+msgid "It has no entry named %s."
+msgstr ""
+
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/glance.js
 msgid "next result"
 msgstr ""
@@ -21550,6 +22770,10 @@ msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/providers.js
 msgid "While the vault is open"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/providers.js
+msgid "What a community list says"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/modules/search/providers.js
@@ -23841,6 +25065,258 @@ msgstr ""
 msgid "Remove this rule"
 msgstr ""
 
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "CAD and 3D printing"
+msgstr ""
+
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "Design a part, slice it and print it."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "Parametric 3D design, for parts that have to fit."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "Designs a part from code, so a change is one number."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "Flat 2D drawings and plans."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "Models and repairs meshes, and renders them."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "Turns a model into instructions for the printer."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "A slicer with calibration tools for many printers."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/cad-3d-printing.json
+msgid "Another slicer, with settings for many printers."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "Data science"
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "Look at data, test an idea and draw the result."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "Statistics, with the results as tables and plots."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "Numerical computing in a language made for matrices."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "Plots and analyses data as you change it."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "A notebook for Python, R, Julia and other languages."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "Opens and edits SQLite databases."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "Queries databases of most kinds."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/data-science.json
+msgid "Maps and analyses geographic data."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "Electronics"
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "Draw schematics, lay out circuit boards, simulate circuits and program microcontrollers."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "Schematics, circuit boards and a 3D view of the board."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "A simpler circuit board editor, with libraries of its own."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "Writes programs and uploads them to Arduino and compatible boards."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "Simulates circuits with the SPICE engines."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "Electrical wiring and control diagrams."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "Shows the waveforms a digital simulation writes."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/electronics.json
+msgid "Makes enclosures and brackets from a few lines of code."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Game development"
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Make a game: the engine, the art, the levels and the sound."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "A game engine for 2D and 3D games."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Models, rigs and animates 3D characters and scenery."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Paints textures and concept art."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Draws icons and interface art that scales."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Builds tile-based levels and maps."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Draws and animates pixel art sprites."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Pixel art and animation, made with Godot."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/game-development.json
+msgid "Records and edits sound effects."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "Music production"
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "Record, arrange, mix and score music."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "Records and mixes many tracks."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "Makes beats and melodies from synthesisers and samples."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "A drum machine with a pattern editor."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "Writes and plays sheet music."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "Edits and cleans up a single recording."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "Hosts audio plug-ins and links them together."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/music-production.json
+msgid "Shows and changes how audio and MIDI connect between apps."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/security-lab.json
+msgid "Security lab"
+msgstr ""
+
+#: usr/share/amethystora/kits/about/security-lab.json
+msgid "Look at traffic, programs and web apps you have the right to test."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/security-lab.json
+msgid "Reads and takes apart packet captures made elsewhere."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/security-lab.json
+msgid "Tests a web application for flaws."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/security-lab.json
+msgid "Takes a program apart to read what it does."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/security-lab.json
+msgid "Reverse engineering in a friendlier window."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/security-lab.json
+msgid "Reads and edits the bytes of a file."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/security-lab.json
+msgid "Runs a virtual machine to try things in."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Streaming"
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Stream or record video, edit it and make the pictures around it."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Mixes cameras, screens and sound, and streams or records them."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Edits a recording into a video."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Cleans up a microphone with noise reduction and compression."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Edits the sound of a recording."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Draws overlays, logos and thumbnails that scale."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Paints artwork and thumbnails."
+msgstr ""
+
+#: usr/share/amethystora/kits/about/streaming.json
+msgid "Plays any file or stream, to check what viewers get."
+msgstr ""
+
 #: apps/connect/src/ask.rs
 #, python-brace-format
 msgid "“{name}” wants to send you a file"
@@ -23967,7 +25443,11 @@ msgid "“{name}” did not accept the pairing"
 msgstr ""
 
 #: apps/connect/src/service.rs
-msgid "The clocks of this computer and the phone differ by more than half an hour. Set both to the right time and try again."
+msgid "The clocks of this computer and the phone differ by more than two minutes. Set both to the right time and try again."
+msgstr ""
+
+#: apps/connect/src/service.rs
+msgid "The app on the phone is too old to pair safely. Update it and try again."
 msgstr ""
 
 #: apps/connect/src/service.rs
@@ -23997,10 +25477,6 @@ msgstr ""
 #: apps/connect/src/service.rs
 #, python-brace-format
 msgid "Key {key}. Compare it with the key on the other computer, and accept only if they are the same."
-msgstr ""
-
-#: apps/connect/src/service.rs
-msgid "This phone uses an older version of the protocol, which protects the pairing less well."
 msgstr ""
 
 #: apps/connect/src/service.rs

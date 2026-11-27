@@ -95,6 +95,43 @@
       datasourceTemplate: 'github-release-attachments',
       extractVersionTemplate: '^v(?<version>.*)$',
     },
+    // The gitleaks release the Checks workflow's Security job runs, with the SHA-256 of its tarball
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/workflows/checks\\.yml$/',
+      ],
+      matchStrings: [
+        'GITLEAKS_VERSION: (?<currentValue>\\S+)\\s+GITLEAKS_SHA256: (?<currentDigest>[a-f0-9]{64})',
+      ],
+      depNameTemplate: 'gitleaks/gitleaks',
+      datasourceTemplate: 'github-release-attachments',
+      extractVersionTemplate: '^v(?<version>.*)$',
+    },
+    // The cargo-deny release the Checks workflow checks the apps' crates with (.github/actions/install-cargo-deny)
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/actions/install-cargo-deny/action\\.yml$/',
+      ],
+      matchStrings: [
+        'CARGO_DENY_VERSION: (?<currentValue>\\S+)\\s+CARGO_DENY_SHA256: (?<currentDigest>[a-f0-9]{64})',
+      ],
+      depNameTemplate: 'EmbarkStudios/cargo-deny',
+      datasourceTemplate: 'github-release-attachments',
+    },
+    // The zizmor release the Security job runs from PyPI
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^\\.github/workflows/checks\\.yml$/',
+      ],
+      matchStrings: [
+        'ZIZMOR_VERSION: (?<currentValue>\\S+)',
+      ],
+      depNameTemplate: 'zizmor',
+      datasourceTemplate: 'pypi',
+    },
     {
       customType: 'regex',
       managerFilePatterns: [
@@ -137,6 +174,22 @@
       ],
       datasourceTemplate: 'docker',
       depTypeTemplate: 'pkg-template',
+    },
+    // The images `ame dev service` starts (dev-services/*.json) and the ones `ame dev gpu`
+    // runs (gpu-compute/images.json), each pinned by digest like the templates
+    // above, and pulled by digest on the person's machine. The image is the
+    // repository and its digest alone, since podman takes a tag with a digest
+    // only in some commands; the tag it follows is the next field.
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^system_files/shared/usr/share/amethystora/(dev-services/[^/]+|gpu-compute/images)\\.json$/',
+      ],
+      matchStrings: [
+        '"image": "(?<depName>[^":@]+)@(?<currentDigest>sha256:[a-f0-9]{64})",\\s*"tag":"(?<currentValue>[^"]+)"',
+      ],
+      datasourceTemplate: 'docker',
+      depTypeTemplate: 'dev-image',
     },
     // The Starship release 05-override-install.sh installs the shell prompt
     // from, with the SHA-256 of its tarball pinned beside it, which this
@@ -292,6 +345,18 @@
     {
       "matchDepTypes": ["pkg-template"],
       "groupName": "amethystora-pkg templates"
+    },
+    // A service or a check image follows its tag's digest. Moving it to the next
+    // major release (PostgreSQL 19) changes the data a volume holds and what the
+    // template says, so that is done by hand.
+    {
+      "matchDepTypes": ["dev-image"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "enabled": false
+    },
+    {
+      "matchDepTypes": ["dev-image"],
+      "groupName": "amethystora dev images"
     },
     // The apps' crates (apps/, cargo). gtk-rs releases gtk4 and libadwaita
     // together, and ICU4X its crates, which only work at matching versions,

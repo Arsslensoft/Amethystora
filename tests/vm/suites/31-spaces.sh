@@ -242,11 +242,14 @@ ame_ desktop sets off >/dev/null
 same "1 ame desktop sets off turns it off" "$(gs get "${WORKSPACES}" sets)" false
 open_menu
 if atspi has "Save this workspace" >/dev/null 2>&1; then not_ok "1 the menu has no Save this workspace while off"; else ok "1 the menu has no Save this workspace while off"; fi
-# Picking up after a restart (resume, on by default) keeps the sets object alive: with it off too, nothing is held
+# Picking up after a restart (resume, on by default) and putting a workspace away (put-away, on by default) keep the sets object
+# alive: with both off too, nothing is held
 gs set "${WORKSPACES}" resume false
+gs set "${WORKSPACES}" put-away false
 sleep 1
 check "1 nothing of the sets is held while off" is_true "${WS}.sets === null && ${WS}._setsMenu === null"
 gs set "${WORKSPACES}" resume true
+gs set "${WORKSPACES}" put-away true
 close_menu
 ame_ desktop sets on >/dev/null
 open_menu

@@ -77,7 +77,7 @@ act_on() {
 }
 
 act() {
-    local mode path output line file outcome mode_for_file
+    local mode path output line file outcome mode_for_file scanned
     local -a files=() errors=()
     local -A found=()
     mode="$(/usr/libexec/amethystora-security-config ON_DETECTION)"
@@ -94,7 +94,9 @@ act() {
 
     # clamd reads each file through the descriptor passed to it, so it needs no access of its own.
     # The paths are absolute, so none of them can be taken for an option.
-    output="$(clamdscan --fdpass --no-summary --infected "${files[@]}" 2>&1)"
+    # 0 is nothing found and 1 something found; anything else is a scan that did not happen (clamd not reachable, say),
+    # and then a file with no FOUND line was not scanned, which is not the same as clean
+    output="$(clamdscan --fdpass --no-summary --infected "${files[@]}" 2>&1)" && scanned=0 || scanned=$?
     # A signature has no spaces, so a FOUND line splits cleanly. An ERROR line's message can hold ": "
     # itself (lstat() failed: ...), so those are matched against the paths asked about instead.
     while IFS= read -r line; do
@@ -108,6 +110,7 @@ act() {
     for file in "${files[@]}"; do
         if [[ -z "${found[${file}]+set}" ]]; then
             outcome=clean
+            (( scanned > 1 )) && outcome=failed
             for line in "${errors[@]}"; do
                 [[ "${line}" == "${file}: "* ]] && outcome=failed
             done

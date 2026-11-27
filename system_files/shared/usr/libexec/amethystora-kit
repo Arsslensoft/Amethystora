@@ -1,0 +1,200 @@
+#!/usr/bin/bash
+# `ame apps kit`: the apps for a line of work, picked once and installed in one go (plans/done/PLAN-kits.md).
+#
+#   amethystora-kit list [--json]       the kits, and how much of each is here
+#   amethystora-kit show KIT [--json]   what a kit holds, each app with the reason it is there
+#   amethystora-kit add KIT             install what is missing: `ame setup apply` on the kit's file, which shows it and asks
+#   amethystora-kit remove KIT          the kit's apps that are installed, asked about one by one
+#
+# A kit is two files in /usr/share/amethystora/kits: KIT.json, a setup file with its apps part only (what `ame setup save`
+# writes, so `amethystora-setup`'s own check reads it and refuses what it does not know), and about/KIT.json, its name,
+# its description and a name and a reason for each app, which are what is translated. A kit names Flathub apps and nothing
+# else: no setting, no Homebrew formula, no container and no remote. It never installs into the image and never layers a
+# package, and `add` never passes --remove: it adds, and an app another kit or you installed is left as it is.
+# `remove` is not `ame setup apply --remove`, which would take away everything the kit does not name: it asks about each
+# of the kit's own apps, and an app's data goes to the trash, where `ame apps undo-uninstall` brings it back.
+# The environment names the folder and the two helpers only for the build's test.
+
+set -uo pipefail
+
+export TEXTDOMAIN=amethystora
+# shellcheck source=/dev/null
+source gettext.sh
+
+KITS="${AMETHYSTORA_KITS:-/usr/share/amethystora/kits}"
+SETUP="${AMETHYSTORA_SETUP:-/usr/libexec/amethystora-setup}"
+UNINSTALL="${AMETHYSTORA_UNINSTALL:-/usr/libexec/amethystora-uninstall}"
+USAGE="usage: ame apps kit list [--json] | show KIT [--json] | add KIT | remove KIT"
+
+die() {
+    printf '%s\n' "$*" >&2
+    exit 1
+}
+
+interactive() { [[ -t 0 && -t 1 ]]; }
+
+# gum asks, as it does everywhere in the image; read is what is there if it is not
+confirm() {
+    local answer
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm --default="$2" "$1"
+        return
+    fi
+    read -r -p "$1 [y/N] " answer || return 1
+    [[ "${answer}" =~ ^[Yy] ]]
+}
+
+# What the kits' own files say, in the session's language where there is a translation (they are read by
+# check-translations.js from about/*.json, which is why none of it is spelled out here)
+say() { command gettext -- "$1"; }
+
+# The kits that are whole: a setup file, its words, and a name that cannot be read as an option
+kit_ids() {
+    local file id
+    for file in "${KITS}"/*.json; do
+        [[ -f "${file}" ]] || continue
+        id="${file##*/}"
+        id="${id%.json}"
+        [[ "${id}" =~ ^[a-z][a-z0-9-]*$ && -f "${KITS}/about/${id}.json" ]] && printf '%s\n' "${id}"
+    done
+}
+
+# Each Flatpak app there is, and the installation it is in
+installed_apps() { flatpak list --app --columns=application,installation 2>/dev/null; }
+
+# Every kit as JSON, in English: {id, name, description, apps: [{app, name, why, installed}]}, the apps as the setup file
+# names them, and the words from the kit's about file
+kits_json() {
+    local id
+    local -a ids=() files=()
+    mapfile -t ids < <(kit_ids)
+    if [[ ${#ids[@]} -eq 0 ]]; then
+        echo '[]'
+        return
+    fi
+    for id in "${ids[@]}"; do
+        files+=("${KITS}/about/${id}.json" "${KITS}/${id}.json")
+    done
+    jq -sc --argjson ids "$(printf '%s\n' "${ids[@]}" | jq -R . | jq -sc .)" \
+        --argjson here "$(installed_apps | cut -f1 | jq -R . | jq -sc .)" '
+        . as $all | [range(0; $ids | length) as $i | $all[2 * $i] as $about | $all[2 * $i + 1] as $setup
+            # A kit holds apps from Flathub and nothing else: a setup file with anything more (Homebrew, a theme, a setting) is no kit
+            | select($setup | type == "object" and keys == ["flatpaks", "version"] and (.flatpaks | type == "object" and keys == ["system"]))
+            | {
+            id: $ids[$i], name: $about.name, description: $about.description,
+            apps: [$setup.flatpaks.system[]?.app | . as $app
+                | (($about.apps // []) | map(select(.app == $app)) | first // {}) as $words
+                | {app: $app, name: ($words.name // $app), why: ($words.why // ""), installed: ($app | IN($here[]))}]}]' \
+        "${files[@]}" || die "The kits could not be read."
+}
+
+# One kit's JSON, or nothing when there is no such kit
+one_kit() { kits_json | jq -ce --arg id "$1" '.[] | select(.id == $id)'; }
+
+# The kit named on the command line, as JSON; leaves with the reason when there is none
+named() {
+    local kit name="$1"
+    [[ "${name}" =~ ^[a-z][a-z0-9-]*$ ]] && kit="$(one_kit "${name}")" ||
+        die "$(eval_gettext "There is no kit called \${name}. ame apps kit list names them.")"
+    printf '%s\n' "${kit}"
+}
+
+# What a kit is and holds, in words: its name, what it is for, and each app with why it is there
+describe() {
+    local kit="$1" app label here why line
+    printf '%s\n' "$(say "$(jq -r .name <<<"${kit}")")"
+    printf '%s\n\n' "$(say "$(jq -r .description <<<"${kit}")")"
+    while IFS=$'\t' read -r app label here why; do
+        line="  ${label} (${app})"
+        # Translators: said after an app's name, when it is installed on this computer already
+        [[ "${here}" == true ]] && line+=", $(gettext "installed")"
+        printf '%s\n' "${line}"
+        [[ -z "${why}" ]] || printf '      %s\n' "$(say "${why}")"
+    done < <(jq -r '.apps[] | [.app, .name, .installed, .why] | @tsv' <<<"${kit}")
+}
+
+list() {
+    local kits id total here
+    kits="$(kits_json)"
+    if [[ "${1:-}" == --json ]]; then
+        # Each kit's name and description in the session's language as well (title, summary), for Control's list, which
+        # reads this in the background
+        local word
+        local -a words=() said=()
+        mapfile -t words < <(jq -r '.[] | .name, .description' <<<"${kits}")
+        for word in "${words[@]}"; do said+=("$(say "${word}")"); done
+        jq -c --args '($ARGS.positional | length / 2) as $n | $ARGS.positional as $p
+            | (reduce range(0; $n) as $i ({}; .[$p[$i]] = $p[$n + $i])) as $t
+            | map(. + {title: ($t[.name] // .name), summary: ($t[.description] // .description)})' "${words[@]}" "${said[@]}" <<<"${kits}"
+        return
+    fi
+    [[ $# -eq 0 ]] || { echo "${USAGE}" >&2; exit 64; }
+    while IFS=$'\t' read -r id total here; do
+        printf '%-18s %s\n' "${id}" "$(say "$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .name' <<<"${kits}")")"
+        printf '    %s\n' "$(say "$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .description' <<<"${kits}")")"
+        printf '    %s\n' "$(eval_ngettext "\${total} app, \${here} of them installed here" "\${total} apps, \${here} of them installed here" "${total}")"
+    done < <(jq -r '.[] | [.id, (.apps | length), ([.apps[] | select(.installed)] | length)] | @tsv' <<<"${kits}")
+}
+
+show() {
+    local kit name
+    [[ $# -ge 1 ]] || { echo "${USAGE}" >&2; exit 64; }
+    name="$1"
+    kit="$(named "${name}")" || exit 1
+    if [[ "${2:-}" == --json ]]; then
+        printf '%s\n' "${kit}"
+        return
+    fi
+    [[ $# -eq 1 ]] || { echo "${USAGE}" >&2; exit 64; }
+    describe "${kit}"
+    echo
+    echo "$(eval_gettext "Add what is missing with: ame apps kit add \${name}")"
+}
+
+add() {
+    local kit
+    [[ $# -eq 1 ]] || { echo "${USAGE}" >&2; exit 64; }
+    kit="$(named "$1")" || exit 1
+    describe "${kit}"
+    echo
+    echo "$(gettext "This installs the apps above that this computer does not have, from Flathub, and changes nothing else. It takes nothing away.")"
+    echo
+    AMETHYSTORA_SETUP_KIT=1 "${SETUP}" apply "${KITS}/$1.json"
+}
+
+remove() {
+    local kit app label installation removed=false data failed=0
+    [[ $# -eq 1 ]] || { echo "${USAGE}" >&2; exit 64; }
+    kit="$(named "$1")" || exit 1
+    local -a found=()
+    # The kit's own apps that are installed, with the installation each is in
+    while IFS=$'\t' read -r app installation; do
+        [[ "${installation}" == system || "${installation}" == user ]] &&
+            jq -e --arg app "${app}" '.apps[] | select(.app == $app)' <<<"${kit}" >/dev/null && found+=("${app}"$'\t'"${installation}")
+    done < <(installed_apps)
+    if [[ ${#found[@]} -eq 0 ]]; then
+        echo "$(gettext "None of this kit's apps is installed here.")"
+        return 0
+    fi
+    interactive || die "$(gettext "Removing asks about each app, which needs a terminal.")"
+    echo "$(gettext "These apps of the kit are installed. You are asked about each one. An app another kit or you installed is asked about too, and one you keep stays as it is. An app's data goes to the trash, and ame apps undo-uninstall brings it back until the trash is emptied.")"
+    echo
+    for data in "${found[@]}"; do
+        IFS=$'\t' read -r app installation <<<"${data}"
+        label="$(jq -r --arg app "${app}" '.apps[] | select(.app == $app) | .name' <<<"${kit}")"
+        if confirm "$(eval_gettext "Remove \${label} (\${app})?")" false; then
+            removed=true
+            "${UNINSTALL}" remove "${app}" "--${installation}" || { echo "$(eval_gettext "\${app} could not be removed.")" >&2; failed=1; }
+        fi
+    done
+    [[ "${removed}" == true ]] || echo "$(gettext "Nothing was removed.")"
+    return "${failed}"
+}
+
+case "${1:-}" in
+    list) shift; list "$@" ;;
+    show) shift; show "$@" ;;
+    add) shift; add "$@" ;;
+    remove) shift; remove "$@" ;;
+    *) echo "${USAGE}" >&2; exit 64 ;;
+esac

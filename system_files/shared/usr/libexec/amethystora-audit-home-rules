@@ -79,8 +79,15 @@ decide_sensor() {
     return 1
 }
 
-# A watch for the sensor, one "KIND KEY PATH" line (KIND: tree, file, exec-tree, read-tree, read-file)
-watchlist() { printf '%s %s %s\n' "$1" "$2" "$3" >>"${WATCHLIST}.new"; }
+# A watch for the sensor, one "KIND KEY PATH" line (KIND: tree, file, exec-tree, read-tree, read-file). A path with a
+# line break or other control character in it is not one line, so it gets no watch, and that is said.
+watchlist() {
+    if [[ "$3" == *[[:cntrl:]]* ]]; then
+        echo "No watch for a path with a control character in it (key $2)" >&2
+        return 0
+    fi
+    printf '%s %s %s\n' "$1" "$2" "$3" >>"${WATCHLIST}.new"
+}
 
 # One shipped audit rule line turned into a watch-list line for the sensor. A -w folder or file, and the
 # folder a program runs from; a module or input rule needs none, since the plan's key is enough.

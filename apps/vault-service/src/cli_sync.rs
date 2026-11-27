@@ -180,6 +180,7 @@ fn status(args: &Args) -> Result<(), u8> {
     }
     write_marker(answer["address"].as_str().unwrap_or(""));
     println!("connected\tyes");
+    println!("backend\t{}", answer["backend"].as_str().unwrap_or("bitwarden"));
     println!("address\t{}", data(answer["address"].as_str().unwrap_or("")));
     println!("email\t{}", data(answer["email"].as_str().unwrap_or("")));
     println!("linked\t{}", answer["linked"]);
@@ -242,8 +243,9 @@ fn choose(args: &Args) -> Result<(), u8> {
     Ok(())
 }
 
-/// `kind KIND off|on|sealed`: the one switch of a kind, in the words a person types (`passwords`, `codes`, `backup-codes`, `keys`, `certificates`, `files`)
+/// `kind KIND off|on`: the one switch of a kind, in the words a person types (`passwords`, `codes`, `backup-codes`, `keys`, `certificates`, `files`)
 fn kind(args: &Args) -> Result<(), u8> {
+    // `sealed` goes to the service all the same: it is the one that says, in a word of its own, that it is gone
     let (word, choice) = (args.word(2).ok_or(USAGE)?, args.word(3).ok_or(USAGE)?);
     if amethystora_vault_core::sync::kinds::ALL.iter().all(|(name, _)| *name != word) || !matches!(choice, "off" | "on" | "sealed") {
         return Err(USAGE);
@@ -270,11 +272,37 @@ fn chosen(chain: &[Value]) -> Option<&Value> {
 
 fn connect(args: &Args) -> Result<(), u8> {
     let address = args.word(2).ok_or(USAGE)?;
+    let backend = match args.word(3) {
+        None => None,
+        Some(word @ ("kemlock" | "bitwarden")) => Some(word),
+        Some(_) => return Err(USAGE),
+    };
+    // Choosing the Kemlock API for a vault that syncs through Bitwarden's moves it, and the person is told what that does before anything is asked
+    let mut reconnect = false;
+    if backend == Some("kemlock") {
+        let status = ask(json!({"op": "sync-status"}))?;
+        if status["connected"] == json!(true) {
+            reconnect = true;
+            if status["backend"] != json!("kemlock") {
+                eprintln!("{}", said(args, "say-sync-move-first", "This vault syncs with this server through Bitwarden's API. Moving to the Kemlock API writes the vault's items there as Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more, so Bitwarden's apps and browser extension will not see what changes from now on.", &[]));
+                if plain(&said(args, "say-sync-move-ask", "Type yes to move to the Kemlock API: ", &[])).as_deref() != Some("yes") {
+                    return Err(1);
+                }
+            }
+        }
+    }
     eprintln!("{}", said(args, "say-sync-intro", "This sends what the vault holds that syncs to the server, encrypted, and keeps it in step. Whoever opens this vault can reach that whole account, so a dedicated account is the better choice.", &[]));
     let address = address.to_string();
     let email = plain(&said(args, "say-sync-email", "Email address of the account: ", &[])).ok_or(1u8)?;
-    let method = plain(&said(args, "say-sync-method", "Log in with the personal API key (it asks no code) or the master password? Type key or password: ", &[])).ok_or(1u8)?;
+    // Enter is the master password: a Kemlock Server has no API key, and says so by being the server that answers
+    let method = if backend == Some("kemlock") { "password".to_string() } else { plain(&said(args, "say-sync-method", "Log in with the personal API key (Vaultwarden and Bitwarden only; it asks no code) or the master password? Type key, or press Enter for the password: ", &[])).unwrap_or_else(|| "password".to_string()) };
     let mut request = json!({"op": "sync-connect", "address": address, "email": email});
+    if let Some(backend) = backend {
+        request["backend"] = json!(backend);
+    }
+    if reconnect {
+        request["reconnect"] = json!(true);
+    }
     if method == "key" {
         let id = plain(&said(args, "say-sync-api-id", "API key client_id: ", &[])).ok_or(1u8)?;
         let secret = read_secret(&said(args, "say-sync-api-secret", "API key client_secret: ", &[])).ok_or(1u8)?;
@@ -325,6 +353,14 @@ fn connect(args: &Args) -> Result<(), u8> {
                 }
                 request["confirm_kdf"] = json!(memory);
             }
+            "kdf-weak-confirm" => {
+                let (memory, passes) = (answer["memory"].as_u64().unwrap_or(0) as u32, answer["iterations"].as_u64().unwrap_or(0) as u32);
+                let typed = kept(&mut talk, || plain(&said(args, "say-sync-kdf-weak", "This account's key is made with {m} MiB and {n} passes, which is less than Kemlock's own 64 MiB and 3, and makes the master password easier to guess. Type yes to go on: ", &[("m", &memory.to_string()), ("n", &passes.to_string())]))).ok_or(1u8)?;
+                if typed != "yes" {
+                    return Err(1);
+                }
+                request["confirm_kdf"] = json!(amethystora_vault_core::kemlock::sync::signin::confirm_token(amethystora_vault_core::kemlock::master::Confirm::Weak { memory_mib: memory, iterations: passes }));
+            }
             "kdf-confirm" => {
                 let rounds = answer["iterations"].as_u64().unwrap_or(0);
                 let typed = kept(&mut talk, || plain(&said(args, "say-sync-kdf", "This account's key is made with only {n} rounds, which is far fewer than Bitwarden's default and easier to guess a password against. Type yes to go on: ", &[("n", &rounds.to_string())]))).ok_or(1u8)?;
@@ -338,10 +374,11 @@ fn connect(args: &Args) -> Result<(), u8> {
                 let provider = if providers.len() == 1 {
                     providers[0]
                 } else {
-                    match kept(&mut talk, || plain(&said(args, "say-sync-provider", "Which second step? Type authenticator, email or yubikey: ", &[]))).as_deref() {
+                    match kept(&mut talk, || plain(&said(args, "say-sync-provider", "Which second step? Type authenticator, email, yubikey or recovery: ", &[]))).as_deref() {
                         Some("authenticator") if providers.contains(&0) => 0,
                         Some("email") if providers.contains(&1) => 1,
                         Some("yubikey") if providers.contains(&3) => 3,
+                        Some("recovery") if providers.contains(&8) => 8,
                         _ => return Err(1),
                     }
                 };
@@ -353,6 +390,7 @@ fn connect(args: &Args) -> Result<(), u8> {
                 let prompt = match provider {
                     0 => said(args, "say-sync-code-app", "Code from your authenticator app: ", &[]),
                     1 => said(args, "say-sync-code-email", "Code sent to your email: ", &[]),
+                    8 => said(args, "say-sync-code-recovery", "Recovery code (it turns off the account's second steps): ", &[]),
                     _ => said(args, "say-sync-code-yubikey", "Touch your YubiKey: ", &[]),
                 };
                 let code = kept(&mut talk, || read_secret(&prompt)).ok_or(1u8)?;
@@ -378,5 +416,14 @@ fn connect(args: &Args) -> Result<(), u8> {
     write_marker(&address);
     eprintln!("{}", said(args, "say-sync-done", "Connected. While the vault is open, it and the account keep each other up to date.", &[]));
     println!("connected\t{}", data(answer["address"].as_str().unwrap_or("")));
+    if answer["backend"] == json!("kemlock") {
+        eprintln!("{}", said(args, "say-sync-kemlock", "This is a Kemlock Server, and the vault synced with its own API: every kind of item goes, and the Kemlock apps open them.", &[]));
+    }
+    if answer["enrolled"] == json!(true) {
+        eprintln!("{}", said(args, "say-sync-enrolled", "This account was made through Bitwarden's API, so the Bitwarden hash of its master password was sent to the server once, to give the account its Kemlock keys. From now on the password signs in to both.", &[]));
+    }
+    if answer["moved"] == json!(true) {
+        eprintln!("{}", said(args, "say-sync-moved", "The vault's items were moved from their Bitwarden copies to Kemlock's own items. The Bitwarden copies stay on the server as they are and are not updated any more.", &[]));
+    }
     Ok(())
 }

@@ -57,8 +57,19 @@ grep -q 'Some("commit-dev") if rest.len() == 1 => self.dev_gate(uid, &rest\[0\])
 grep -q 'fn dev_gate' "${SRC}/plugin-host/src/rootcmd.rs" && grep -q 'const DEV_HOLD: u64 = 360' "${SRC}/plugin-host/src/rootcmd.rs" || fail "commit-dev is not held to one plugin"
 # An account's folder of the store is its own to read, and nobody else's (and the accounts folder cannot be listed)
 grep -qE '^d /var/lib/amethystora/plugins/accounts 0711 root root' /usr/lib/tmpfiles.d/amethystora-plugins.conf || fail "the accounts folder of the store can be listed"
-grep -q 'fn seal_account' "${SRC}/plugin-host/src/store.rs" && grep -q '0o750' "${SRC}/plugin-host/src/store.rs" && grep -q 'self.store.seal_account(uid)' "${SRC}/plugin-host/src/rootcmd.rs" ||
+grep -q 'fn seal_account' "${SRC}/plugin-host/src/store.rs" && grep -q '0o750' "${SRC}/plugin-host/src/store.rs" && grep -q 'self.store.seal_all()' "${SRC}/plugin-host/src/rootcmd.rs" ||
     fail "an account's folder of the store is not closed to the other accounts"
+# ...for every account at every verb, and a seal that cannot be made is said; the files are made closed to others from the start
+grep -q 'fn seal_all' "${SRC}/plugin-host/src/store.rs" && grep -q 'mode(0o640)' "${SRC}/plugin-host/src/store.rs" && grep -qF 'eprintln!("amethystora-plugin-root: {why}")' "${SRC}/plugin-host/src/rootcmd.rs" ||
+    fail "a seal that cannot be made is not said, or a file of the store is made open to others"
+# A plugin of the image is held to its folder and to what it was given, not to the digest of the day it was added (an image update changes its files)
+grep -q 'fn verify_grant' "${SRC}/plugin-host/src/store.rs" && grep -q 'verify_grant(id, &grant)' "${SRC}/plugin-host/src/host.rs" && grep -q 'verify_grant(id, grant)' "${SRC}/plugin-host/src/audit.rs" ||
+    fail "a plugin of the image is stopped by an image update"
+# No id names a file the host keeps beside the plugins' state folders
+grep -qF 'Some(&("secrets" | "json" | "new"))' "${SRC}/plugin-host/src/manifest.rs" || fail "a plugin id may name one of the host's own files"
+# The consent says a host's hourly limit, and an update that loses a lower one is asking for more
+grep -qF 'an hour to it (1 MiB is usual)' "${COMMAND}" && grep -qF 'kept[substr($2, 9)]' "${COMMAND}" || fail "a host's byte limit is not shown, or a dropped lower one is not asked about"
+grep -qF 'new_limit(h) > old_limit(h)' "${SRC}/plugin-host/src/rootcmd.rs" || fail "the helper does not take a dropped lower limit as asking for more"
 # A `files` place is bound from the descriptor it was opened on, never by the name a link could be put under while the sandbox starts
 grep -q '"--bind-fd"' "${SRC}/plugin-host/src/sandbox.rs" && grep -q 'files::open(' "${SRC}/plugin-host/src/host.rs" || fail "a files place is mounted by its name"
 # The filter refuses the socket families the network namespace does not keep apart

@@ -63,14 +63,14 @@ case "${FLAVOR}:${CARD}" in
         KIND=nvidia-card
         TARGET="${IMAGE}-nvidia-open"
         SUMMARY="$(N_ 'This machine has an NVIDIA graphics card')"
-        BODY="$(N_ "\${TARGET} is Amethystora with NVIDIA's driver for it, which this image does not have. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with a key of this machine's own, which the kernel trusts only with Secure Boot on. Nothing changes unless you switch.")"
+        BODY="$(N_ "\${TARGET} is Amethystora with NVIDIA's driver for it, which this image does not have. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with the key of the project that builds the image's kernel modules, which the kernel trusts only once it is enrolled with Secure Boot on. Nothing changes unless you switch.")"
         ;;
     main:lts | nvidia-open:lts)
         KIND=nvidia-lts-card
         TARGET="${WITHOUT}-nvidia-lts"
         SUMMARY="$(N_ "This machine's NVIDIA card needs NVIDIA's older driver")"
         if [[ "${FLAVOR}" == main ]]; then
-            BODY="$(N_ "Its card is a GeForce 900 or 10 series, or as old: \${TARGET} carries the driver that drives it, the last NVIDIA makes for it. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with a key of this machine's own, which the kernel trusts only with Secure Boot on. Nothing changes unless you switch.")"
+            BODY="$(N_ "Its card is a GeForce 900 or 10 series, or as old: \${TARGET} carries the driver that drives it, the last NVIDIA makes for it. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with the key of the project that builds the image's kernel modules, which the kernel trusts only once it is enrolled with Secure Boot on. Nothing changes unless you switch.")"
         else
             BODY="$(N_ 'Its card is a GeForce 900 or 10 series, or as old: ${TARGET} carries the driver that drives it, the last NVIDIA makes for it. Nothing changes unless you switch.')"
         fi
@@ -79,13 +79,13 @@ case "${FLAVOR}:${CARD}" in
         KIND=no-nvidia-card
         TARGET="${WITHOUT}"
         SUMMARY="$(N_ 'This machine has no NVIDIA graphics card')"
-        BODY="$(N_ "It runs \${IMAGE}, which carries NVIDIA's driver. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with a key of this machine's own, which the kernel trusts only with Secure Boot on. \${TARGET} has no NVIDIA driver and keeps lockdown on. Nothing changes unless you switch.")"
+        BODY="$(N_ "It runs \${IMAGE}, which carries NVIDIA's driver. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with the key of the project that builds the image's kernel modules, which the kernel trusts only once it is enrolled with Secure Boot on. \${TARGET} has no NVIDIA driver and keeps lockdown on. Nothing changes unless you switch.")"
         ;;
     nvidia-*:older)
         KIND=old-nvidia-card
         TARGET="${WITHOUT}"
         SUMMARY="$(N_ "This machine's NVIDIA card is older than any NVIDIA driver drives")"
-        BODY="$(N_ "It runs \${IMAGE}, whose driver cannot drive it: the open driver nouveau, in \${TARGET}, does. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with a key of this machine's own, which the kernel trusts only with Secure Boot on. \${TARGET} keeps lockdown on. Nothing changes unless you switch.")"
+        BODY="$(N_ "It runs \${IMAGE}, whose driver cannot drive it: the open driver nouveau, in \${TARGET}, does. Without Secure Boot, the NVIDIA images leave kernel lockdown off: their driver is signed with the key of the project that builds the image's kernel modules, which the kernel trusts only once it is enrolled with Secure Boot on. \${TARGET} keeps lockdown on. Nothing changes unless you switch.")"
         ;;
 esac
 

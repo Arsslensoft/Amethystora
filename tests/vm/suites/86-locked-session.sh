@@ -52,6 +52,16 @@ session_terminal() {
         systemd-run --user --pty --wait --quiet --collect -- /usr/bin/bash -lc "$*"
 }
 same() { if [[ "$2" == "$3" ]]; then ok "$1"; else not_ok "$1" "expected: $3" "found: $2"; fi; }
+# Root alone talks to USBGuard (G-1 of the audit of 2026-11-16): a group in IPCAllowedGroups, wheel as Fedora ships
+# it, could add a rule that lets any device in without a password. The account, an administrator, is refused too
+root_only() {
+    same "$1: no group may talk to USBGuard" "$(grep -E '^IPCAllowedGroups=' /etc/usbguard/usbguard-daemon.conf)" "IPCAllowedGroups="
+    if runuser -u "${TEST_USER}" -- usbguard list-rules >/dev/null 2>&1; then
+        not_ok "$1: ${TEST_USER} ($(id -nG "${TEST_USER}")) reads USBGuard's rules without sudo"
+    else
+        ok "$1: ${TEST_USER} may not talk to USBGuard without sudo"
+    fi
+}
 record() { runuser -u "${TEST_USER}" -- env HOME="${HOME_TEST}" /usr/libexec/amethystora-security-status --json 2>/dev/null |
     jq -c --arg id "$1" '[.. | objects | select(.id? == $id)][0] | {state, text}'; }
 locked() { [[ "$(loginctl show-session "${SESSION}" -p LockedHint --value)" == yes ]]; }
@@ -105,6 +115,7 @@ if [[ "${SUITE_PHASE}" == 1 ]]; then
     same "USBGuard's D-Bus service is enabled" "$(systemctl is-enabled usbguard-dbus.service 2>&1)" enabled
     check "USBGuard and its D-Bus service run" systemctl is-active --quiet usbguard.service usbguard-dbus.service
     same "the rules allow every device, and nothing else" "$(cat /etc/usbguard/rules.conf)" 'allow id *:* label "amethystora-usb-locked"'
+    root_only locked
     same "the report says it blocks while the screen is locked" "$(record usb-protection)" \
         '{"state":"on","text":"Blocks new USB devices while the screen is locked; a plain keyboard or mouse still works, so that you can unlock"}'
     # GNOME's plugin in the session that was running already: it saw the name appear, and Settings may not change it
@@ -184,6 +195,7 @@ if [[ "${SUITE_PHASE}" == 3 ]]; then
     if [[ $? -eq 0 ]]; then ok "ame security usb on, after locked"; else not_ok "ame security usb on" "$(tail -n 15 <<<"${out}")"; fi
     same "USBGuard's D-Bus service is masked again" "$(systemctl is-enabled usbguard-dbus.service 2>&1)" masked
     check "no rule of GNOME's is left" sh -c '! usbguard list-rules | grep -q GNOME_SETTINGS_DAEMON_RULE'
+    root_only on
     same "the report says it blocks every new device" "$(record usb-protection)" \
         '{"state":"on","text":"Allows what is plugged in now, and blocks any new USB device until you allow it"}'
     usb_next '{"plug": ["stick2"]}'
@@ -195,6 +207,14 @@ if [[ "${SUITE_PHASE}" == 4 ]]; then
     check "a second stick shows up" wait_for 60 usb_device "QEMU USB HARDDRIVE" VMLAB-STICK-2
     same "a new stick is blocked while the screen is unlocked, under on" "$(authorized "QEMU USB HARDDRIVE" VMLAB-STICK-2)" 0
     same "the stick allowed when on was set up still works" "$(authorized "QEMU USB HARDDRIVE" VMLAB-STICK-1)" 1
+    # Allowed through the recipe, which lists and allows with sudo now that the account's group may not
+    out="$(session_terminal 300 "${SUDO[@]}" 'Allow which device\?' $'\r' -- ame security usb allow 2>&1)"
+    if [[ $? -eq 0 ]] && wait_for 30 is_authorized "QEMU USB HARDDRIVE" VMLAB-STICK-2 1; then
+        ok "ame security usb allow lets the blocked stick in"
+    else
+        not_ok "ame security usb allow did not let the stick in" "$(tail -n 15 <<<"${out}")"
+    fi
+    check "the stick allowed is in the rules, for after a reboot" grep -q 'serial "VMLAB-STICK-2"' /etc/usbguard/rules.conf
     out="$(session_terminal 120 "${SUDO[@]}" -- ame security usb off 2>&1)"
     if [[ $? -eq 0 ]]; then ok "ame security usb off"; else not_ok "ame security usb off" "$(tail -n 15 <<<"${out}")"; fi
     same "USBGuard is off and its D-Bus service masked" \

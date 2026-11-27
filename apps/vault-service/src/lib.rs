@@ -11,6 +11,7 @@ pub mod plugs;
 pub mod server;
 pub mod service;
 pub mod sync;
+pub mod sync_kemlock;
 pub mod ssh;
 pub mod protect;
 pub mod credentials;

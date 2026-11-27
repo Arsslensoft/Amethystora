@@ -1,0 +1,41 @@
+{
+  "name": "Music production",
+  "description": "Record, arrange, mix and score music.",
+  "apps": [
+    {
+      "app": "org.ardour.Ardour",
+      "name": "Ardour",
+      "why": "Records and mixes many tracks."
+    },
+    {
+      "app": "io.lmms.LMMS",
+      "name": "LMMS",
+      "why": "Makes beats and melodies from synthesisers and samples."
+    },
+    {
+      "app": "org.hydrogenmusic.Hydrogen",
+      "name": "Hydrogen",
+      "why": "A drum machine with a pattern editor."
+    },
+    {
+      "app": "org.musescore.MuseScore",
+      "name": "MuseScore",
+      "why": "Writes and plays sheet music."
+    },
+    {
+      "app": "org.audacityteam.Audacity",
+      "name": "Audacity",
+      "why": "Edits and cleans up a single recording."
+    },
+    {
+      "app": "studio.kx.carla",
+      "name": "Carla",
+      "why": "Hosts audio plug-ins and links them together."
+    },
+    {
+      "app": "org.rncbc.qpwgraph",
+      "name": "qpwgraph",
+      "why": "Shows and changes how audio and MIDI connect between apps."
+    }
+  ]
+}

@@ -30,6 +30,7 @@ import {Hello} from './pill/hello.js';
 import {Hold} from './pill/hold.js';
 import {Media} from './pill/media.js';
 import {Meetings} from './pill/meeting.js';
+import {FirstApps} from './pill/apps.js';
 import {Moving, releaseKeeper} from './pill/moving.js';
 import {Osd} from './pill/osd.js';
 import {Phone} from './pill/phone.js';
@@ -176,6 +177,7 @@ export class Pill {
         // The focus module tells the rule again when it starts, and the present module its mark
         this._focusRule = null;
         this._presentMark = null;
+        this._playingMark = null;
     }
 
     get _comfort() {
@@ -220,6 +222,7 @@ export class Pill {
             connect: this._ext.modules?.get('connect') ?? null,
             flatpaks: () => this._ext.modules?.get('dock')?.flatpakUpdating ?? [],
             awake: () => this._settings?.get_boolean('stay-awake') ?? false,
+            covered: () => this._apps?.covers ?? false,
         }));
         // What held on through a lock has nobody to go to when moving is off, and the pill's own part gives it back by itself
         if (!this._moving)
@@ -254,10 +257,11 @@ export class Pill {
         // The apps that always wait for the digest hold their banners also while the digest itself is off
         this._toggle('_hold', on('quiet') || on('quiet-night') || on('digest') ||
             this._settings.get_strv('digest-wait').length > 0 || on('later') || this._focusWants() ||
-            !!this._presentMark,
+            !!this._presentMark || !!this._playingMark,
             () => new Hold(this._settings, this._capture, this._activities, (...a) => this.notice(...a), () => this._glass()));
         this._hold?.setFocus(this._focusRule ?? null);
         this._hold?.setPresenting(!!this._presentMark);
+        this._hold?.setPlaying(!!this._playingMark);
         // A meeting about to start: a part of the live pill, while both keys are on
         const notice = (...a) => this.notice(...a);
         this._toggle('_meetings', !!this._clock && on('meetings'), () => new Meetings(this._activities, notice, this._settings));
@@ -304,6 +308,24 @@ export class Pill {
 
     presentChanged() {
         this._activities?.update('present');
+    }
+
+    // ---- While you play (modules/power/playing.js) ----
+
+    // Its mark in the pill (an activity, or null), and banners held while it is there
+    setPlaying(mark) {
+        if ((this._playingMark ?? null) === (mark ?? null))
+            return;
+        this._playingMark = mark ?? null;
+        this._activities?.set('playing', this._playingMark);
+        // Told before the hold may stop, so that what it held is said once ("N waiting in the list")
+        this._hold?.setPlaying(Boolean(this._playingMark));
+        if (this._settings)
+            this._sync();
+    }
+
+    playingChanged() {
+        this._activities?.update('playing');
     }
 
     // ---- A focus profile (modules/focus.js) ----
@@ -456,6 +478,11 @@ export class Pill {
             ['_timer', () => this._newTimer(0)],
             ['_recording', () => new Recording(this._activities, notice, this._capture, reduce)],
             ['_update', () => new Update(this._activities)],
+            // The apps the computer comes with, while they install: what moving says of the Flatpak pulls goes with it
+            ['_apps', () => new FirstApps(this._activities, {
+                awake: () => this._moving?.awake ?? false,
+                changed: () => this._moving?.refresh(),
+            })],
             ['_news', () => new News(this._activities, this._settings)],
             ['_resume', () => new ResumeCard(this._activities, () => this._ext.modules?.get('workspaces')?.resume ?? null)],
             ['_putaway', () => new PutAwayCards(this._activities, () => this._ext.modules?.get('workspaces')?.putAway ?? null,
@@ -714,10 +741,12 @@ export class Pill {
             news: this._news?.shown ? this._news.news : null,
             resume: this._resume?.shown ?? false,
             saving: this._saving?.shown ?? false,
+            playing: this._activities?.get('playing') ? true : false,
             osd: this._osd?.state ?? null,
             timer: {running: this._timer?.running ?? false, paused: this._timer?.paused ?? false, left: Math.round(this._timer?.left ?? 0)},
             timer2: {running: this._timer2?.running ?? false, left: Math.round(this._timer2?.left ?? 0)},
             moving: this._moving?.state() ?? null,
+            apps: this._apps?.state() ?? null,
             paused: this._media?.paused === true,
             meeting: this._meetings?.state() ?? null,
             relayouts: this._clock?.relayouts ?? 0,

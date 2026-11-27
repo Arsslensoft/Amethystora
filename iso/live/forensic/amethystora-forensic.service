@@ -1,0 +1,17 @@
+[Unit]
+Description=Forensic start: every disk read-only before udev sees it
+ConditionKernelCommandLine=amethystora.forensic=1
+DefaultDependencies=no
+After=systemd-journald.socket
+# Before udev starts and before its coldplug of the block devices, and before anything that assembles, mounts or activates
+Before=systemd-udevd.service systemd-udev-trigger.service systemd-udev-settle.service udisks2.service local-fs-pre.target sysinit.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/amethystora-forensic start
+
+[Install]
+WantedBy=sysinit.target

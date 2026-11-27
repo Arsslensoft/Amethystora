@@ -65,6 +65,9 @@ it keeps nothing; words it cannot read just search as usual. `ame desktop search
 - **Clipboard history**, only when you type `clip:` first, with words after it to narrow it down: `clip: ssh`. `Enter`
   pastes the item where you were typing. It is the history [the clipboard](clipboard.md#the-clipboard) already keeps;
   the search stores nothing new.
+- **Will it run?**, only when you type `game:` first, then a game's name: `game: elden ring`. A row says what a community
+  list says of the game's anti-cheat on Linux, and the day its entry changed ([Games](games.md#will-it-run)).
+  `ame desktop search game off` turns it off.
 - **The agent**, only while the [agentic features](ai-agent.md) are on: the last row, *Ask the agent: …*, opens your
   agent in a terminal with what you typed as its first question. Nothing starts before `Enter`, and the agent asks
   before it changes anything.

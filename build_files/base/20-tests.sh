@@ -276,6 +276,7 @@ grep -q "^Font=Inter " /usr/share/plymouth/themes/amethystora/amethystora.plymou
 # Boot menu: the theme ships read-only in the image and is copied to /boot by amethystora-grub-theme,
 # because /boot is not part of a bootc image
 test -x /usr/bin/amethystora-grub-theme
+bash /ctx/build_files/shared/test-grub-theme.sh
 test -x /usr/share/amethystora/system-setup.hooks.d/30-grub-theme.sh
 for file in theme.txt background.png logo.png select_c.png select_e.png select_w.png icons/fedora.png; do
     test -s "/usr/share/grub/themes/amethystora/${file}"
@@ -426,6 +427,7 @@ grep -q '"Copy without hidden data")" /usr/libexec/amethystora-clean-copy$' /usr
 grep -vh '^ *#' /usr/libexec/amethystora-clean-copy | grep -qE 'NAUTILUS_SCRIPT_|eval |bash -c|sh -c|--inplace' && false
 grep -q 'mv -n -- ' /usr/libexec/amethystora-clean-copy
 [[ "$(/usr/libexec/amethystora-clean-copy /tmp/x >/dev/null 2>&1; echo $?)" == 64 ]]
+bash /ctx/build_files/shared/test-clean-copy-kinds.sh
 # Sign a PDF (R7-42): Files' entry over the Vault's own `pdf sign`, with a card that says a reader calls the signer unknown. It
 # reads argv only, runs no shell on a path and never signs without the card
 test -x /usr/libexec/amethystora-pdf-sign
@@ -540,6 +542,8 @@ for uuid in amethystora-clipboard amethystora-logo-menu; do
     test -s "/usr/share/gnome-shell/extensions/${uuid}@arsslensoft.github.io/styles.css"
     grep -qF "'${uuid}@arsslensoft.github.io'" "${UI_EXTENSION}/extension.js"
 done
+# ...and that merged sheet is kept through a lock: every selector of the clipboard's names a class of its own
+[[ -z "$(grep -E '^[^ }/].*\{$' "${CLIPBOARD_EXTENSION}/styles.css" | grep -vE 'ci-|clipboard-')" ]]
 # The glass's paint in native code (apps/glass, modules/glass/native.js): the library resolves against the image's own
 # Mutter, and GJS loads its typelib, which names it by its installed path, and makes a pane with it, as GNOME Shell does
 ! ldd /usr/lib64/amethystora/libamethystora_glass.so | grep -q 'not found'
@@ -642,10 +646,10 @@ rm -rf "${UI_RENDER}"
 # The search box is on Super+Space alone, which GNOME's input-source switch must not take (zz0 moves it to
 # Shift+Super+Space): on a base without that line the box never opened
 [[ "$(GSETTINGS_BACKEND=memory gsettings list-keys org.gnome.shell.extensions.amethystora-ui.search | sort | paste -sd ' ')" == \
-    "agent answers bookmarks clipboard glance manual meaning notes old-words open photos plugins put-away remembered reminders settings timers times windows" ]]
+    "agent answers bookmarks clipboard game glance manual meaning notes old-words open photos plugins put-away remembered reminders settings timers times windows" ]]
 [[ "$(GSETTINGS_BACKEND=memory gsettings get org.gnome.shell.extensions.amethystora-ui.search open)" == "['<Super>space']" ]]
 # Search that answers (plans/beyond/spec-search.md): each part on, the emoji picker on Super+. in the yellow tone
-for key in answers times reminders timers put-away settings manual windows clipboard agent glance old-words remembered; do
+for key in answers times reminders timers put-away settings manual windows clipboard agent glance old-words remembered game; do
     [[ "$(GSETTINGS_BACKEND=memory gsettings get org.gnome.shell.extensions.amethystora-ui.search "${key}")" == true ]]
 done
 EMOJI=org.gnome.shell.extensions.amethystora-ui.emoji
@@ -713,6 +717,8 @@ grep -q 'flatpak' "${UI_EXTENSION}/modules/quick/tv.js" && false
 env LD_LIBRARY_PATH=/apps-stage/usr/lib64 NODE_ICU_DATA="$(echo /apps-stage/usr/share/node-*/icudata)" /apps-stage/usr/bin/node /ctx/build_files/shared/test-your-year.mjs
 # The clipboard history reads a picture's header before it records or decodes it (M20 of the 2026-11-10 audit)
 env LD_LIBRARY_PATH=/apps-stage/usr/lib64 NODE_ICU_DATA="$(echo /apps-stage/usr/share/node-*/icudata)" /apps-stage/usr/bin/node /ctx/build_files/shared/test-clipboard-pictures.mjs
+# What the tiling reads back from tiling.json is used only for a schema and key that exist with the type the record is for
+env LD_LIBRARY_PATH=/apps-stage/usr/lib64 NODE_ICU_DATA="$(echo /apps-stage/usr/share/node-*/icudata)" /apps-stage/usr/bin/node /ctx/build_files/shared/test-tiling-state.mjs
 # The agent's Ask about this judges a copied or dropped picture with the same check, as a copy of that file (extensions cannot import each other's)
 cmp "${CLIPBOARD_EXTENSION}/pictures.js" "${UI_EXTENSION}/modules/agent/pictures.js"
 grep -q "pictureFits" "${UI_EXTENSION}/modules/agent/ask.js"
@@ -859,7 +865,7 @@ done
 # The live bars are off until a GPU shows they cost under 1% of a core (R7-PILL-41); only the maintainer turns them on
 [[ "$(GSETTINGS_BACKEND=memory gsettings get "${PILL}" music-bars)" == false ]]
 env LD_LIBRARY_PATH=/apps-stage/usr/lib64 NODE_ICU_DATA="$(echo /apps-stage/usr/share/node-*/icudata)" /apps-stage/usr/bin/node /ctx/build_files/shared/test-pill-logic.mjs
-PILL_R7=(spring ring banners moving movinglist subscribe hello drop tint levels code)
+PILL_R7=(spring ring banners moving movinglist subscribe hello drop tint levels code apps appslist)
 for file in "${PILL_R7[@]}"; do
     test -s "${UI_EXTENSION}/modules/pill/${file}.js"
     if grep -nE "[a-z]_sync\(|file_get_contents|file_test|query_exists|communicate_utf8\(|\.spawn_sync|wait_check\(" "${UI_EXTENSION}/modules/pill/${file}.js"; then
@@ -891,6 +897,10 @@ for file in "${UI_EXTENSION}/modules/pill/code.js" "${UI_EXTENSION}/modules/conn
     /usr/share/gnome-shell/extensions/amethystora-clipboard@arsslensoft.github.io/extension.js; do
     grep -q "Symbol.for('amethystora.clipboard.secret')" "${file}"
 done
+# ...and the pill hands St a player's cover only once it has checked the file (a plain file, a size, a declared picture
+# size), asynchronously: St reads a background image whole, on the main thread
+grep -qF 'pictureFits(' "${UI_EXTENSION}/modules/pill/media.js"
+[[ -z "$(grep -nF 'style: `background-image' "${UI_EXTENSION}/modules/pill/media.js")" ]]
 for recipe in pill quiet digest; do
     grep -q "^${recipe} \*ARGS:" /usr/share/amethystora/just/desktop.just
 done
@@ -930,12 +940,25 @@ fi
 # them), the module between today's and the dock, its recipe; it quits an app only by asking it (request_quit), and runs
 # nothing. The flat battery's own files block nothing (its rule is checked by node, with the saved sets, below).
 POWER=org.gnome.shell.extensions.amethystora-ui.power
-[[ "$(GSETTINGS_BACKEND=memory gsettings list-keys "${POWER}" | sort | paste -sd ' ')" == "battery-details busy-app charge-by-leaving device-batteries flat-battery flat-hold sleep-report" ]]
+[[ "$(GSETTINGS_BACKEND=memory gsettings list-keys "${POWER}" | sort | paste -sd ' ')" == "battery-details busy-app charge-by-leaving device-batteries flat-battery flat-hold sleep-report while-playing" ]]
 # Not yet from the keyboard, bound only while the flat battery's card shows: a key nobody else binds
 [[ "$(GSETTINGS_BACKEND=memory gsettings get "${POWER}" flat-hold)" == "['<Super><Shift>n']" ]]
 for key in battery-details busy-app device-batteries flat-battery sleep-report; do
     [[ "$(GSETTINGS_BACKEND=memory gsettings get "${POWER}" "${key}")" == true ]]
 done
+# While you play: offered and off. Its data has no GNOME in it (node checks it with the pill's sums), and its one program is the
+# mark of amethystora-metered
+[[ "$(GSETTINGS_BACKEND=memory gsettings get "${POWER}" while-playing)" == false ]]
+test -s "${UI_EXTENSION}/modules/power/playing.js"
+[[ -z "$(grep -E "gi://|resource://" "${UI_EXTENSION}/modules/power/playingdata.js")" ]]
+[[ "$(grep -c "Subprocess.new" "${UI_EXTENSION}/modules/power/playing.js")" == 1 ]]
+grep -qF "Subprocess.new([METERED, 'playing'," "${UI_EXTENSION}/modules/power/playing.js"
+[[ -z "$(grep -nE 'Gio\.Settings|run_dispose|use_markup *= *true|file_get_contents|\.communicate' "${UI_EXTENSION}/modules/power/playing.js")" ]]
+# It watches GameMode's name without starting it, and holds the power mode on mains only
+grep -q "NO_AUTO_START" "${UI_EXTENSION}/modules/power/playing.js"
+grep -q "Gio.BusNameWatcherFlags.NONE" "${UI_EXTENSION}/modules/power/playing.js"
+grep -q "'performance'" "${UI_EXTENSION}/modules/power/playing.js"
+bash /ctx/build_files/shared/test-while-playing.sh /usr/libexec/amethystora-metered
 for file in modules/power.js modules/power/apps.js modules/power/battery.js modules/power/busy.js modules/power/devices.js     modules/power/flat.js modules/power/flatdata.js modules/pill/flat.js stylesheets/power.css; do
     test -s "${UI_EXTENSION}/${file}"
 done
@@ -945,7 +968,7 @@ test -s /usr/share/amethystora/themed/shell-power.css.tpl
 [[ "$(grep -oE "^    \['(today|power|dock)'," "${UI_EXTENSION}/extension.js" | paste -sd ' ')" == \
     "    ['today',     ['power',     ['dock'," ]]
 grep -q '^power \*ARGS:' /usr/share/amethystora/just/desktop.just
-[[ -z "$(grep -rnE --exclude=slept.js 'Subprocess|Util\.spawn|spawn_command_line|GLib\.spawn|kill\(|SIGKILL|force_exit' \
+[[ -z "$(grep -rnE --exclude=slept.js --exclude=playing.js 'Subprocess|Util\.spawn|spawn_command_line|GLib\.spawn|kill\(|SIGKILL|force_exit' \
     "${UI_EXTENSION}/modules/power.js" "${UI_EXTENSION}/modules/power")" ]]
 grep -q "request_quit()" "${UI_EXTENSION}/modules/power/busy.js"
 [[ -z "$(grep -rnE 'use_markup = true|use_markup: true|set_markup\(' "${UI_EXTENSION}/modules/power.js" \
@@ -1354,6 +1377,27 @@ grep -q "^const SECURITY = '/usr/bin/amethystora-security';" "${UI_EXTENSION}/mo
 grep -q "^const CONFIG = '/usr/libexec/amethystora-security-config';" "${UI_EXTENSION}/modules/privacy/away.js"
 [[ "$(/usr/libexec/amethystora-security-config WALK_AWAY)" == off ]]
 [[ "$(/usr/libexec/amethystora-security-config --list --json | jq -r '.settings[] | select(.key == "WALK_AWAY") | .group')" == logins ]]
+# Pull the key (ame security pull-key; manual: pull-the-key.md): a security switch of the logins group, off as the image ships,
+# one udev rule written only on request and accepted by the watcher only as the helper writes it, a unit that reads its key, and
+# no rule in the image; it stands alone (nothing of it names another feature)
+[[ "$(/usr/libexec/amethystora-security-config PULL_KEY)" == off ]]
+[[ "$(/usr/libexec/amethystora-security-config --list --json | jq -r '.settings[] | select(.key == "PULL_KEY") | .group')" == logins ]]
+test -x /usr/libexec/amethystora-pull-key
+grep -q '^pull-key ACTION="" DEVICE="":' /usr/share/amethystora/just/security.just
+test ! -e /etc/udev/rules.d/90-amethystora-pull-key.rules
+test ! -e /usr/lib/udev/rules.d/90-amethystora-pull-key.rules
+grep -q 'pull_key_rule_as_written' /usr/libexec/amethystora-security-watch
+grep -qx 'ExecCondition=/usr/libexec/amethystora-security-config --is PULL_KEY lock poweroff' /usr/lib/systemd/system/amethystora-pull-key.service
+bash /ctx/build_files/shared/test-pull-key.sh
+# What the snapshots and the backup leave out: root's list of subvolumes and the account's own patterns, each changed by one
+# helper; the list ships empty (no file), the watcher accepts it in /etc, and both recipes hand their words to the helpers
+test -x /usr/libexec/amethystora-snapshot-exclude
+test -x /usr/libexec/amethystora-backup-exclude
+test ! -e /etc/amethystora/snapshot-excludes
+grep -q 'amethystora/snapshot-excludes' /usr/libexec/amethystora-security-watch
+grep -q '^ransomware ACTION="" \*MORE:' /usr/share/amethystora/just/security.just
+grep -q 'exec /usr/libexec/amethystora-backup-exclude' /usr/share/amethystora/just/backup.just
+bash /ctx/build_files/shared/test-snapshot-exclude.sh
 # GNOME's own rest reminders are what ame desktop breaks writes: the key and its two kinds of break are there
 [[ "$(GSETTINGS_BACKEND=memory gsettings get org.gnome.desktop.break-reminders selected-breaks)" == "@as []" ]]
 GSETTINGS_BACKEND=memory gsettings list-keys org.gnome.desktop.break-reminders.eyesight | grep -qx interval-seconds
@@ -1431,6 +1475,7 @@ grep -q 'new_from_file_at_scale' /usr/libexec/amethystora-photos
 grep -vh '^ *#' /usr/libexec/amethystora-photos | grep -qE 'PIL|Image\.open' && false
 [[ "$(systemctl --global is-enabled amethystora-photos.timer 2>/dev/null)" != enabled ]]
 bash /ctx/build_files/shared/test-photos.sh
+bash /ctx/build_files/shared/test-bookmarks.sh
 # Another screen from what you have, and help from someone you trust (R7-26, R7-50): GNOME's remote desktop, started for the session only,
 # a new code every time, view only for a help. The port is Security's: the loosening switch remote-screen (off) adds the
 # amethystora-remote-screen service to the home zone alone, and the commands refuse while it is off; nothing here calls the firewall
@@ -1442,7 +1487,7 @@ grep -q 'port="3389"' /usr/lib/firewalld/services/amethystora-remote-screen.xml
 grep -vh '^ *#' /usr/libexec/amethystora-share-screen | grep -q 'firewall-cmd' && false
 [[ "$(/usr/libexec/amethystora-hardening status --json | jq -r '.[] | select(.name == "remote-screen") | "\(.group) \(.default) \(.loosens)"')" == "network off true" ]]
 grep -q '^remote-screen ACTION="":' /usr/share/amethystora/just/security.just
-grep -q '^gnome-remote-de 3389$' /usr/share/amethystora/allow.d/listeners
+grep -qxF '/usr/libexec/gnome-remote-desktop-daemon 3389' /usr/share/amethystora/allow.d/listeners
 test -x /usr/share/amethystora/user-setup.hooks.d/30-share-screen-end.sh
 [[ "$(/usr/libexec/amethystora-share-screen >/dev/null 2>&1; echo $?)" == 64 ]]
 bash /ctx/build_files/shared/test-share-screen.sh
@@ -1614,6 +1659,8 @@ for helper in amethystora-open-anything amethystora-free-space amethystora-unins
 done
 # New shell code blocks nothing, and writes nothing that is not markup-free
 [[ -z "$(grep -nE '_sync\(|file_get_contents|use_markup = true' "${UI_EXTENSION}/modules/tools/opener.js" "${UI_EXTENSION}/modules/tools/room.js")" ]]
+# ...and the card for an app from Flathub shows the app's id with where it comes from (what is installed is what was shown)
+grep -qF 'plain(app.id, 80), from' "${UI_EXTENSION}/modules/tools/opener.js"
 # Never out of room never takes a container's volume, a named image or the trash's last 30 days
 grep -vh '^ *#' /usr/libexec/amethystora-free-space | grep -qE 'volume prune|prune.*-a|-af\b' && false
 # ...and a check connects to nothing: Homebrew's dry run would fetch its list of formulae
@@ -1687,6 +1734,12 @@ test -x /usr/libexec/amethystora-move
 grep -q '^move \*ARGS:' /usr/share/amethystora/just/system.just
 test -x /usr/libexec/amethystora-bring-over
 bash /ctx/build_files/shared/test-bring-over.sh /usr/libexec/amethystora-bring-over
+# Move in from Windows: the Windows disk of this computer or one plugged in is mounted read-only and never written, a BitLocker volume's key is
+# typed and kept nowhere, nothing a person has is replaced, OneDrive's placeholders are counted, a stopped copy carries on; the kernel can read NTFS
+test -x /usr/libexec/amethystora-move-in
+grep -q '^move-in \*ARGS:' /usr/share/amethystora/just/system.just
+bash /ctx/build_files/shared/test-move-in.sh /usr/libexec/amethystora-move-in
+grep -qE '^CONFIG_NTFS3_FS=[ym]$' /usr/lib/modules/*/config
 # Send to anyone (R7-66): offered and off; Warp only after a yes, from Flathub, by the one helper that installs; the relay said first
 test -x /usr/libexec/amethystora-send-anyone
 grep -q '^send-anyone ACTION="":' /usr/share/amethystora/just/desktop.just
@@ -1981,7 +2034,7 @@ done
 # Its map: known fields only, every pattern compiles, every Flatpak ID has an ID's shape, and no entry names one twice
 WIN_MAP=/usr/share/amethystora/windows-programs.json
 jq -e 'length >= 30 and all(.[]; .match as $m |
-    (.name | type == "string") and (keys - ["name", "match", "flatpak", "web", "launcher", "ame", "alternatives", "wine", "driver"] == [])
+    (.name | type == "string") and (keys - ["name", "match", "flatpak", "web", "launcher", "ame", "alternatives", "wine", "driver", "game"] == [])
     and ("x" | test($m; "i") | type == "boolean")
     and ([.flatpak // empty, .alternatives[]?.flatpak] | all(test("^[A-Za-z][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)+$")) and length == (unique | length))
     and ((.web // "https://") | startswith("https://")))' "${WIN_MAP}" >/dev/null
@@ -1994,6 +2047,14 @@ done
 [[ "$(/usr/libexec/amethystora-windows-program --match 'SpotifySetup (1).exe' | jq -r .flatpak)" == com.spotify.Client ]]
 [[ "$(/usr/libexec/amethystora-windows-program --match 'Firefox Installer.exe' | jq -r .launcher)" == org.mozilla.firefox.desktop ]]
 [[ -z "$(/usr/libexec/amethystora-windows-program --match 'something-else.exe')" ]]
+# The `game` of an entry is an id of the community list of games and their anti-cheat that amethystora-will-it-run answers from:
+# the test holds each to the shipped copy, and the copy to its SOURCE and the list's licence (MIT, which ships beside it and is named in
+# NOTICE). The helper says what the list says and never that a game will run; what the handler says is checked in suite 63
+[[ "$(/usr/libexec/amethystora-windows-program --match 'Install VALORANT.exe' | jq -r .game)" == valorant ]]
+test -x /usr/libexec/amethystora-will-it-run
+grep -q '^Copyright' /usr/share/licenses/areweanticheatyet/LICENSE
+grep -q 'Are We Anti-Cheat Yet' /usr/share/licenses/amethystora/NOTICE
+bash /ctx/build_files/shared/test-will-it-run.sh
 # DistroShelf, the window onto the containers, comes with every machine, as Bazaar and Flatseal do
 for preinstall in bazaar flatseal distroshelf; do
     test -f "/usr/share/flatpak/preinstall.d/${preinstall}.preinstall"
@@ -2040,6 +2101,16 @@ grep -vE "^[[:space:]]*#" /usr/libexec/amethystora-restore-setup | grep -qE "res
 test -x /usr/libexec/amethystora-setup
 ame --show setup::apply >/dev/null
 bash /ctx/build_files/shared/test-setup.sh
+# Kits, the apps for a line of work (ame apps kit): each a setup file with its apps part only, from Flathub, that
+# amethystora-setup's own check reads, with a name and a reason for every app, added by `ame setup apply` and never
+# with --remove (a kit's own remove asks about each app and goes through the uninstall helper, whose data goes to the trash)
+test -x /usr/libexec/amethystora-kit
+ame --show apps::kit >/dev/null
+bash /ctx/build_files/shared/test-kits.sh
+[[ -z "$(grep -vE '^[[:space:]]*#' /usr/libexec/amethystora-kit | grep -E -- '--remove|flatpak (install|uninstall)|rpm-ostree|brew ')" ]]
+for kit in /usr/share/amethystora/kits/about/*.json; do
+    grep -qF "| $(jq -r .name "${kit}") |" /usr/share/amethystora/manual/kits.md
+done
 # The image switch it makes goes through the rebase helper, which takes signed images only and offers the
 # image without NVIDIA's driver too
 grep -q "^rebase IMAGE=\"\" STREAM=\"\":" /usr/share/amethystora/just/system.just
@@ -2197,6 +2268,14 @@ grep -q "Open Control" /usr/libexec/amethystora-raid
 test -x /usr/libexec/amethystora-update-alert
 test -L /etc/systemd/user/graphical-session.target.wants/amethystora-update-alert.service
 grep -qF 'PKEXEC, &["/usr/bin/bootc", "rollback"]' /ctx/apps/update/src/backend.rs
+# ...and the shell helpers that start pkexec or bootc name them by full path, as PATH is the account's
+for helper in /usr/libexec/amethystora-changes /usr/libexec/amethystora-deployments /usr/libexec/amethystora-soft-reboot \
+    /usr/bin/amethystora-rollback-helper; do
+    if grep -vE '^\s*#' "${helper}" | grep -qE '(^|[^/A-Za-z_.-])(pkexec|bootc) (status|switch|rollback|/|")|"pkexec"'; then
+        echo "${helper} starts pkexec or bootc by a bare name"
+        exit 1
+    fi
+done
 # The windows that show the machine's state follow it live (common/src/live.rs): a switch turned anywhere shows at once
 for app in security control backups update; do
     grep -q 'live::watch(' "/ctx/apps/${app}/src/lib.rs" || { echo "apps/${app} does not follow the machine live"; exit 1; }
@@ -2261,6 +2340,8 @@ bash /ctx/build_files/shared/test-sensor-records.sh
 # The checks written in JavaScript run on the apps stage's Node, mounted at /apps-stage with its libraries,
 # so that the image carries no Node of its own
 NODE=(env LD_LIBRARY_PATH=/apps-stage/usr/lib64 NODE_ICU_DATA="$(echo /apps-stage/usr/share/node-*/icudata)" /apps-stage/usr/bin/node)
+# The script that trims the list of games and their anti-cheat (will it run?), on a made-up list
+"${NODE[@]}" /ctx/build_files/shared/test-trim-anticheat-list.mjs
 
 # The manual: every page in pages.json exists and every link between pages lands on a page and a heading
 # that exist, as the pages are in the image and as they were written, before 07-debrand.sh renamed
@@ -2316,7 +2397,9 @@ cat >"${PERMISSIONS_TEST}/flatpak" <<'EOF'
 #!/usr/bin/bash
 app="${*: -1}"
 case "$*" in
-    "list --app --columns=application,installation,name") printf 'org.example.Loaded\tuser\tLoaded\norg.example.Plugins\tsystem\tPlugins\n' ;;
+    "list --app --columns=application,installation,name") printf 'org.example.Loaded\tuser\tLoaded\norg.example.Plugins\tsystem\tPlugins\norg.example.Abs\tuser\tAbs\norg.example.Units\tuser\tUnits\n' ;;
+    *--show-permissions*org.example.Abs) printf '[Context]\nfilesystems=/var/home;\n' ;;
+    *--show-permissions*org.example.Units) printf '[Context]\nfilesystems=xdg-data/systemd;~/bin;\n' ;;
     *--show-permissions*org.example.Loaded) printf '[Context]\nfilesystems=xdg-data/flatpak;\n\n[Environment]\nLD_PRELOAD=/var/home/u/x.so\nPYTHONPATH=\n' ;;
     *--show-permissions*org.example.Plugins) printf '[Context]\nfilesystems=~/.local/share/flatpak:ro;\n\n[Environment]\nGST_PLUGIN_PATH=/app/lib/gst\n' ;;
     *--show-metadata*org.example.Plugins) printf '[Application]\nname=%s\n\n[Environment]\nGST_PLUGIN_PATH=/app/lib/gst\n' "${app}" ;;
@@ -2326,7 +2409,8 @@ esac
 EOF
 chmod +x "${PERMISSIONS_TEST}/flatpak"
 jq -e 'map({(.app): [.reaches[] | "\(.id) \(.granted)"]}) | add == {
-    "org.example.Loaded": ["installations true", "code true"], "org.example.Plugins": ["code false"]}' \
+    "org.example.Loaded": ["installations true", "code true"], "org.example.Plugins": ["code false"],
+    "org.example.Abs": ["home true"], "org.example.Units": ["autostart true"]}' \
     <<<"$(PATH="${PERMISSIONS_TEST}:${PATH}" /usr/libexec/amethystora-app-permissions --json)"
 rm -rf "${PERMISSIONS_TEST}"
 
@@ -2474,6 +2558,11 @@ jq -e '.items[] | select(.id == "text-shortcut-list") | .kind == "shortcuts" and
 jq -e 'any(.items[]; .id == "raid-create")' <<<"${CONTROL_LIST}" >/dev/null
 [[ -z "$(jq -c '.items[] | select(.id | startswith("raid-")) | ., (.choices // [])[] | select(.command != null)
     | select(.command[0:3] != ["ame", "system", "raid"] or .terminal != true)' <<<"${CONTROL_LIST}")" ]]
+# The Kits group of the Apps page: a row for each kit, whose Show and Add are `ame apps kit` in a terminal and nothing else
+jq -e '[.items[] | select(.id == "kits" and .kind == "rows" and .page == "apps")] | length == 1' <<<"${CONTROL_LIST}" >/dev/null
+[[ "$(jq -r '.items[] | select(.id == "kits") | .rows | map(.id) | join(" ")' <<<"${CONTROL_LIST}")" == "$(/usr/libexec/amethystora-kit list --json | jq -r 'map(.id) | join(" ")')" ]]
+[[ -z "$(jq -c '.items[] | select(.id == "kits") | .rows[].actions[]
+    | select(.terminal != true or (.command[0:3] != ["ame", "apps", "kit"]) or (.id | IN("show", "add") | not))' <<<"${CONTROL_LIST}")" ]]
 mapfile -t CONTROL_MANUAL < <(jq -r '.items[].manual // empty' <<<"${CONTROL_LIST}" | sort -u)
 "${NODE[@]}" /ctx/build_files/shared/check-manual.js /usr/share/amethystora/manual --links "${CONTROL_MANUAL[@]}"
 # The window runs nothing of its own: no shell, no password prompt, nothing of Security's (the commands it
@@ -2581,6 +2670,9 @@ bash /ctx/build_files/shared/test-theme-palette.sh
 # elsewhere read for their colours only, a palette from the theme maker, look files read whole or refused whole
 test -x /usr/libexec/amethystora-theme-file
 bash /ctx/build_files/shared/test-theme-file.sh
+# ...and what the import says of the file's names, which are somebody else's text, goes through the text cleaner
+grep -qF 'file="$(/usr/libexec/amethystora-security-text "${2##*/}")"' /usr/share/amethystora/just/desktop.just
+grep -qF 'picture="$(/usr/libexec/amethystora-security-text "${picture##*/}")"' /usr/share/amethystora/just/desktop.just
 # The theme maker's three checks are palette.awk's (checks=1), which apps/control-core/src/contrast.rs is held to
 [[ "$(bash -c 'source /usr/lib/amethystora/theme/lib.sh; palette_checks /usr/share/amethystora/themes/nord' | cut -d' ' -f1 | tr '\n' ' ')" == "text label outline " ]]
 # Every one of the seven drawn wallpapers is a whole SVG in every shipped theme's colours, and in the first's at each time
@@ -3325,6 +3417,12 @@ for helper in amethystora-bookmarks amethystora-file-meaning amethystora-letters
     python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "/usr/libexec/${helper}"
 done
 bash -n /usr/libexec/amethystora-guest
+# ...whose clean-up also runs as the next session starts, so that a crash or a power cut leaves nothing for the next
+# visitor, and asks each service that keeps something for the guest to forget it
+sed -n '/^prepare() {/,/^}/p' /usr/libexec/amethystora-guest | grep -x '    cleanup' >/dev/null
+for command in 'umount -l' 'SetIconFile' 'cancel -a -x -u' 'nmcli connection delete' 'bluetoothctl remove'; do
+    sed -n '/^cleanup() {/,/^}/p' /usr/libexec/amethystora-guest | grep -F -- "${command}" >/dev/null
+done
 # The bookmarks are read from a copy, which goes before anything is printed, and never a visit
 [[ -z "$(grep -v '^ *#' /usr/libexec/amethystora-bookmarks | grep -n "moz_historyvisits\|visit_count\|last_visit")" ]]
 grep -q "WHERE b.type = 1" /usr/libexec/amethystora-bookmarks
@@ -3365,12 +3463,25 @@ grep -q 'set-self-linger' /usr/share/polkit-1/rules.d/50-amethystora-guest.rules
 grep -q 'set-user-linger' /usr/share/polkit-1/rules.d/50-amethystora-guest.rules
 grep -q 'polkit.Result.NO' /usr/share/polkit-1/rules.d/50-amethystora-guest.rules
 for profile in local sssd winbind; do
-    [[ "$(grep -c 'pam_succeed_if.so quiet user != amethystora-guest {include if "with-guest-login"}' \
-        "/usr/share/authselect/vendor/${profile}/system-auth")" == 1 ]]
-    grep -q 'pam_succeed_if.so quiet service = gdm-password {include if "with-guest-login"}' \
-        "/usr/share/authselect/vendor/${profile}/password-auth"
+    # The refusal is in the auth stack and in the account stack (a service that starts a process with no auth step)
+    for stack in auth account; do
+        [[ "$(grep -cE "^${stack}[[:space:]]+requisite[[:space:]]+pam_succeed_if\.so quiet user != amethystora-guest \{include if \"with-guest-login\"\}\$" \
+            "/usr/share/authselect/vendor/${profile}/system-auth")" == 1 ]]
+        [[ "$(grep -cE "^${stack}[[:space:]]+requisite[[:space:]]+pam_succeed_if\.so quiet service = gdm-password \{include if \"with-guest-login\"\}\$" \
+            "/usr/share/authselect/vendor/${profile}/password-auth")" == 1 ]]
+    done
+    # ...and first in system-auth's password stack, where passwd would otherwise let the guest give itself a password
+    grep -m1 -E '^password[[:space:]]' "/usr/share/authselect/vendor/${profile}/system-auth" |
+        grep -qF 'pam_succeed_if.so quiet user != amethystora-guest {include if "with-guest-login"}'
 done
 [[ -z "$(grep -n amethystora-guest /etc/authselect/system-auth /etc/authselect/password-auth)" ]]
+grep -qF 'passwd -d "${USER_NAME}"' <(sed -n '/^prepare() {/,/^}/p' /usr/libexec/amethystora-guest)
+# Notices carry other people's words (a disk's name, a file's), which systemd-run must not expand; the watcher knows when
+# "Verified Flathub apps only" was lost from the Flathub remote
+grep -qF -- 'systemd-run --collect --quiet --expand-environment=no -p TimeoutStartSec=infinity' /usr/libexec/amethystora-raid
+grep -qF -- 'systemd-run --user --collect --quiet --expand-environment=no -- /usr/libexec/amethystora-agent-notice' \
+    /usr/libexec/amethystora-notify-users
+grep -qF -- 'amethystora-hardening is-on flathub-verified' /usr/libexec/amethystora-security-watch
 grep -q '^guest-login ACTION="":' /usr/share/amethystora/just/security.just
 # The shelf (plans/beyond/spec-r4-shelf.md, R4-08; manual: clipboard.md#the-shelf): one key, off for a new account, the
 # module beside the Shelf app (the apps' loop above); the shell starts nothing but the app, with the drop on its standard
@@ -3861,14 +3972,33 @@ openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "${TRUST_ROO
 openssl pkey -in "${TRUST_ROOT}/cosign.key" -pubout -out "${TRUST_ROOT}/cosign.pub"
 /usr/libexec/amethystora-trust-image --root "${TRUST_ROOT}" ghcr.io/someone/my-image "${TRUST_ROOT}/cosign.pub"
 jq -e '.transports.docker["ghcr.io/someone/my-image"] == [{"type": "sigstoreSigned",
-    "keyPath": "/etc/pki/containers/ghcr.io-someone-my-image.pub", "signedIdentity": {"type": "matchRepository"}}]
+    "keyPath": "/etc/pki/containers/ghcr.io-someone-my--image.pub", "signedIdentity": {"type": "matchRepository"}}]
     and .transports.docker["ghcr.io/arsslensoft"][0].keyPath == "/etc/pki/containers/amethystora.pub"
     and .default == [{"type": "reject"}]' "${TRUST_ROOT}/etc/containers/policy.json" >/dev/null
-cmp "${TRUST_ROOT}/cosign.pub" "${TRUST_ROOT}/etc/pki/containers/ghcr.io-someone-my-image.pub"
-grep -qxF "  ghcr.io/someone/my-image:" "${TRUST_ROOT}/etc/containers/registries.d/ghcr.io-someone-my-image.yaml"
+cmp "${TRUST_ROOT}/cosign.pub" "${TRUST_ROOT}/etc/pki/containers/ghcr.io-someone-my--image.pub"
+grep -qxF "  ghcr.io/someone/my-image:" "${TRUST_ROOT}/etc/containers/registries.d/ghcr.io-someone-my--image.yaml"
 /usr/libexec/amethystora-trust-image --root "${TRUST_ROOT}" ghcr.io/arsslensoft/amethystora "${TRUST_ROOT}/cosign.pub" && false
 /usr/libexec/amethystora-trust-image --root "${TRUST_ROOT}" ghcr.io/someone/other "${TRUST_ROOT}/cosign.key" && false
+# ...two repositories never share a key or a registries.d file, and an entry this command did not write (the image's own
+# for openSUSE and toolbx) is never replaced
+/usr/libexec/amethystora-trust-image --root "${TRUST_ROOT}" ghcr.io/a-b/c "${TRUST_ROOT}/cosign.pub"
+/usr/libexec/amethystora-trust-image --root "${TRUST_ROOT}" ghcr.io/a/b-c "${TRUST_ROOT}/cosign.pub"
+[[ "$(find "${TRUST_ROOT}/etc/pki/containers" "${TRUST_ROOT}/etc/containers/registries.d" -name 'ghcr.io-a-*' | wc -l)" == 4 ]]
+/usr/libexec/amethystora-trust-image --root "${TRUST_ROOT}" registry.opensuse.org/opensuse/leap "${TRUST_ROOT}/cosign.pub" && false
+/usr/libexec/amethystora-trust-image --root "${TRUST_ROOT}" quay.io/toolbx-images "${TRUST_ROOT}/cosign.pub" && false
+jq -e --slurpfile good /etc/containers/policy.json \
+    'del(.transports.docker["ghcr.io/someone/my-image", "ghcr.io/a-b/c", "ghcr.io/a/b-c"]) == $good[0]' "${TRUST_ROOT}/etc/containers/policy.json" >/dev/null
 rm -rf "${TRUST_ROOT}"
+# ...and the check does not stop at the exact repository: a scope below it that takes anything would stand in for it
+POLICY_GOOD="$(mktemp)"
+cp /etc/containers/policy.json "${POLICY_GOOD}"
+OWN_REPO="ghcr.io/$(jq -r '."image-vendor"' /usr/share/amethystora/image-info.json)"
+jq --arg r "${OWN_REPO}/amethystora:latest" '.transports.docker[$r] = [{"type": "insecureAcceptAnything"}]' "${POLICY_GOOD}" >/etc/containers/policy.json
+IMAGE_CHECK="$(/usr/libexec/amethystora-image-check 2>&1 || true)"
+grep -qF "below ${OWN_REPO}, without a signature" <<<"${IMAGE_CHECK}"
+cat "${POLICY_GOOD}" >/etc/containers/policy.json
+/usr/libexec/amethystora-image-check
+rm -f "${POLICY_GOOD}"
 # The rest of an image of your own, while it builds: its setup.json as every account's defaults (amethystora-setup
 # bake, in test-setup.sh above) and its branding, whose login picture goes in with the helper 12-login-screen.sh
 # put this image's in with. `file` tells its pictures apart.
@@ -3970,6 +4100,29 @@ for program in chfn chage gpasswd newgrp ksu mount.davfs; do
         exit 1
     fi
 done
+# ...and two more, with the file capabilities of Apache's suexec (lxc-user-nic stays where the `lxc` package is)
+for program in /usr/bin/pam_timestamp_check /usr/libexec/lxc/lxc-user-nic; do
+    if [[ -u "${program}" ]] && { [[ "${program}" != */lxc-user-nic ]] || ! rpm -q --quiet lxc; }; then
+        echo "${program} is still setuid root"
+        exit 1
+    fi
+done
+[[ -z "$(getcap /usr/bin/suexec)" ]]
+# Input Remapper's bus name is root's, and only root and wheel may send to it (08-hardening.sh)
+INPUT_REMAPPER_BUS=/usr/share/dbus-1/system.d/inputremapper.Control.conf
+[[ "$(sed -n '/<policy context="default">/,/<\/policy>/p' "${INPUT_REMAPPER_BUS}" | grep -c '<allow')" == 0 ]]
+grep -qF '<deny own="inputremapper.Control"/>' "${INPUT_REMAPPER_BUS}"
+grep -qF '<policy group="wheel">' "${INPUT_REMAPPER_BUS}"
+# The mouse daemon's bus name is root's, and only root and wheel may send to it (08-hardening.sh)
+RATBAG_BUS=/usr/share/dbus-1/system.d/org.freedesktop.ratbag1.conf
+[[ "$(sed -n '/<policy context="default">/,/<\/policy>/p' "${RATBAG_BUS}" | grep -c '<allow')" == 0 ]]
+grep -qF '<policy group="wheel">' "${RATBAG_BUS}"
+# dnf's D-Bus service, which nothing in the image uses (04-packages.sh)
+for package in dnf5daemon-server dnf5daemon-server-polkit; do
+    rpm -q "${package}" >/dev/null 2>&1 && false
+done
+# The image's smart-card rule is for the session at the machine only
+[[ "$(grep -cF 'subject.local && subject.active' /usr/share/polkit-1/rules.d/org.debian.pcsc-lite.access_card.rules)" == 2 ]]
 # What the stricter switches write has to be what its program takes: chrony's servers, the away zone, the
 # dconf keys. block-xwayland restates GNOME Shell's own command with --no-x11, so a change to it must show.
 chronyd -p -f /usr/share/amethystora/hardening/chrony.conf >/dev/null
@@ -3981,7 +4134,7 @@ rm -rf "${DCONF_TEST}" "${DCONF_TEST}.db"
 grep -qx "ExecStart=/usr/bin/gnome-shell --mode=%i" /usr/lib/systemd/user/org.gnome.Shell@.service
 # modprobe reports module names with underscores, whichever spelling the config file uses
 MODPROBE_CONFIG="$(modprobe --showconfig)"
-for module in dccp sctp rds tipc n_hdlc firewire_core firewire_sbp2 cramfs hfs vivid; do
+for module in dccp sctp rds tipc n_hdlc firewire_core firewire_sbp2 cramfs hfs vivid f2fs nilfs2; do
     grep -q "^install ${module} /usr/bin/false$" <<<"${MODPROBE_CONFIG}"
 done
 # FireWire is a switch of its own (ame security firewire), for FireWire sound cards: its three modules in a file
@@ -4062,7 +4215,7 @@ fi
 # from every interface whose report descriptor is not vendor-defined only (an app with --device=all would read
 # passwords from it), and the USB device nodes are given only to bootloaders
 rules=/usr/lib/udev/rules.d/71-amethystora-keyboard-interfaces.rules
-grep -q 'IMPORT{program}="/usr/bin/python3 /usr/libexec/amethystora-hid-vendor-only %S%p"' "${rules}"
+grep -q 'IMPORT{program}="/usr/bin/python3 -I /usr/libexec/amethystora-hid-vendor-only %S%p"' "${rules}"
 for vendor in 16c0 3297 03eb 31e3; do
     grep -q "idVendor}==\"[0-9a-f|]*${vendor}[0-9a-f|]*\", ENV{AMETHYSTORA_HID_VENDOR_ONLY}!=\"1\", TAG-=\"uaccess\"" "${rules}"
 done
@@ -4087,6 +4240,41 @@ assert module.pages(raw) == [0xFF60], module.pages(raw)
 assert module.pages(kbd) == [1, 7] and module.pages(cons) == [0xC], (module.pages(kbd), module.pages(cons))
 assert module.pages(raw + kbd) == [0xFF60, 1, 7] and module.pages(b"\x06") is None
 EOF
+# ...and for every other maker's keyboards: the files that come with the base image (Solaar's, OpenRGB's, the game
+# controllers') tag all of a device's nodes, so 72-amethystora-keyboards-not-shared.rules, which sorts after them and before
+# 73-seat-late.rules, takes the grant back from a hidraw node whose descriptor declares a keyboard or keypad, from keyboards'
+# input nodes and from the USB device node of a boot keyboard among HID interfaces only (security keys excepted), and
+# test-hid-keyboards.sh runs the helper's answers for a set of descriptors and checks the order of the files
+rules=/usr/lib/udev/rules.d/72-amethystora-keyboards-not-shared.rules
+grep -q 'SUBSYSTEM=="hidraw".*ENV{AMETHYSTORA_HID_KEYBOARD}=="1".*TAG-="uaccess", MODE="0600"' "${rules}"
+grep -qxF 'SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="?*", TAG-="uaccess"' "${rules}"
+grep -qxF 'SUBSYSTEM=="input", ENV{ID_INPUT_KEY}=="?*", ENV{ID_INPUT_JOYSTICK}!="?*", ENV{ID_REMOTE_CONTROL}!="1", TAG-="uaccess"' "${rules}"
+grep -q 'SUBSYSTEM=="usb".*AMETHYSTORA_USB_KEYBOARD}=="1", TAG-="uaccess"' "${rules}"
+udevadm verify "${rules}" 2>/dev/null ||
+    ! udevadm verify --help >/dev/null 2>&1
+bash /ctx/build_files/shared/test-hid-keyboards.sh
+# Lab devices (ame system lab-devices; manual: devices.md#lab-devices): debug probes, USB serial adapters and logic analysers given
+# to the person at the seat by vendor and product, copied into /etc only on request and accepted by the watcher only as shipped;
+# test-lab-devices.sh holds the file to uaccess rules by vendor and product, each with its source, sorted before the rules that
+# take a keyboard's grant back, and none the system's own hardware database already gives
+test -x /usr/libexec/amethystora-lab-devices
+test -s /usr/share/amethystora/lab-devices/70-amethystora-lab-devices.rules
+test ! -e /etc/udev/rules.d/70-amethystora-lab-devices.rules
+test ! -e /usr/lib/udev/rules.d/70-amethystora-lab-devices.rules
+test -e /usr/lib/udev/rules.d/73-seat-late.rules
+grep -q '^lab-devices ACTION="":' /usr/share/amethystora/just/system.just
+bash /ctx/build_files/shared/test-lab-devices.sh
+# OpenRGB's two lines that gave every i2c bus and /dev/port to the seat (08-hardening.sh takes them out) are gone, and no
+# rule of the image tags an i2c node but the display brightness switch's own file, which the switch copies into /etc
+for rules in /usr/lib/udev/rules.d/*.rules /etc/udev/rules.d/*.rules; do
+    [[ -e "${rules}" ]] || continue
+    if grep -nE '^[^#]*(i2c|KERNEL=="port").*TAG\+="uaccess"' "${rules}"; then
+        echo "${rules} gives the i2c buses or /dev/port to the user at the seat"
+        false
+    fi
+done
+grep -q '^# Changed by Amethystora.*i2c' /usr/lib/udev/rules.d/60-openrgb.rules
+grep -qF 'ATTRS{class}=="0x03*", TAG+="uaccess"' /usr/share/amethystora/ddc/60-amethystora-ddc.rules
 # A keyboard's hidraw device carries every key typed on it, and the devices under a vendor ID include the
 # keyboards built on its chips: no rule the image adds gives either to every account, as 92-viia.rules,
 # 60-arduino-mbed.rules and 50-zsa.rules did before they gave them to the user at the seat (uaccess)
@@ -4233,6 +4421,8 @@ test -x "${DURESS}"
 "${DURESS}" supported
 [[ "$(rpm -q --queryformat '%{RELEASE}\n' fprintd fprintd-pam | grep -c '\.amethystora\.')" == 2 ]]
 test -s "/usr/src/amethystora/$(rpm -q --queryformat '%{SOURCERPM}' fprintd-pam)"
+# ...whose pam_fprintd takes fprintd's signals from fprintd's own connection (0008): a rebase that drops it fails here
+grep -q GetNameOwner /usr/lib64/security/pam_fprintd.so
 test -x /usr/libexec/amethystora-duress-service
 python3 -m py_compile /usr/libexec/amethystora-duress-service
 [[ "$("${DURESS}" status)" == off ]]
@@ -4373,8 +4563,10 @@ grep -qE "^[^#]*nmcli device modify" "${DNS}"
 test -L /etc/systemd/user/graphical-session.target.wants/amethystora-dns-portal.service
 # The offer stays on the screen with its button until answered: GNOME Shell shows a normal one collapsed
 grep -qE -- "--urgency=critical --wait" "${DNS}"
-# A network's search domains are routing domains too, so they are taken off by a root service that wakes on nmcli monitor
-# (not a dispatcher script), which runs only while encrypted DNS is on
+# A network's search domains are routing domains too, so they are taken off by a root service that wakes on systemd-resolved's own
+# signals for a link's domains and on nmcli monitor (not a dispatcher script), which runs only while encrypted DNS is on
+grep -qF 'gdbus monitor --system --dest org.freedesktop.resolve1' "${DNS}"
+grep -qF 'gdbus monitor --system --dest org.freedesktop.NetworkManager' "${DNS}"
 grep -qx "ConditionPathExists=${RESOLVED_DROP_IN}" /usr/lib/systemd/system/amethystora-dns-domains.service
 grep -qx "ExecStart=/usr/libexec/amethystora-dns domains-watch" /usr/lib/systemd/system/amethystora-dns-domains.service
 test -L /etc/systemd/system/multi-user.target.wants/amethystora-dns-domains.service
@@ -4603,6 +4795,11 @@ done
 systemctl is-enabled amethystora-kargs.path amethystora-kargs-finalize.service >/dev/null
 grep -q 'amethystora-kargs status --json' /usr/libexec/amethystora-soft-reboot
 
+# The live ISO's forensic start (iso/live/forensic, manual: forensic-start.md) is that ISO's alone: none of it is in the image
+# the live ISO installs, whose disks it would otherwise keep read-only
+test ! -e /usr/bin/amethystora-forensic
+test -z "$(ls /usr/lib/systemd/system/amethystora-forensic* /usr/lib/systemd/user/amethystora-forensic* 2>/dev/null)"
+
 # The ssh the live ISO's Anaconda added to the Amethystora zone goes once, unless sshd is on or the zone has more of the owner's
 INSTALLER_SSH_TEST="$(mktemp -d)"
 mkdir -p "${INSTALLER_SSH_TEST}/etc/firewalld/zones" "${INSTALLER_SSH_TEST}/usr/lib/firewalld/zones"
@@ -4656,6 +4853,10 @@ rpm -q input-remapper >/dev/null
 # reach gamemoded through its portal, from Steam's sandbox (ame apps gaming).
 rpm -q waydroid gamemode scx-scheds scx-tools >/dev/null
 [[ "$(systemctl is-enabled waydroid-container.service 2>/dev/null)" == "enabled" ]] && false
+# Masked, since its D-Bus service would start it as root for any account (`ame apps android` unmasks it)
+[[ "$(systemctl is-enabled waydroid-container.service 2>/dev/null)" == "masked" ]]
+grep -qF 'systemctl unmask waydroid-container.service' /usr/share/amethystora/just/apps.just
+grep -qF 'systemctl mask waydroid-container.service' /usr/share/amethystora/just/apps.just
 [[ "$(systemctl is-enabled scx_loader.service 2>/dev/null)" == "enabled" ]] && false
 test ! -e /etc/scx_loader/config.toml
 # The loader sees each kernel's build configuration where libbpf looks for it (04-packages.sh)
@@ -4673,6 +4874,9 @@ grep -qx 'BindReadOnlyPaths=/usr/lib/amethystora/kconfig:/boot' \
 # the GNOME keys it reads are set and locked, so that no account turns it off from Settings.
 rpm -q usbguard-dbus >/dev/null
 [[ "$(systemctl is-enabled usbguard-dbus.service 2>/dev/null)" == masked ]]
+# Turning it on leaves USBGuard's own socket to root (the recipe lists and allows through sudo): a group there could add rules
+grep -q 'IPCAllowedGroups=|' /usr/share/amethystora/just/security.just
+grep -q 'IPCAllowedGroups=wheel' /usr/share/amethystora/just/security.just && false
 # The base image's boot-time appstream refresh is masked (it gated graphical.target by ~6-11 s), and the
 # cache is kept fresh by a daily off-boot timer instead. A base bump must not quietly re-add the stall.
 [[ "$(systemctl is-enabled fedora-atomic-desktop-appstream-cache-refresh.service 2>/dev/null)" == masked ]]
@@ -4991,6 +5195,12 @@ for mode in $(grep -E '^declare -A READERS=' /usr/libexec/amethystora-security-w
     grep -qE "^    ${mode}\) " /usr/libexec/amethystora-security-reader
 done
 bash /ctx/build_files/shared/test-security-reader.sh
+# What an account's check prints goes to a file of root's, which no program of the account can open again as it can a
+# pipe, and the process that holds it makes itself non-dumpable before it does anything else; a failed check is said
+grep -qF 'file="${STATE}/accounts/${uid}/${mode}.out"' /usr/libexec/amethystora-security-watch
+grep -qF 'prctl(4, 0, 0, 0, 0)' /usr/libexec/amethystora-security-reader
+grep -qF 'prctl(4, 0, 0, 0, 0)' /usr/libexec/amethystora-integrity
+grep -qx 'OnFailure=amethystora-scan-alert@%n.service' /usr/lib/systemd/system/amethystora-integrity.service
 # Installed apps and the system's files against their updates (APP_INTEGRITY): the check, daily and after each
 # change to the system's Flatpaks, against stand-in repositories, deploys and boot files, an account's own read as
 # that account; and the image has what it imports
@@ -5107,6 +5317,17 @@ grep -qE "^Requires=" /usr/lib/systemd/system/amethystora-clamav-scan.service &&
 # A connection left waiting while clamd is skipped (VIRUS_SCAN=off) would start it again and again until the
 # socket failed (trigger-limit-hit); FlushPending refuses it instead
 grep -qx "FlushPending=yes" /usr/lib/systemd/system/clamd@.socket
+# clamd parses every file of every account, and every caller hands it a descriptor or the bytes on its socket, so
+# its unit has no network, no homes, a read-only system and a system-call filter (it drops to clamscan itself)
+for line in NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes PrivateTmp=yes PrivateNetwork=yes \
+    RestrictAddressFamilies=AF_UNIX 'CapabilityBoundingSet=CAP_SETUID CAP_SETGID' SystemCallFilter=@system-service; do
+    grep -qxF "${line}" /usr/lib/systemd/system/clamd@.service.d/10-amethystora.conf
+done
+# No caller hands clamd a path, which would need the homes the unit hides: each passes a descriptor (--fdpass), the
+# bytes on standard input, or asks for a reload
+grep -hE 'clamdscan -' /usr/libexec/amethystora-clamav-scan /usr/libexec/amethystora-quarantine /usr/bin/amethystora-pkg \
+    /usr/libexec/amethystora-windows-program | grep -vE '^[[:space:]]*#' |
+    grep -vE 'clamdscan (--fdpass|--no-summary - |--reload)' && false
 
 # Signature age is what says whether a clean scan means anything; `systemctl is-active` of the freshclam
 # daemon does not, because it stays active whether or not a download ever succeeded. The image ships no
@@ -5146,6 +5367,23 @@ test -f /usr/lib/systemd/system/amethystora-home-snapshot.timer
 command -v btrfs >/dev/null
 grep -qF 'ExcludePath ^/var/home/\.snapshots/' /etc/clamd.d/scan.conf
 grep -qF 'echo /var/home/.snapshots' /usr/libexec/amethystora-clamav-onaccess
+# Real-time scanning scans a file again before it says anything of it, in every mode: a file name can hold a line of
+# its own (W-7 of the audit of 2026-11-16)
+grep -qF 'outcome="$(/usr/libexec/amethystora-quarantine act' /usr/libexec/amethystora-clamav-onaccess
+! grep -qF '[[ "${mode}" == report ]] || outcome=' /usr/libexec/amethystora-clamav-onaccess
+# The image's own allowlists of listeners name the file a process runs, never the name it gives itself, and that file
+# is in the image; nothing in /tmp is allowed by its name, which any account can give a folder
+while read -r program _; do
+    [[ "${program}" == /* ]]
+    compgen -G "${program}" >/dev/null
+done < <(grep -vE '^[[:space:]]*(#|$)' /usr/share/amethystora/allow.d/listeners)
+! grep -qE '^/tmp/' /usr/share/amethystora/allow.d/exec-watch /usr/share/amethystora/allow.d/processes
+# What the watcher reads of an entry of two halves, and what it does with the audit log's place in it
+grep -qF 'allowed_pair credentials "${exe}" "${path}"' /usr/libexec/amethystora-security-watch
+grep -qF 'allowed_pair injection "${exe}" "${target}"' /usr/libexec/amethystora-security-watch
+grep -qF 'MEMFD_PARENTS' /usr/libexec/amethystora-security-watch
+grep -qF -- '--checkpoint "${next}"' /usr/libexec/amethystora-security-watch
+! grep -qF -- '--checkpoint "${checkpoint}"' /usr/libexec/amethystora-security-watch
 
 # TPM disk unlock (ame security disk-unlock) only works if the initramfs can talk to the TPM at all.
 # 19-initramfs.sh adds dracut's tpm2-tss module where dracut has it, and warns where it does not.
@@ -5154,7 +5392,10 @@ grep -q "tss2" <<<"${INITRAMFS_FILES}" ||
 # It is the one TPM unlocker, and it replaces any key the TPM held before, so that one bound to no PCRs
 # (as upstream's luks-tpm2-autounlock enrolled) cannot open the disk without the checks
 test ! -e /usr/bin/luks-tpm2-autounlock
-grep -q -- "--wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7+14" /usr/share/amethystora/just/security.just
+grep -q -- '--wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs="${PCRS}"' /usr/share/amethystora/just/security.just
+grep -qx '    PCRS=7+14' /usr/share/amethystora/just/security.just
+# ...and, on a sealed machine, to PCR 12, where systemd-stub measures what is added to the UKI's command line
+grep -qx '        PCRS=7+12+14' /usr/share/amethystora/just/security.just
 
 # DisplayLink: evdi built for the image kernel, and no module signing key left behind by the build
 KERNEL_VERSION="$(rpm -q kernel-core --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}')"
@@ -5170,7 +5411,21 @@ if systemctl is-enabled -q displaylink.service; then
 fi
 # Skipped, not restarted every five seconds, where evdi cannot load (Secure Boot without the key enrolled)
 grep -qx "ExecStartPre=" /usr/lib/systemd/system/displaylink.service.d/10-amethystora.conf
-grep -qx "ExecCondition=/usr/sbin/modprobe evdi" /usr/lib/systemd/system/displaylink.service.d/10-amethystora.conf
+grep -qxF "ExecCondition=+/usr/sbin/modprobe evdi" /usr/lib/systemd/system/displaylink.service.d/10-amethystora.conf
+# Any USB device can claim DisplayLink's vendor id and have the closed manager parse it as root: it runs sandboxed,
+# with /tmp shared (the suspend hook's FIFOs) and the host's network namespace (libusb's netlink), never crashing in
+# a loop for good, and without the module and kernel settings it could otherwise reach
+DL_SANDBOX=/usr/lib/systemd/system/displaylink.service.d/20-amethystora-sandbox.conf
+for line in NoNewPrivileges=yes ProtectSystem=strict ProtectHome=yes ProtectKernelModules=yes \
+    "ReadOnlyPaths=/proc/sys /proc/sysrq-trigger -/sys/kernel/uevent_helper" SystemCallFilter=@system-service IPAddressDeny=any; do
+    grep -qxF "${line}" "${DL_SANDBOX}" || { echo "${DL_SANDBOX} lacks ${line}"; exit 1; }
+done
+if grep -qE '^(PrivateTmp|PrivateNetwork|ProtectKernelTunables|RestrictRealtime|ProcSubset)=' "${DL_SANDBOX}"; then
+    echo "${DL_SANDBOX} takes away what the manager needs (the suspend hook's /tmp, netlink, evdi's /sys, its priority, /proc/cpuinfo)"
+    exit 1
+fi
+grep -qx "StartLimitBurst=10" <<<"$(systemctl cat displaylink.service)"
+grep -qE '^CapabilityBoundingSet=~(.* )?CAP_SYS_MODULE( |$)' "${DL_SANDBOX}"
 grep -q "^d /var/log/displaylink " /usr/lib/tmpfiles.d/displaylink.conf
 # DisplayLinkManager is proprietary. Its licence lets it be redistributed unmodified, and only with
 # the licence itself beside it
@@ -5250,6 +5505,13 @@ case "${IMAGE_NAME}" in
     *-nvidia-lts) [[ "$(modinfo -F license "${NVIDIA_KO}")" == "NVIDIA" ]] ;;
     *) [[ -z "${NVIDIA_KO}" ]] ;;
 esac
+# ...which write podman's CDI description of the card at every start (ame dev gpu asks for it): the toolkit's refresh service and the path
+# unit that starts it again after a driver change are both enabled
+if [[ "${IMAGE_NAME}" =~ nvidia ]]; then
+    for unit in nvidia-cdi-refresh.service nvidia-cdi-refresh.path; do
+        systemctl is-enabled -q "${unit}"
+    done
+fi
 # ...whose services are skipped where the driver is not loaded, rather than restarted until the machine is degraded
 if [[ "${IMAGE_NAME}" =~ nvidia ]]; then
     for unit in nvidia-persistenced.service nvidia-cdi-refresh.service; do
@@ -5309,6 +5571,24 @@ mapfile -t DRIVERS_MANUAL < <(jq -r '.findings[].manual' <<<"${DRIVERS_FOUND}" |
 "${NODE[@]}" /ctx/build_files/shared/check-manual.js /usr/share/amethystora/manual --links "${DRIVERS_MANUAL[@]}"
 rm -rf "${DRIVERS_TEST}"
 bash /ctx/build_files/shared/test-driver-status.sh
+# ...which is also why a module refused for its key does not leave the start "degraded", nor the composefs root that
+# cannot be remounted: anything else systemd-modules-load or systemd-remount-fs meets still fails them
+bash /ctx/build_files/shared/test-early-units.sh
+# For developers (ame dev): a database or a mail catcher in one line, the port that is taken, and whether a container can use the graphics
+# card. Each is a program of the account's own against stand-ins for podman, systemctl, ss, the card and its devices; the images they
+# name are pinned by digest (a pull of one happens only on a person's machine), and nothing listens beyond the loopback address
+test -x /usr/libexec/amethystora-dev-services
+test -x /usr/libexec/amethystora-gpu-compute
+ame --show dev::service >/dev/null
+ame --show dev::ports >/dev/null
+ame --show dev::gpu >/dev/null
+(($(ls /usr/share/amethystora/dev-services/*.json | wc -l) >= 4))
+grep -hoE '"image": "[^"]+"' /usr/share/amethystora/dev-services/*.json /usr/share/amethystora/gpu-compute/images.json |
+    while read -r _ image; do
+        [[ "${image}" =~ ^\"[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}\"$ ]] || { echo "an image of ame dev is not pinned by digest: ${image}"; exit 1; }
+    done
+bash /ctx/build_files/shared/test-dev-services.sh
+bash /ctx/build_files/shared/test-gpu-compute.sh
 # Looking for updates without installing them (amethystora-update-check): what it finds against stand-ins, an update
 # that waits for the look rather than failing beside it, and a look the person at the machine starts without a password
 bash /ctx/build_files/shared/test-update-check.sh
@@ -5555,6 +5835,9 @@ bash /ctx/build_files/shared/test-vault.sh /ctx
 # nobody, the sandbox recipe, the agent's never list (tests/vm/suites/72-plugins.sh is what runs it)
 bash /ctx/build_files/shared/test-plugins.sh /ctx
 
+# The terminal's extras run nothing from a Homebrew folder the account does not own (bling.sh, bling.fish)
+bash /ctx/build_files/shared/test-bling.sh
+
 # these packages are supposed to be removed
 # and are considered footguns
 UNWANTED_PACKAGES=(
@@ -5602,9 +5885,20 @@ for file in /etc/yum.repos.d/{tailscale,docker-ce,falcosecurity,_copr_ublue-os-a
         exit 1
     fi
 done
+# ...and dnf itself reads, for each of them, package signature checks and that one copy alone
+dnf5 repo info --all --json --disable-repo='*' | jq -e '
+    [.[] | select((.repo_file_path // "") | test("/(tailscale|docker-ce|falcosecurity|_copr_ublue-os-akmods)[.]repo$|/_copr:copr[.]fedorainfracloud[.]org:(che:nerd-fonts|ublue-os:packages|bieszczaders:kernel-cachyos-addons)[.]repo$"))] |
+    (length > 0) and all(.pkg_gpgcheck == true and (.gpg_key | length == 1 and (.[0] | startswith("file:///etc/pki/rpm-gpg/"))))' >/dev/null
+# pin_repo_key refuses a repository file that checks no signatures, names a second key or defines a repository of no key
+bash /ctx/build_files/shared/test-repo-pin.sh
 
 # Swapped-out memory: lzo-rle, with zstd for what stays unused (zram-generator.conf.d, and the hourly timer below)
 grep -qx 'compression-algorithm = lzo-rle zstd' /usr/lib/systemd/zram-generator.conf.d/10-amethystora.conf
+# ...repacked by the timer's helper, and tailscaled run only once chosen or joined, each against stand-ins; and the
+# session's small helpers (the greeting, Super+Return's terminal, the repository, a notice's Ask the agent, the buses)
+bash /ctx/build_files/shared/test-zram-recompress.sh
+bash /ctx/build_files/shared/test-tailscale.sh
+bash /ctx/build_files/shared/test-session-helpers.sh
 
 IMPORTANT_UNITS=(
     clamav-freshclam.service
@@ -5656,5 +5950,10 @@ if [[ -e /var/lib ]]; then
         { echo "/var/lib is $(stat -c '%a %U %G' /var/lib); the rechunker would give /usr/lib that mode"; exit 1; }
 fi
 [[ "$(stat -c '%a %U %G' /usr/lib)" == "755 root root" ]]
+# ...and no podman state of the build's: the same copy puts it into /usr/lib/containers/storage, the read-only image store,
+# where the live ISO's pull then meets a database that names another store and stops (a test that ran the real podman)
+for db in /var/lib/containers/storage/db.sql /var/lib/containers/storage/libpod/bolt_state.db; do
+    [[ ! -e "${db}" ]] || { echo "${db}: something in this build ran podman as root"; exit 1; }
+done
 
 echo "::endgroup::"

@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# run.sh [all | build | disk | test] [--keep]: a test run of this checkout's last commit in the VM lab
+# run.sh [all | build | disk | test | ready | plan] [--keep]: a test run of this checkout's last commit in the VM lab
 # (README.md). Starts the lab when it is not running, sends HEAD into it as a git bundle, which holds what is
 # committed whatever the checkout's line endings, and runs tests/vm/run.mjs from it there. The run's files
 # stay in the lab, in /vm/runs/last. With VMLAB_NAME set, the run has a source tree, image tag, disks and VMs of
@@ -25,4 +25,4 @@ if ! docker exec amevm test -c /dev/kvm; then
 fi
 git bundle create - HEAD 2>/dev/null | docker exec -i amevm sh -c "cat >/vm/head-${NAME}.bundle"
 docker exec amevm sh -c "rm -rf ${SRC} && git clone -q /vm/head-${NAME}.bundle ${SRC}"
-exec docker exec -e "VMLAB_NAME=${NAME}" amevm node "${SRC}/tests/vm/run.mjs" "$@"
+exec docker exec -e "VMLAB_NAME=${NAME}" -e "VMLAB_COMPRESS=${VMLAB_COMPRESS:-}" -e "VMLAB_RECORD_ONLY=${VMLAB_RECORD_ONLY:-}" amevm node "${SRC}/tests/vm/run.mjs" "$@"

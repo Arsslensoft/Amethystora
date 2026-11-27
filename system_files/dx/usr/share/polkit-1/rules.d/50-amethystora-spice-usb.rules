@@ -1,0 +1,9 @@
+// Passing a USB device from the computer to a virtual machine in virt-manager or virt-viewer goes through spice-glib's
+// setuid helper, which gives the program that asked read and write access to the device itself. Its polkit action
+// says yes to the active session; here it asks for an administrator's password, each time.
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.spice-space.lowlevelusbaccess") {
+        return polkit.Result.AUTH_ADMIN;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

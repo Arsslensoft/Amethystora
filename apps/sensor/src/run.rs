@@ -9,14 +9,16 @@ use std::error::Error;
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant};
 
-use libbpf_rs::{Map, MapCore, MapFlags, RingBufferBuilder};
+use libbpf_rs::{Map, MapCore, MapFlags, MapHandle, RingBufferBuilder};
 
 use crate::event::{self, Event};
 use crate::plan::{self, Kind};
@@ -43,6 +45,15 @@ const SDIR_HAS_FILES: u32 = 1;
 /// The longest the logins wait for the sensor to be watching: a machine slow enough to take longer lets them
 /// in anyway, while the sensor goes on loading.
 const LOGIN_WAIT: Duration = Duration::from_secs(30);
+/// How often the loop writes the drop count and its heartbeat, whether or not an event came.
+const HEARTBEAT_EVERY: Duration = Duration::from_secs(5);
+/// A registration that has been under way this long is said (`stalled` in `full`).
+const STALL_AFTER_SECS: u64 = 60;
+/// New folders waiting for the worker, and folders it has opened waiting to be recorded.
+const JOB_QUEUE: usize = 256;
+const FOUND_QUEUE: usize = 1024;
+/// The most folders the loop records in one turn, so that it goes back to the ring buffer.
+const APPLY_PER_TURN: usize = 1024;
 
 /// Runs the sensor, or just probes it (load and attach every program, then stop) for the generator.
 pub fn run(probe: bool) -> Result<(), Box<dyn Error>> {
@@ -91,6 +102,16 @@ pub fn run(probe: bool) -> Result<(), Box<dyn Error>> {
     // Every watch is now in the maps: the sensor is fully watching.
     let _ = fs::write(&ready, b"ready\n");
     notify_ready();
+    reg.host_mnt = host_mount_ns(&bss);
+
+    // A folder made later is opened by a thread of its own, since opening one an account controls may never
+    // return: the loop below goes on draining the ring buffer meanwhile.
+    let (job_tx, job_rx) = mpsc::sync_channel::<Job>(JOB_QUEUE);
+    let (found_tx, found_rx) = mpsc::sync_channel::<Found>(FOUND_QUEUE);
+    let busy = Arc::new(AtomicU64::new(0));
+    let handle = MapHandle::try_from(&bss)?;
+    let worker_busy = busy.clone();
+    std::thread::spawn(move || worker(job_rx, found_tx, handle, worker_busy));
 
     let mut log = Log::open()?;
     let offset = boot_offset_ns();
@@ -116,16 +137,21 @@ pub fn run(probe: bool) -> Result<(), Box<dyn Error>> {
 
     let mut serial = (std::process::id() as u64) << 16;
     let mut drops_said = 0u64;
+    let mut last_beat: Option<Instant> = None;
     loop {
         ring.poll(Duration::from_millis(500))?;
         let batch: Vec<Vec<u8>> = queue.borrow_mut().drain(..).collect();
-        // Events the BPF could not write (the ring buffer full in a burst), counted per CPU: the watcher reports
-        // them as it does audit's lost events. Looked at only after a batch, since a burst is what fills it.
-        if !batch.is_empty() {
-            let drops = count_drops(&dropped);
-            if drops != drops_said {
-                let _ = fs::write(plan::run_dir().join("dropped"), format!("{drops}\n"));
-                drops_said = drops;
+        // Every few seconds, with or without an event: the drop count (events the BPF could not write, the ring
+        // buffer full in a burst, counted per CPU: the watcher reports them as it does audit's lost events), a
+        // registration that does not finish, and the heartbeat, which stops when this loop does.
+        if last_beat.is_none_or(|t| t.elapsed() >= HEARTBEAT_EVERY) {
+            last_beat = Some(Instant::now());
+            beat(&dropped, &mut drops_said, &busy, &mut reg);
+        }
+        for _ in 0..APPLY_PER_TURN {
+            match found_rx.try_recv() {
+                Ok(found) => reg.apply_found(found, &dirs),
+                Err(_) => break,
             }
         }
         for raw in batch {
@@ -155,7 +181,7 @@ pub fn run(probe: bool) -> Result<(), Box<dyn Error>> {
                 if let Some(j) = &journal {
                     let _ = j.send(&journal_line(&rec));
                 }
-                reg.register_new_dir(&ev, &rec, &dirs, &bss);
+                reg.register_new_dir(&ev, &rec, &job_tx);
             }
         }
     }
@@ -202,6 +228,42 @@ fn count_drops(dropped: &Map) -> u64 {
     }
 }
 
+/// Writes what the loop reports on a timer: the drops when they changed, a registration that has run too long,
+/// and the heartbeat (seconds since boot, as /proc/uptime counts them), which the watcher reads for staleness.
+fn beat(dropped: &Map, drops_said: &mut u64, busy: &AtomicU64, reg: &mut Registry) {
+    let run = plan::run_dir();
+    let drops = count_drops(dropped);
+    if drops != *drops_said {
+        let _ = fs::write(run.join("dropped"), format!("{drops}\n"));
+        *drops_said = drops;
+    }
+    let now = boot_secs();
+    let since = busy.load(Ordering::Relaxed);
+    if since != 0 && now.saturating_sub(since) >= STALL_AFTER_SECS {
+        reg.note_full("stalled".to_string());
+    }
+    let tmp = run.join("heartbeat.tmp");
+    if fs::write(&tmp, format!("{now}\n")).is_ok() {
+        let _ = fs::rename(&tmp, run.join("heartbeat"));
+    }
+}
+
+/// Seconds since boot, never 0.
+fn boot_secs() -> u64 {
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) };
+    (ts.tv_sec as u64).max(1)
+}
+
+/// The host's mount namespace, which the BPF read from the initial namespaces when it first saw the registering
+/// thread open a folder (offset 16 of .bss); 0 when the kernel does not say.
+fn host_mount_ns(bss: &Map) -> u32 {
+    match bss.lookup(&0u32.to_ne_bytes(), MapFlags::ANY) {
+        Ok(Some(v)) if v.len() >= 20 => u32::from_ne_bytes(v[16..20].try_into().unwrap()),
+        _ => 0,
+    }
+}
+
 /// Tells systemd the sensor is watching (sd_notify's READY=1), which the logins wait for. A second READY is
 /// ignored, and without $NOTIFY_SOCKET (run by hand) there is nobody to tell.
 fn notify_ready() {
@@ -222,6 +284,9 @@ fn notify_ready() {
 // --- Registration ------------------------------------------------------------------------------------------
 
 struct FolderRec {
+    /// Held open, so that the folder's inode cannot be reused while it is watched, and so that a folder made
+    /// inside it is opened from it.
+    fd: OwnedFd,
     path: Vec<u8>,
     write_keys: u32,
     read_keys: u32,
@@ -232,7 +297,8 @@ struct FolderRec {
 struct Registry {
     by_inode: HashMap<u64, u32>,
     folders: HashMap<u32, FolderRec>,
-    fds: Vec<OwnedFd>,
+    /// The host's mount namespace, to say of each event whether its actor ran in it.
+    host_mnt: u32,
     next_id: u32,
     /// How many more new folders the registration under way may take, and for whom (the account whose mkdir it
     /// answers; none at start-up).
@@ -249,7 +315,7 @@ impl Registry {
         Registry {
             by_inode: HashMap::new(),
             folders: HashMap::new(),
-            fds: Vec::new(),
+            host_mnt: 0,
             next_id: 1,
             budget: BOOT_TREE_FOLDERS,
             owner: None,
@@ -346,7 +412,12 @@ impl Registry {
     /// descriptor and record the folder under that inode in the map. Returns the folder's id and inode.
     fn register_folder(&mut self, path: &[u8], w: u32, r: u32, e: u32, flags: u32, dirs: &Map, bss: &Map) -> Option<(u32, u64)> {
         let (fd, inode) = open_folder(path, bss)?;
+        self.register_found(path.to_vec(), fd, inode, w, r, e, flags, dirs)
+    }
 
+    /// Records an opened folder under its inode, within the budget.
+    #[allow(clippy::too_many_arguments)]
+    fn register_found(&mut self, path: Vec<u8>, fd: OwnedFd, inode: u64, w: u32, r: u32, e: u32, flags: u32, dirs: &Map) -> Option<(u32, u64)> {
         let id = if let Some(&id) = self.by_inode.get(&inode) {
             let rec = self.folders.get_mut(&id).unwrap();
             rec.write_keys |= w;
@@ -368,8 +439,7 @@ impl Registry {
             let id = self.next_id;
             self.next_id += 1;
             self.by_inode.insert(inode, id);
-            self.folders.insert(id, FolderRec { path: path.to_vec(), write_keys: w, read_keys: r, exec_keys: e, flags });
-            self.fds.push(fd);
+            self.folders.insert(id, FolderRec { fd, path, write_keys: w, read_keys: r, exec_keys: e, flags });
             id
         };
         let rec = &self.folders[&id];
@@ -379,9 +449,9 @@ impl Registry {
         Some((id, inode))
     }
 
-    /// A mkdir, or a rename, that made a new folder inside a watched tree: register it (and rescan it) so
-    /// what appears in it afterwards is watched too.
-    fn register_new_dir(&mut self, ev: &Event, rec: &Record, dirs: &Map, bss: &Map) {
+    /// A mkdir, or a rename, that made a new folder inside a watched tree: hand it (and what is below it) to the
+    /// worker to open, so that what appears in it afterwards is watched too.
+    fn register_new_dir(&mut self, ev: &Event, rec: &Record, jobs: &mpsc::SyncSender<Job>) {
         if ev.head.result != 0 {
             return;
         }
@@ -401,19 +471,38 @@ impl Registry {
             return;
         }
         let name = if ev.head.op == event::SOP_MKDIR { &rec.name } else { &rec.name2 };
-        let mut child = parent.path.clone();
-        child.push(b'/');
-        child.extend_from_slice(name);
+        let mut path = parent.path.clone();
+        path.push(b'/');
+        path.extend_from_slice(name);
+        let Ok(parent_fd) = parent.fd.try_clone() else {
+            self.note_full("queue".to_string());
+            return;
+        };
         // What one account's folders may take of the table: root's own are not an account's to fill, so only
         // the table itself bounds them
         let uid = ev.head.uid;
         let used = self.per_account.get(&uid).copied().unwrap_or(0);
-        self.budget = if uid == 0 { MAX_FOLDERS } else { ACCOUNT_FOLDERS.saturating_sub(used) };
-        self.owner = Some(uid);
+        let limit = if uid == 0 { MAX_FOLDERS } else { ACCOUNT_FOLDERS.saturating_sub(used) };
+        if limit == 0 {
+            self.note_full(format!("uid {uid}"));
+            return;
+        }
+        let job = Job { parent: parent_fd, name: name.clone(), path, w, r, e, uid, limit };
+        if jobs.try_send(job).is_err() {
+            self.note_full("queue".to_string());
+        }
+    }
+
+    /// A folder the worker opened: recorded under its inode, within the budget of the account whose mkdir it
+    /// answers.
+    fn apply_found(&mut self, f: Found, dirs: &Map) {
+        let used = self.per_account.get(&f.uid).copied().unwrap_or(0);
+        self.budget = if f.uid == 0 { MAX_FOLDERS } else { ACCOUNT_FOLDERS.saturating_sub(used) };
+        self.owner = Some(f.uid);
         let before = self.budget;
-        self.register_tree(&child, w, r, e, 0, MAX_DEPTH, dirs, bss);
-        if uid != 0 {
-            *self.per_account.entry(uid).or_insert(0) += before - self.budget;
+        self.register_found(f.path, f.fd, f.inode, f.w, f.r, f.e, 0, dirs);
+        if f.uid != 0 {
+            *self.per_account.entry(f.uid).or_insert(0) += before - self.budget;
         }
         self.owner = None;
     }
@@ -479,6 +568,7 @@ impl Registry {
             target_comm: if is_memory { ev.strings[event::SSTR_NAME].to_vec() } else { Vec::new() },
             target_mnt: h.target_mnt,
             own_mnt: h.own_mnt,
+            host_mnt: self.host_mnt,
             time_ns: wall,
         }
     }
@@ -554,7 +644,12 @@ fn open_folder(path: &[u8], bss: &Map) -> Option<(OwnedFd, u64)> {
         return None;
     }
     let owned = unsafe { OwnedFd::from_raw_fd(fd) };
-    // The file_open program wrote this folder's inode to globals.registered_inode (offset 8 of .bss).
+    Some((owned, registered_inode(bss)?))
+}
+
+/// The inode the file_open program wrote for the registering thread's last open (globals.registered_inode,
+/// offset 8 of .bss).
+fn registered_inode(bss: &impl MapCore) -> Option<u64> {
     let value = bss.lookup(&0u32.to_ne_bytes(), MapFlags::ANY).ok()??;
     if value.len() < 16 {
         return None;
@@ -563,7 +658,158 @@ fn open_folder(path: &[u8], bss: &Map) -> Option<(OwnedFd, u64)> {
     if inode == 0 {
         return None;
     }
-    Some((owned, inode))
+    Some(inode)
+}
+
+// --- Registering new folders, off the loop's thread ---------------------------------------------------------
+
+/// A folder to open from its parent's descriptor, and what is below it: the keys it takes from the parent, the
+/// account whose mkdir made it, and the most folders it may open.
+struct Job {
+    parent: OwnedFd,
+    name: Vec<u8>,
+    path: Vec<u8>,
+    w: u32,
+    r: u32,
+    e: u32,
+    uid: u32,
+    limit: u32,
+}
+
+/// A folder the worker opened, for the loop to record.
+struct Found {
+    path: Vec<u8>,
+    fd: OwnedFd,
+    inode: u64,
+    w: u32,
+    r: u32,
+    e: u32,
+    uid: u32,
+}
+
+/// The one thread that opens folders to register after start. The BPF takes the inode of only this thread's
+/// opens, so the loop's own files are never mistaken for a folder. A job that does not return holds only this
+/// thread (`busy` says since when).
+fn worker(jobs: mpsc::Receiver<Job>, found: mpsc::SyncSender<Found>, bss: MapHandle, busy: Arc<AtomicU64>) {
+    let tid = unsafe { libc::syscall(libc::SYS_gettid) } as u32;
+    let named = match bss.lookup(&0u32.to_ne_bytes(), MapFlags::ANY) {
+        Ok(Some(mut v)) if v.len() >= 8 => {
+            v[4..8].copy_from_slice(&tid.to_ne_bytes());
+            bss.update(&0u32.to_ne_bytes(), &v, MapFlags::ANY).is_ok()
+        }
+        _ => false,
+    };
+    if !named {
+        eprintln!("amethystora-sensor: the registering thread could not be named to the BPF, so new folders are not registered");
+        return;
+    }
+    for job in jobs {
+        busy.store(boot_secs(), Ordering::Relaxed);
+        if let Some(dev) = fstat_dev(job.parent.as_raw_fd()) {
+            let mut count = 0;
+            walk(job.parent.as_raw_fd(), dev, &job.name, job.path.clone(), &job, MAX_DEPTH, &mut count, &bss, &found);
+        }
+        busy.store(0, Ordering::Relaxed);
+    }
+}
+
+/// Opens NAME in PARENT (never through a link, never waiting on the open), sends it, then walks the folders in
+/// it. A folder on another device than its parent's is a mount and is left alone. False once the walk should
+/// stop (the job's limit reached, or the loop gone).
+#[allow(clippy::too_many_arguments)]
+fn walk(parent: RawFd, parent_dev: u64, name: &[u8], path: Vec<u8>, job: &Job, depth: u32, count: &mut u32, bss: &MapHandle, found: &mpsc::SyncSender<Found>) -> bool {
+    if *count >= job.limit {
+        return false;
+    }
+    let Some((fd, inode, dev)) = open_child(parent, name, bss) else {
+        return true;
+    };
+    if dev != parent_dev {
+        return true;
+    }
+    *count += 1;
+    let Ok(copy) = fd.try_clone() else {
+        return true;
+    };
+    if found.send(Found { path: path.clone(), fd: copy, inode, w: job.w, r: job.r, e: job.e, uid: job.uid }).is_err() {
+        return false;
+    }
+    if depth == 0 {
+        return true;
+    }
+    for child in subfolders(&fd, (job.limit - *count) as usize) {
+        let mut child_path = path.clone();
+        child_path.push(b'/');
+        child_path.extend_from_slice(&child);
+        if !walk(fd.as_raw_fd(), dev, &child, child_path, job, depth - 1, count, bss, found) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Opens a folder from its parent's descriptor: read-only, not through a final link, and without waiting for
+/// the file system to answer; and reads back the inode the BPF left for this thread's open.
+fn open_child(parent: RawFd, name: &[u8], bss: &MapHandle) -> Option<(OwnedFd, u64, u64)> {
+    let cname = CString::new(name).ok()?;
+    let fd = unsafe {
+        libc::openat(
+            parent,
+            cname.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return None;
+    }
+    let owned = unsafe { OwnedFd::from_raw_fd(fd) };
+    let inode = registered_inode(bss)?;
+    Some((owned, inode, fstat_dev(fd)?))
+}
+
+fn fstat_dev(fd: RawFd) -> Option<u64> {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    (unsafe { libc::fstat(fd, &mut st) } == 0).then_some(st.st_dev as u64)
+}
+
+/// The names of the folders in one (not links), at most `cap` of them, listed through a copy of its descriptor.
+fn subfolders(fd: &OwnedFd, cap: usize) -> Vec<Vec<u8>> {
+    let mut names = Vec::new();
+    let Ok(copy) = fd.try_clone() else {
+        return names;
+    };
+    let raw = copy.into_raw_fd();
+    let dir = unsafe { libc::fdopendir(raw) };
+    if dir.is_null() {
+        unsafe { libc::close(raw) };
+        return names;
+    }
+    unsafe { libc::rewinddir(dir) };
+    while names.len() < cap {
+        let entry = unsafe { libc::readdir(dir) };
+        if entry.is_null() {
+            break;
+        }
+        let entry = unsafe { &*entry };
+        let name = unsafe { std::ffi::CStr::from_ptr(entry.d_name.as_ptr()) };
+        if name.to_bytes() == b"." || name.to_bytes() == b".." {
+            continue;
+        }
+        let is_dir = match entry.d_type {
+            libc::DT_DIR => true,
+            libc::DT_UNKNOWN => {
+                let mut st: libc::stat = unsafe { std::mem::zeroed() };
+                let got = unsafe { libc::fstatat(fd.as_raw_fd(), name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) };
+                got == 0 && st.st_mode & libc::S_IFMT == libc::S_IFDIR
+            }
+            _ => false,
+        };
+        if is_dir {
+            names.push(name.to_bytes().to_vec());
+        }
+    }
+    unsafe { libc::closedir(dir) };
+    names
 }
 
 fn cstr(b: &[u8]) -> Vec<u8> {

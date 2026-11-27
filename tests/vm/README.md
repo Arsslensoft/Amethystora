@@ -74,6 +74,60 @@ VM ran each suite and how long each lane took. `--memory MB` gives every VM but 
 Each suite starts on a machine where only the prep suites ran before it, not every suite before it in name order:
 a suite that needs another's leftovers says so and does the work itself.
 
+### On GitHub
+
+The Lab workflow (`.github/workflows/lab.yml`) runs the same lanes on GitHub's runners, each lane on a runner of its
+own, as bootc runs its integration tests. Every pull request runs the prep suites and `shards.json`'s `smoke` ones on
+one lane, and a pull request with the label `lab` every suite, from its next push; a change to Markdown alone runs
+none, and a merge group none (its pull requests ran it). By hand (Actions, Lab, Run workflow) it takes the image, the
+stream, the suites and how many lanes, ten by default:
+
+```bash
+gh workflow run Lab --ref main -f suites=11,50 -f lanes=2
+```
+
+**Plan** prints the lanes (`run.mjs plan --parallel N --json`, which plans as if the ready state were made before any
+lane starts). **Build, install, sign in** runs `run.sh build`, `run.sh disk` with `VMLAB_COMPRESS=1` (the disks'
+clusters compressed with zstd, which the VMs read as they are), and `run.sh ready` (the prep suites, then the ready state
+alone), and keeps the disks and the ready state as artifacts for a day. Each **Lane N** fetches what its suites need
+and runs `run.sh test --parallel 1 --reuse --suites ...`, and **Lab** puts every job's `results.json` into one table
+(`run.mjs report DIR --expect ...`), a suite whose job did not finish counted as failed; it is the one check to require.
+Each job's run folders, with each VM's serial console, are its artifact `lab-run-*` for two weeks, and its summary shows
+`summary.md`. `/vm` is a folder of the runner there (`VMLAB_VOLUME` in `setup.sh`), so that the disks can be handed on.
+A runner has 4 processors, 16 GB and about 50 GB free once the build space is cleared: one VM at a time, of 4 GB. Nothing
+is published and no secret is used: the image is built with throwaway keys from the layers on GHCR, as a pull request's.
+
+The suites of ten minutes and more (`shards.json`'s `long`) are a workflow of their own, **Lab (long suites)**
+(`lab-long.yml`), which runs this one's jobs through `workflow_call` with `set: long`: one lane, and one runner, for each,
+so that the longest is the whole run's time. A pull request with the label `lab` runs them there, and Lab's run of every
+suite leaves them out (`run.mjs plan --skip`). By hand: `gh workflow run "Lab (long suites)" --ref main -f suites=93`.
+
+`tests/vm/known-failures` names checks (`SUITE :: the start of the check's words`) that fail on a runner and have not been looked at on a
+machine with a screen: a suite whose only failures are listed passes, and its summary says `passed (N known)` and prints them.
+A suite that fails is run once more on the same machine, and passes only if the second run does (the summary says `passed on the second run` and prints what the first run failed; `VMLAB_NO_RETRY=1` runs each once): on a runner a session now and then does not come up. A check that fails and is not listed fails its suite as before; take a line out once its check has been seen to pass. Suite 71's
+numbers are the maintainer's machine's, so with `VMLAB_RECORD_ONLY` (set by `lab.yml`) it records them and compares nothing.
+
+**Lab (ISOs)** (`lab-iso.yml`) tries installing for every pull request: the image built here, its installer ISO made by
+`iso/build-installer-iso.sh` and its live ISO as `build-iso.yml` makes it, each installed by `iso.sh` (below) on a
+runner of its own, the live ISO's forensic start tried first.
+
+### Installing from the ISOs
+
+```bash
+bash tests/vm/iso.sh installer amethystora-non-uefi.iso [--digest sha256:...]
+bash tests/vm/iso.sh live amethystora.iso [--digest sha256:...]
+```
+
+`iso.mjs` starts the ISO under Secure Boot from its own boot menu and looks at what it started (the installer's system,
+or the live session with the image it installs, read-only), installs onto a blank 40 GiB disk with only the answers a
+person gives (the whole disk, encrypted, the language and keyboard: the installer ISO's own kernel with its entry's
+arguments and a kickstart of those answers that runs the ISO's own kickstart, under UEFI with Secure Boot off since the
+firmware checks no kernel it is handed directly; the live ISO from its session, Anaconda on `interactive-defaults.ks`
+with the same answers), then starts the disk alone under Secure Boot with the passphrase as a credential, twice: every
+unit started, the signed origin, `--digest`'s image running, btrfs on LUKS2, SELinux and its labels, the firewall,
+no Fedora logo, the new installation's snapshots, GNOME Initial Setup. Its lines are in `/vm/iso/KIND/results.tap`, with
+a screenshot after each step. Written on 2026-11-23 and not run yet.
+
 The lab shares one Linux VM with every other container (WSL 2's, 13.3 GB here), and when a build and a VM ran
 beside other containers it ran out of memory and Docker stopped answering (2026-10-29). So `vm_start` refuses while
 an image is being built in the lab, and when the VM's memory is not free: the kernel's `MemAvailable`, less what
@@ -103,7 +157,7 @@ reboot too (it keeps the boot id, so systemd's `SoftRebootsCount` is compared as
 `{"powers_off": true}` it waits for the machine to power itself off, then starts it. Exit status 101
 (`continue_phase`) runs the next phase in the same boot, for what outlasts a phase's 30 minutes; a phase that calls
 `usb_next JSON` first has USB devices plugged out and in before it, as a person would (`{"unplug": ["stick"],
-"plug": ["stick", "keyboard"]}`: two USB sticks with serials of their own and a plain keyboard, `USB_DEVICES` in
+"plug": ["stick", "keyboard"]}`: two USB sticks with serials of their own, a plain keyboard and an FTDI serial adapter, `serial`, which is `ttyUSB0`, `USB_DEVICES` in
 `run.mjs`).
 
 A suite whose second line is `# vmlab-vm: installer` runs on a second machine, installed as the installer
@@ -158,6 +212,7 @@ reads what it says (`70-backups.sh` shows how).
 | `70-backups.sh` | the home folders made a btrfs subvolume (a restart), the hourly snapshots and a backup to an append-only rest-server; Backups' helper and window on both: points, folders, versions, putting back (labels, reflinks, refusals), Look, the whole folder, Open With, a stale and a failed backup |
 | `74-vault.sh` | Amethystora Vault as a person goes through it, with real polkit, SELinux enforcing and the real service: the sockets and nothing running or kept before setup, the cold start, setup in a terminal with the recovery key typed back, the folder, `/proc`, the network, another account, a Flatpak and an account over SSH all kept out, the sealed purposes Round 7 builds on, each item's approval and the sentence polkit shows (as a text agent prints it and in GNOME Shell's dialog, read through AT-SPI, with the lab's screenshot checked), the ways it opens (the account's password, the TPM, no prompt, a fingerprint on libfprint's virtual reader), what closes it (the screen, a suspend, an idle minute, the service killed, no core file), what idles (no process, an open vault's wakeups and memory), an authenticator code against `oathtool`, the SSH agent with `ssh` to a real sshd and in a new login, a protected file run through `ame vault run` (and what the account's other programs can reach meanwhile), the machine's root, a certificate and a real PDF signed through the PKCS#11 module and read by `pdfsig` as trusted and as unknown, a hidden vault (in no list, journal or report, and a password that takes as long as a wrong one), the sealed backup, forgetting and restoring with the recovery key, Vaultwarden in a container reached by the network service alone, no denial; then after a restart. Not run: a security key, the camera and a picture's QR, a second account with a seat, Bitwarden's own server |
 | `75-deja-dup.sh` | Déjà Dup from Flathub: where its schedule is kept, what `flatpak preinstall` uninstalls when its list stops naming an app, and the one notice at the next login |
+| `79-move-in.sh` | Move in from Windows: the first spare disk (SPARE-1) made into an NTFS Windows disk (needs `mkfs.ntfs`; ntfs-3g leaves it not cleanly unmounted when present), Control's entry unavailable before and available after, the offer mounting nothing, `ame system move-in` in a terminal copying the folders chosen (a file already there kept with the Windows one beside it, Downloads and the other account not copied, a OneDrive attribute placeholder counted), a second run copying nothing, the first look's card once, and the whole disk's checksum unchanged (no BitLocker, real hibernation or polkit password: by hand) |
 | `83-logins.sh` | Parental Controls' allowed hours, a child's login typed at the text console and made over SSH; one-time codes for SSH set up and switched in a terminal, a code used twice, a scratch code, a key, fail2ban banning wrong codes from another address, what the watcher accepts; an Active Directory domain (a Samba domain controller in a container) joined with SSSD and with winbind, logged in to and left, the image's PAM setup kept each time |
 | `85-raid-mirror.sh` | the system spread over two disks as the installer leaves it (SPARE-6), mirrored (2a), started with the second disk unplugged from Start with a disk missing, the disk back and its copies put back, then on one disk again |
 | `86-locked-session.sh` | `ame security usb locked` turned on in the running session: a stick and a keyboard plugged in while the screen is locked (the stick blocked, the keyboard let in, GNOME's notifications), the stick still blocked once unlocked until plugged in again, the login screen of another session counting as unlocked, `on` afterwards (no rule of GNOME's left, a new stick blocked while unlocked) and off; the private folder made in a terminal with its recovery key, closed by the lock with programs holding files in it (named in a notification), its thumbnails and recent files gone, opened from the launcher with a wrong and the right password, Close Now, its watcher stopped or killed, a suspend without the lock, a new password with the old one and with the recovery key, a backup holding only the encrypted copy, logging out, removing |
@@ -170,6 +225,23 @@ reads what it says (`70-backups.sh` shows how).
 | `97-terminal.sh` | kitty as the terminal: `xdg-terminal-exec` opens it and it stays open, the image's `kitty.conf` is what it reads, a theme switch rewrites its colours and an open window takes them without closing, and the prompt is the powerline one (account, folder, branch, an arrow after each, the command on a line of its own) in the theme's colours |
 
 A new feature gets its check here with it, and a bug a run found gets the check that would have caught it.
+
+### The live ISO's forensic start
+
+The suites above run in an installed image. The live ISO's third menu entry, **Start without touching the disks** (`iso/live/forensic`,
+manual: `forensic-start.md`), is tried in the live system itself by `forensic-live.sh`, which is not part of `run.sh` and needs the live ISO
+(the `live-iso` job's, or one made the same way):
+
+```bash
+bash tests/vm/forensic-live.sh disk                     # once: a 3 GiB disk with ext4, XFS, btrfs, LVM, LUKS, swap and an MD RAID1, logs unreplayed
+bash tests/vm/forensic-live.sh amethystora.iso          # the entry's own kernel and arguments, the disk beside it, the session used, the disk's checksum before and after
+bash tests/vm/forensic-live.sh amethystora.iso --control   # the first entry instead, one partition mounted read-write: the checksum must differ
+```
+
+It reads the entry and its arguments out of the ISO's own `grub.cfg`, starts the ISO's kernel and initramfs with them under QEMU with the
+disk as a SATA disk (`forensic-live.mjs`), and exits 0 only when every line is ok and the checksum is the same. The disk is made in the lab
+container with the tools it installs when it runs (xfsprogs, btrfs-progs, lvm2, cryptsetup, mdadm): a file system the lab's kernel cannot
+make is left out and its lines say `skip`. Not run yet: written without a live ISO to try it on.
 
 ## Using it by hand
 

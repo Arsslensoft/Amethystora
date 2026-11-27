@@ -1,6 +1,6 @@
 # fprintd with the duress finger
 
-Fedora's fprintd package with seven patches, for the duress finger (`ame security duress`). Each image build
+Fedora's fprintd package with eight patches, for the duress finger (`ame security duress`). Each image build
 makes it in the Containerfile's `fprintd` stage (`build_files/shared/build-fprintd.sh`), on the same pinned
 base image, and `build_files/base/05-override-install.sh` installs it in place of Fedora's and puts its
 source package in `/usr/src/amethystora`.
@@ -13,6 +13,9 @@ source package in `/usr/src/amethystora`.
 - **0007** is Amethystora's. pam_fprintd takes `duress=allow` or `duress=deny`, reads the account's duress
   finger from `/etc/amethystora/duress.d/fingers`, and on a match with it calls `Run` on
   `org.amethystora.Duress`. `pam_fprintd(8)` describes it.
+- **0008** is Amethystora's too. pam_fprintd asks the bus for the unique name of fprintd's connection, matches
+  fprintd's signals on that name and drops any whose sender is another connection, so that a program of another
+  account cannot send the module a match straight to its connection; the tests in `tests/pam` try it.
 
 The spec is Fedora's (MIT, as Fedora's spec files are) with its `Release`, patches and changelog changed. The
 patches are GPL-2.0-or-later, as fprintd is. `sources` pins the release tarball's SHA-512, Fedora's own. The
@@ -47,8 +50,8 @@ fails, because `sources` still names the old tarball, so the update is made on m
 closes it:
 
 1. Put the new tarball's SHA-512 in `sources`.
-2. Drop each patch the release already carries. A release with 6396302 and 38f1104 leaves 0007 alone.
-3. Rebase 0007 on the release and run the PAM tests.
+2. Drop each patch the release already carries. A release with 6396302 and 38f1104 leaves 0007 and 0008 alone.
+3. Rebase 0007 and 0008 on the release and run the PAM tests.
 4. Set `Release` to Fedora's for that version (or `1` if Fedora has none yet) with `.1.amethystora`.
 
 ## When Fedora changes fprintd

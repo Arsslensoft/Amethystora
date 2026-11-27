@@ -40,7 +40,8 @@ export class PluginTile {
     set(plugin) {
         this.plugin = plugin;
         const out = plugin.output ?? plugin.sample;
-        this.tile.title = plugin.draft ? `${_('Draft')} · ${plugin.name}` : plugin.name;
+        // Beside GNOME's own tiles a plugin's says what it is; the image's own plugins are the system's
+        this.tile.title = plugin.draft ? `${_('Draft')} · ${plugin.name}` : plugin.shipped ? plugin.name : `${_('Plugin')} · ${plugin.name}`;
         // Hidden is for the pill, the bar and the desktop; a tile was asked for, so it stays
         this.tile.visible = Boolean(out) && !this._ui.hidden({output: out});
         if (!out)

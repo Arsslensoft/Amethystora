@@ -18,6 +18,8 @@ use adw::prelude::*;
 const MEDIA: &str = "/usr/share/amethystora/manual/media";
 /// Clips open at once. A pipeline takes some 60 descriptors, of the 1024 a program has by default
 const MOST_OPEN: usize = 8;
+/// How long after a card shows, or its page scrolls, it looks again at where it is: by then the page has been laid out
+const LAID_OUT: std::time::Duration = std::time::Duration::from_millis(250);
 
 thread_local! {
     static OPEN: Cell<usize> = const { Cell::new(0) };
@@ -50,6 +52,8 @@ struct Card {
     held: Cell<bool>,
     /// The clip could not be played: the poster stays
     failed: Cell<bool>,
+    /// A look after the next layout is asked for already (sync_laid_out)
+    pending: Cell<bool>,
     watch: RefCell<Option<Watch>>,
 }
 
@@ -101,6 +105,24 @@ impl Card {
         root.update_property(&[gtk::accessible::Property::Label(&label)]);
     }
 
+    /// Again a moment later: a scroll moves the card only at the layout that follows it, so the place read when the page
+    /// says it scrolled is the old one (a new page opened at a section jumps there once, and its cards stayed paused below
+    /// the edge they had left)
+    fn sync_laid_out(self: &Rc<Self>) {
+        if self.root.upgrade().is_none() || self.pending.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        // A timer, not a tick: the compositor sends a window that has nothing new to draw no frames, so a tick that waits for
+        // the layout after a jump never comes
+        glib::timeout_add_local_once(LAID_OUT, move || {
+            if let Some(card) = weak.upgrade() {
+                card.pending.set(false);
+                card.sync();
+            }
+        });
+    }
+
     fn open(self: &Rc<Self>) -> gtk::MediaFile {
         let media = gtk::MediaFile::for_filename(&self.clip);
         media.set_loop(true);
@@ -148,12 +170,14 @@ impl Card {
             let moved = adjustment.connect_value_changed(move |_| {
                 if let Some(card) = weak.upgrade() {
                     card.sync();
+                    card.sync_laid_out();
                 }
             });
             let weak = Rc::downgrade(self);
             let laid_out = adjustment.connect_changed(move |_| {
                 if let Some(card) = weak.upgrade() {
                     card.sync();
+                    card.sync_laid_out();
                 }
             });
             (adjustment, moved, laid_out)
@@ -216,6 +240,7 @@ pub fn card(href: &str, caption: &str) -> Option<gtk::Widget> {
         media: RefCell::new(None),
         held: Cell::new(false),
         failed: Cell::new(false),
+        pending: Cell::new(false),
         watch: RefCell::new(None),
     });
 
@@ -230,12 +255,8 @@ pub fn card(href: &str, caption: &str) -> Option<gtk::Widget> {
     root.connect_map(move |root| {
         shown.follow(root);
         shown.sync();
-        // Only laid out by the next frame can it tell whether it is on the screen, and a window already active says nothing more
-        let card = shown.clone();
-        root.add_tick_callback(move |_, _| {
-            card.sync();
-            glib::ControlFlow::Break
-        });
+        // Only once laid out can it tell whether it is on the screen, and a window already active says nothing more
+        shown.sync_laid_out();
     });
     let hidden = card.clone();
     root.connect_unmap(move |_| {

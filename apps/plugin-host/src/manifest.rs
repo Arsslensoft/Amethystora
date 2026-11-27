@@ -75,6 +75,11 @@ pub fn valid_id(id: &str, system: bool) -> Result<(), String> {
     if !system && id.starts_with("amethystora.") {
         return Err("ids starting with amethystora. are the system's".into());
     }
+    // A plugin's state folder is named by its id, in the folder where the host keeps sent.json, ID.secrets, ID.settings.json and their temporary
+    // files: no id ends as one of those names does
+    if matches!(labels.last(), Some(&("secrets" | "json" | "new"))) {
+        return Err("the last part of \"id\" cannot be secrets, json or new: those end the names of the host's own files".into());
+    }
     Ok(())
 }
 
@@ -520,6 +525,8 @@ mod tests {
             ("amethystora. id", Box::new(|v| v["id"] = "amethystora.pill".into())),
             ("one label", Box::new(|v| v["id"] = "plain".into())),
             ("upper case id", Box::new(|v| v["id"] = "Dev.Example".into())),
+            ("id ending as the host's secrets file", Box::new(|v| v["id"] = "dev.example.secrets".into())),
+            ("id of the host's sent.json", Box::new(|v| v["id"] = "sent.json".into())),
             ("schema", Box::new(|v| v["schema"] = 2.into())),
             ("version", Box::new(|v| v["version"] = "latest".into())),
             ("name with control", Box::new(|v| v["name"] = "a\u{7}b".into())),

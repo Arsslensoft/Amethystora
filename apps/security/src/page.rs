@@ -541,6 +541,7 @@ fn tile_icon(id: &str) -> &'static str {
         "disk-unlock" => "chip",
         "usb-protection" => "plug",
         "private-folder" => "folder",
+        "pull-key" => "key",
         "browser-protection" | "browser-privacy" => "monitor",
         "site-checking" => "scan",
         "key-remapping" => "keyboard",
@@ -799,6 +800,8 @@ fn value_words(value: &str) -> String {
         "strict" => t!("Strict"),
         "skip" => t!("Skip"),
         "run" => t!("Run"),
+        "lock" => t!("Lock"),
+        "poweroff" => t!("Power off"),
         _ => value.to_string(),
     }
 }
@@ -868,6 +871,9 @@ fn nav_of(page: &str) -> &'static str {
 fn recipe(page: &str) -> &'static str {
     if page == "settings/duress" {
         return "ame security duress";
+    }
+    if page == "settings/snapshots" {
+        return "ame security ransomware";
     }
     match nav_of(page) {
         "scan" => "ame security scan",
@@ -1070,6 +1076,7 @@ impl Security {
             "containers" => self.containers_page(),
             "settings" => self.settings_page(),
             "settings/duress" => self.duress_page(),
+            "settings/snapshots" => self.snapshots_page(),
             page if page.starts_with("settings/") => self.category_page(&page["settings/".len()..]),
             "events" => self.events_page(),
             _ => self.overview_page(),
@@ -2969,6 +2976,23 @@ impl Security {
                 }
             }
         }
+        // The hourly snapshots, which the overview's tile turns on, and the folders they leave out
+        let snapshots_on = self.state.borrow().report.as_ref().and_then(|report| report.checks.iter().find(|c| c.id == "ransomware-protection")).is_some_and(|c| c.state == "on");
+        let left_out = self.state.borrow().snapshot_excludes.as_ref().map(|list| list.excluded.iter().filter(|e| e.left_out).count()).unwrap_or(0);
+        let snapshots_state = if !snapshots_on {
+            t!("Off")
+        } else if left_out == 0 {
+            t!("On")
+        } else {
+            t!("{count, plural, one {On, # folder left out} other {On, # folders left out}}", count = left_out as f64)
+        };
+        tiles.push(self.category_tile(
+            "history",
+            &t!("Ransomware protection"),
+            &t!("A read-only snapshot of the home folders every hour, and the folders it leaves out to save disk space."),
+            &snapshots_state,
+            "settings/snapshots".into(),
+        ));
         // Says nothing of whether this account has one, as the report does not
         tiles.push(self.category_tile(
             "fingerprint",
@@ -3103,6 +3127,102 @@ impl Security {
         Self::page(children)
     }
 
+    /// A folder left out of the snapshots, with the way to snapshot it again
+    fn left_out_row(&self, entry: &backend::LeftOut) -> gtk::Box {
+        let row = ui::hbox(18, &["list-row", "switch-row"]);
+        let words = ui::vbox(3, &["grow"]);
+        words.set_hexpand(true);
+        let name = wrapping(&format!("~/{}", entry.rel), &["strong", "mono"]);
+        name.set_direction(gtk::TextDirection::Ltr);
+        words.append(&name);
+        let said = if entry.left_out {
+            t!("Left out: what changes in it is not kept.")
+        } else {
+            t!("Listed, but a plain folder again, so the snapshots keep it.")
+        };
+        words.append(&wrapping(&said, &["small-text", "faint"]));
+        row.append(&words);
+        let path = entry.path.clone();
+        let again = self.button(&t!("Snapshot it again…"), Opts { small: true, icon: Some("terminal"), ..Default::default() }, move |this| {
+            backend::snapshot_exclude(this.state.borrow().snapshot_excludes.as_ref(), "remove", &path, &this.home)
+        });
+        again.update_property(&[gtk::accessible::Property::Label(&t!("Snapshot {folder} again", folder = format!("~/{}", entry.rel)))]);
+        again.set_valign(gtk::Align::Center);
+        row.append(&again);
+        row
+    }
+
+    /// A folder of the home from the window's own folder dialog, left out in a terminal that says what it costs
+    fn choose_left_out(&self) {
+        let this = self.rc();
+        glib::spawn_future_local(async move {
+            let dialog = gtk::FileDialog::builder()
+                .title(t!("Leave a folder out of the hourly snapshots"))
+                .accept_label(t!("Leave out"))
+                .initial_folder(&amethystora_ui::gio::File::for_path(&this.home))
+                .modal(true)
+                .build();
+            let Ok(folder) = dialog.select_folder_future(Some(&this.shell.window)).await else { return };
+            let Some(path) = folder.path() else { return };
+            let path = std::fs::canonicalize(&path).unwrap_or(path).to_string_lossy().into_owned();
+            backend::snapshot_exclude(this.state.borrow().snapshot_excludes.as_ref(), "add", &path, &this.home);
+        });
+    }
+
+    /// Ransomware protection: on or off, and the folders the snapshots leave out
+    fn snapshots_page(&self) -> gtk::Widget {
+        let state = self.state.borrow();
+        let check = state.report.as_ref().and_then(|report| report.checks.iter().find(|c| c.id == "ransomware-protection")).cloned();
+        let list = state.snapshot_excludes.clone().unwrap_or_default();
+        drop(state);
+        let on = check.as_ref().is_some_and(|c| c.state == "on");
+        let unavailable = check.as_ref().is_some_and(|c| c.state == "unavailable") || (check.is_some() && !list.possible && !on);
+        let mut children: Vec<gtk::Widget> = vec![
+            self.settings_back(),
+            page_head(
+                &t!("Ransomware protection"),
+                &t!("Every hour, a read-only snapshot of every home folder on this machine, which ransomware running as you cannot change or delete. Kept: every snapshot from the last day, and one a day for two weeks. A snapshot holds on to what was deleted or changed since, so the snapshots cost disk space, most of it for folders that change a lot."),
+            )
+            .upcast(),
+        ];
+        let switch = if on {
+            self.button(&t!("Turn off…"), Opts { icon: Some("terminal"), ..Default::default() }, |_| backend::ransomware(false))
+        } else {
+            self.button(&t!("Turn on…"), Opts { icon: Some("terminal"), primary: true, disabled: unavailable, ..Default::default() }, |_| backend::ransomware(true))
+        };
+        let title = if on {
+            t!("On")
+        } else if unavailable {
+            t!("Not available here")
+        } else {
+            t!("Off")
+        };
+        let tone = "info";
+        let text = if unavailable {
+            t!("The home folders are not on a btrfs subvolume of their own, so they cannot be snapshotted.")
+        } else {
+            check.as_ref().map(|c| c.text.clone()).unwrap_or_default()
+        };
+        children.push(callout(tone, &title, &text, Some(actions(vec![switch.upcast()]).upcast())).upcast());
+        let mut rows: Vec<gtk::Widget> = list.excluded.iter().map(|entry| self.left_out_row(entry).upcast()).collect();
+        if rows.is_empty() {
+            rows.push(empty(&t!("Nothing is left out: every folder of your home is in the snapshots.")).upcast());
+        }
+        let body = ui::vbox(12, &[]);
+        body.append(&list_card(rows));
+        let leave = self.button(&t!("Leave a folder out…"), Opts { icon: Some("terminal"), disabled: !list.possible, ..Default::default() }, |this| this.choose_left_out());
+        body.append(&actions(vec![leave.upcast()]));
+        children.push(
+            section(
+                &t!("Left out of the snapshots"),
+                &body,
+                Some(&t!("For a folder that changes a lot and is rebuilt or downloaded again anyway: games, containers, virtual machines. What changes in it is not kept, so ransomware that encrypts it can be undone only from a backup. Each change asks for an administrator's password, and the apps using the folder must be closed first.")),
+            )
+            .upcast(),
+        );
+        children.push(actions(vec![self.manual_link(&t!("Ransomware protection in the manual"), "viruses#ransomware-protection").upcast()]).upcast());
+        Self::page(children)
+    }
 }
 
 #[cfg(test)]

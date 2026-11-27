@@ -416,6 +416,8 @@ fingerprint_off() {
     rm -f /run/systemd/system/fprintd.service.d/vmlab-vault.conf "${WORK}/vmlab-fprintd-reader.cil"
     systemctl daemon-reload
     systemctl stop fprintd.service 2>/dev/null
+    # What the delete left on disk when the reader no longer held the print: the next reader (suite 84's) starts empty
+    rm -rf "/var/lib/fprint/${TEST_USER}"
     if semodule -l 2>/dev/null | grep -qx vmlab-fprintd-reader; then semodule -r vmlab-fprintd-reader; fi
     rm -f "${READER}"
 }
@@ -872,7 +874,7 @@ if command -v podman >/dev/null && wait_for 60 sh -c 'getent hosts docker.io >/d
         if ((rc != 0)); then ok "connecting to a server with no such account fails, and says so"; else not_ok "sync connected to an account that does not exist"; fi
         echo "# the network service after a connection attempt: $(systemctl is-active amethystora-vault-net.service)"
         same "sync's address is not a row of what the machine sends: nothing is connected" "$(tester_session 'ame security sends' 2>&1 | grep -c vault-sync || true)" 0
-        skip "every kind both ways, a conflict keeping both, a sealed item unreadable on the server, a stopped server and nothing failing: they need an account the server knows (cargo's vaultwarden.rs does them against this same image)"
+        skip "every kind both ways, a conflict keeping both, an old sealed note moved to its plain form, a stopped server and nothing failing: they need an account the server knows (cargo's vaultwarden.rs does them against this same image)"
         podman rm -f vmlab-vaultwarden >/dev/null 2>&1
     else
         skip "Vaultwarden could not be pulled here (no registry reachable from the lab): sync against it is cargo's, apps/vault-net/tests/vaultwarden.rs"

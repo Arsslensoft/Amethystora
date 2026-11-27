@@ -6,7 +6,8 @@
 #   amethystora-integrity account --rows-fd N [--trust FINGERPRINT]...
 #                                             an account's own Flatpak installation, run as that account by the
 #                                             check above: its rows on descriptor N, read only, and what changed
-#                                             as JSON lines on stdout, which root writes
+#                                             as JSON lines on stdout (a file of root's, which root reads once the
+#                                             run has ended and checks against the files themselves)
 #
 # What it reads:
 #
@@ -33,6 +34,7 @@
 # line each in the security reader's form ({id, text, level, tactic, account, within}), and the security
 # watcher, started at the end, says what is new.
 
+import ctypes
 import errno
 import fcntl
 import glob
@@ -40,8 +42,8 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import shutil
+import signal
 import sqlite3
 import stat
 import struct
@@ -50,7 +52,13 @@ import sys
 import tempfile
 import time
 
-import gi
+# The account's run is the first thing here to be made non-dumpable (PR_SET_DUMPABLE), before anything else is
+# loaded: no other process of the account may then reach its descriptors or memory through ptrace, pidfd_getfd
+# or /proc. An exec made it dumpable again, so this is the earliest it can be done.
+if sys.argv[1:2] == ["account"] and ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0) != 0:
+    sys.exit(70)
+
+import gi  # noqa: E402
 
 gi.require_version("OSTree", "1.0")
 from gi.repository import Gio, GLib, OSTree  # noqa: E402
@@ -72,6 +80,9 @@ ACTIVE_FOR = 86400
 # An account's installation is read when it changed, or once this long has gone by
 ACCOUNT_EVERY = 23 * 3600
 ACCOUNT_TIMEOUT = 1800
+# What an account's run may hand back: this much in all, and this much in one line. More is a run that did not finish
+OUT_MOST = 1 << 30
+LINE_MOST = 1 << 20
 # More changed files of one deploy than this are said as one finding
 MOST = 20
 REINSTALL = ("Something with administrator rights changed this system's own files. Back up your files and "
@@ -270,6 +281,23 @@ def lstat(path):
         return os.lstat(path)
     except OSError:
         return None
+
+
+def readlink(path):
+    """Where a link leads, or None when it is no link any more (an account's files change while they are read)"""
+    try:
+        return os.readlink(path)
+    except OSError:
+        return None
+
+
+def is_text(name):
+    """A name SQLite and JSON can keep: one that is not UTF-8 reaches Python as lone surrogates"""
+    try:
+        name.encode()
+        return True
+    except UnicodeEncodeError:
+        return False
 
 
 FS_IOC_GETVERSION = 0x80087601
@@ -641,24 +669,58 @@ def written_by_flatpak(dep, rel, in_commit=False):
     return None
 
 
-def runs_app(value, app):
-    """A flatpak run of this app, with only the options Flatpak itself writes"""
+def launcher_values(text):
+    """A launcher's Exec, TryExec and SystemdService by group, as GLib reads them: the whole file, a key-file
+    escape undone, a key given twice taken from its last line. None when GLib cannot read it."""
+    keyfile = GLib.KeyFile()
+    found = {}
     try:
-        argv = shlex.split(value)
-    except ValueError:
+        keyfile.load_from_data(text, len(text.encode()), GLib.KeyFileFlags.NONE)
+        for group in keyfile.get_groups()[0]:
+            keys = keyfile.get_keys(group)[0]
+            for key in ("Exec", "TryExec", "SystemdService"):
+                if key in keys:
+                    found[(group, key)] = keyfile.get_string(group, key)
+    except GLib.Error:
+        return None
+    return found
+
+
+def words_of(value):
+    """An Exec value split as GLib splits it, or None"""
+    try:
+        ok, argv = GLib.shell_parse_argv(value)
+    except GLib.Error:
+        return None
+    return argv if ok else None
+
+
+def runs_app(value, app, original=None):
+    """A flatpak run of this app, with only the options Flatpak itself writes. ORIGINAL, when the commit's own
+    launcher could be read, is its Exec in words: --command has to be its program, and what follows the app its
+    arguments (Flatpak wraps file fields in @@ and @@u)"""
+    argv = words_of(value)
+    if argv is None or argv[:2] != [FLATPAK, "run"]:
         return False
-    if argv[:2] != [FLATPAK, "run"]:
-        return False
-    i = 2
+    i, command = 2, None
     while i < len(argv) and argv[i].startswith("--"):
-        if argv[i].split("=", 1)[0] not in RUN_OPTIONS:
+        name, _, setting = argv[i].partition("=")
+        if name not in RUN_OPTIONS:
             return False
+        if name == "--command":
+            command = setting
         i += 1
-    return i < len(argv) and argv[i] == app
+    if i >= len(argv) or argv[i] != app:
+        return False
+    if original:
+        own = set(original[1:]) | {"@@", "@@u"}
+        return command in (None, original[0]) and all(w in own or re.fullmatch(r"%[A-Za-z%]", w) for w in argv[i + 1:])
+    return True
 
 
-def export_problem(path, dep, kind):
-    """None when what Flatpak wrote still runs this app and nothing else, or the line that does not"""
+def export_problem(path, dep, kind, original=None):
+    """None when what Flatpak wrote still runs this app and nothing else, or the line that does not. ORIGINAL is the
+    commit's own launcher in launcher_values' form, when it could be read."""
     text = text_of(path)
     if text is None:
         return "it cannot be read"
@@ -670,15 +732,18 @@ def export_problem(path, dep, kind):
         if re.fullmatch(wanted, text):
             return None
         return text.strip().splitlines()[-1][:300] if text.strip() else "it is empty"
-    for line in text.splitlines():
-        match = re.match(r"\s*(Exec|TryExec|SystemdService)\s*=\s*(.*)", line)
-        if not match:
-            continue
-        key, value = match.groups()
+    st = lstat(path)
+    if st is None or st.st_size > LINE_MOST:
+        return "it is longer than a launcher is"
+    values = launcher_values(text)
+    if values is None:
+        return "it cannot be read as a launcher"
+    for (group, key), value in values.items():
         # Flatpak sets TryExec to itself, so that the launcher goes when Flatpak does, and takes SystemdService
         # out, which would start a unit of the host's
-        if key == "SystemdService" or not (runs_app(value, dep.app) or (key == "TryExec" and value == FLATPAK)):
-            return line.strip()[:300]
+        if key == "SystemdService" or not (
+                (key == "TryExec" and value == FLATPAK) or runs_app(value, dep.app, words_of((original or {}).get((group, key), "")))):
+            return f"{key}={value}"[:300]
     return None
 
 
@@ -693,6 +758,7 @@ class Installation:
         self.counts = {"apps": 0, "runtimes": 0, "objects": 0, "files": 0}
         self.bad = set()
         self.said = {}
+        self.kept = {}
 
     def where(self):
         return "your" if self.own else "the system's"
@@ -728,8 +794,13 @@ class Installation:
             notes, folder = self.store.deploy(dep.path)
             now = folder_of(dep.path)
             # A reinstall checks the same commit out again into a new folder of the same name, and writes what
-            # Flatpak writes anew: looked at as the first time, its files against the commit's objects again
+            # Flatpak writes anew: looked at as the first time, its files against the commit's objects again. Extra
+            # data is not in the commit: what it was is kept, so that a file that is not the same now is a change
+            self.kept = {}
             if notes is not None and now is not None and folder != now:
+                prefix = dep.path + "/files/extra/"
+                self.kept = {f"{f}/{n}": row[9] for f, n, *row in self.store.under(dep.path)
+                             if f"{f}/{n}".startswith(prefix) and row[0] == "own" and row[9] and not row[9].startswith("link:")}
                 self.store.drop_tree(dep.path)
                 notes = None
             if notes is None:
@@ -775,6 +846,10 @@ class Installation:
             st = lstat(path)
             if st is None:
                 continue
+            if not is_text(name):
+                self.changed(dep, sub, "has a name that is not text, and was added")
+                stray = True
+                continue
             written = written_by_flatpak(dep, sub, name in expected)
             if written:
                 self.record_written(dep, path, sub, st, written)
@@ -805,7 +880,8 @@ class Installation:
     def record_written(self, dep, path, rel, st, kind):
         folder, name = os.path.dirname(path), os.path.basename(path)
         if kind in ("export", "wrapper"):
-            problem = "it is not a plain file" if not stat.S_ISREG(st.st_mode) else export_problem(path, dep, kind)
+            problem = "it is not a plain file" if not stat.S_ISREG(st.st_mode) else export_problem(
+                path, dep, kind, self.original_exec(dep, rel) if kind == "export" else None)
             if problem:
                 self.export_runs(dep, rel, problem)
             self.store.put(folder, name, row_of(st, kind, dirty=bool(problem)))
@@ -814,16 +890,28 @@ class Installation:
                 children = sorted(os.listdir(path))
             except OSError:
                 children = []
+            odd = False
             for child in children:
                 child_st = lstat(path + "/" + child)
-                if child_st is not None:
+                if not is_text(child):
+                    self.changed(dep, f"{rel}/{child}", "has a name that is not text, and was added")
+                    odd = True
+                elif child_st is not None:
                     self.record_written(dep, path + "/" + child, f"{rel}/{child}", child_st,
                                         written_by_flatpak(dep, f"{rel}/{child}") or "own")
-            self.store.put(folder, name, row_of(st, "dir"))
+            self.store.put(folder, name, row_of(st, "dir", dirty=odd))
         elif stat.S_ISLNK(st.st_mode):
-            self.store.put(folder, name, row_of(st, "own", "link:" + os.readlink(path)))
+            target = readlink(path)
+            self.store.put(folder, name, row_of(st, "own", "link:" + (target or ""), dirty=target is None))
         elif stat.S_ISREG(st.st_mode):
-            self.store.put(folder, name, row_of(st, "own", digest(path)))
+            ref, before = digest(path), self.kept.get(path)
+            if before is not None and ref != before:
+                # Not what this deploy's extra data was before its folder was made again: kept as it was, so that
+                # it is said at every run until it is put back
+                self.changed(dep, rel, "changed")
+                self.store.put(folder, name, row_of(st, "own", before, dirty=True))
+            else:
+                self.store.put(folder, name, row_of(st, "own", ref))
         else:
             self.changed(dep, rel, "is not a plain file, and was added")
         self.counts["files"] += 1
@@ -833,6 +921,21 @@ class Installation:
                 f"The launcher {rel} of the Flatpak {dep.what} {dep.app} runs something other than the app: {line}. "
                 f"Put it back with: ame security app-integrity repair {dep.app}", **self.facts(dep))
 
+    def original_exec(self, dep, rel):
+        """The Exec lines the commit's own copy of launcher REL has, in launcher_values' form: what Flatpak rewrote.
+        None when the commit has none to read."""
+        commit = load(self.repo, OSTree.ObjectType.COMMIT, dep.commit)
+        csum, parts = None if commit is None else raw(commit.get_child_value(6)), rel.split("/")
+        for part in parts[:-1]:
+            tree = tree_of(self.repo, csum) if csum else None
+            csum = dict(tree[1]).get(part) if tree else None
+        tree = tree_of(self.repo, csum) if csum else None
+        csum = dict(tree[0]).get(parts[-1]) if tree else None
+        obj = lstat(f"{self.objects}/{csum[:2]}/{csum[2:]}.file") if csum else None
+        if obj is None or not stat.S_ISREG(obj.st_mode) or obj.st_size > LINE_MOST:
+            return None
+        return launcher_values(text_of(f"{self.objects}/{csum[:2]}/{csum[2:]}.file") or "")
+
     def deployed_row(self, path, csum, st):
         """A checked-out file's row when it is what its object holds: the object itself, hardlinked, or a copy
         where Flatpak copies (an empty file, one its owner cannot read, a link, or a hardlink refused)"""
@@ -841,8 +944,8 @@ class Installation:
         if ost is None or csum in self.bad:
             return None
         if stat.S_ISLNK(ost.st_mode):
-            target = os.readlink(obj)
-            return row_of(st, "link", target) if stat.S_ISLNK(st.st_mode) and os.readlink(path) == target else None
+            target = readlink(obj)
+            return row_of(st, "link", target) if target is not None and stat.S_ISLNK(st.st_mode) and readlink(path) == target else None
         if not stat.S_ISREG(st.st_mode):
             return None
         if (st.st_dev, st.st_ino) == (ost.st_dev, ost.st_ino):
@@ -901,15 +1004,17 @@ class Installation:
         if kind in ("deployed", "copy", "empty"):
             new = self.deployed_row(path, ref, st)
         elif kind == "link":
-            new = row_of(st, kind, ref) if stat.S_ISLNK(st.st_mode) and os.readlink(path) == ref else None
+            new = row_of(st, kind, ref) if stat.S_ISLNK(st.st_mode) and readlink(path) == ref else None
         elif kind == "own":
             if stat.S_ISLNK(st.st_mode):
-                same = ref == "link:" + os.readlink(path)
+                target = readlink(path)
+                same = target is not None and ref == "link:" + target
             else:
                 same = stat.S_ISREG(st.st_mode) and digest(path) == ref
             new = row_of(st, kind, ref) if same else None
         else:
-            problem = "it is not a plain file" if not stat.S_ISREG(st.st_mode) else export_problem(path, dep, kind)
+            problem = "it is not a plain file" if not stat.S_ISREG(st.st_mode) else export_problem(
+                path, dep, kind, self.original_exec(dep, rel) if kind == "export" else None)
             if problem:
                 self.export_runs(dep, rel, problem)
                 return None
@@ -923,6 +1028,10 @@ class Installation:
     def check_exports(self, deploys):
         root = self.base + "/exports"
         allowed = tuple(dep.path + "/export/" for dep in deploys)
+        # An app installed while this run read the others (a first boot's preinstall, Bazaar) has its deploy and its
+        # exports now, not in the list read at the start: the active deploys are read again before a link is stray, and
+        # a later run checks the new app's files. A link into anything but an active deploy is still stray
+        current = None
         stack = [root]
         while stack:
             folder = stack.pop()
@@ -936,7 +1045,12 @@ class Installation:
                     stack.append(entry.path)
                     continue
                 if entry.is_symlink():
-                    if os.path.realpath(entry.path).startswith(allowed):
+                    target = os.path.realpath(entry.path)
+                    if target.startswith(allowed):
+                        continue
+                    if current is None:
+                        current = tuple(dep.path + "/export/" for dep in deploys_of(self.base))
+                    if target.startswith(current):
                         continue
                 elif entry.is_file(follow_symlinks=False) and TRIGGERED.fullmatch(rel):
                     continue
@@ -984,9 +1098,11 @@ def account_mode(args):
     finally:
         if own_tmp:
             shutil.rmtree(own_tmp, ignore_errors=True)
-    emit({"op": "counts", "counts": counts})
     for item in FINDINGS:
         emit({"op": "finding", "finding": item})
+    # The last line: root takes a run that does not end with it as one that did not finish
+    emit({"op": "counts", "counts": counts})
+    sys.stdout.flush()
     return 0
 
 
@@ -1054,11 +1170,68 @@ def check_account(uid, name, gid, home, trusted):
     command += [os.path.abspath(sys.argv[0]), "account", "--rows-fd", str(fd)]
     for fingerprint in sorted(trusted):
         command += ["--trust", fingerprint]
-    findings, counts = [], None
-    with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                          pass_fds=(fd,)) as proc:
+    # What the run prints goes to a file of root's (0600 in a folder of its own), not to a pipe: a pipe's write end
+    # can be opened again through /proc by any program of the account, and held open, but a file is root's to open.
+    # Root waits for the run itself, with a limit of its own, and reads the file once it has ended.
+    out_path = f"{STATE}/{uid}.out"
+    findings, counts, whole = [], None, False
+    out = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.DEVNULL,
+                                pass_fds=(fd,), start_new_session=True)
+    finally:
+        os.close(out)
         os.close(fd)
-        for line in proc.stdout:
+    try:
+        try:
+            proc.wait(timeout=ACCOUNT_TIMEOUT + 60)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+        if proc.returncode == 0:
+            whole, findings, counts = read_run(store, out_path, name, base)
+    finally:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+    if not whole:
+        # The account's own programs can stop or kill this run, and a run that does not end leaves the last one's
+        # findings standing: the second one in a row is a finding of its own, so that a check that cannot finish
+        # does not look like one that found nothing. Any end but a whole one counts, an error of its own as well: it
+        # is the account's installation that makes it, and saying so is right.
+        con.rollback()
+        kept = json.loads(store.meta("findings", "[]"))
+        cut = int(store.meta("cut", "0")) + 1 if (store.meta("cut", "0") or "0").isdigit() else 1
+        store.set_meta("cut", str(cut))
+        con.commit()
+        if cut >= 2:
+            kept = kept + [{"id": f"{name}:check-cut", "level": "normal", "tactic": "Execution", "account": name,
+                            "installation": "user",
+                            "text": f"The check of {name}'s own Flatpak installation did not finish {cut} times running"
+                                    " (something stopped it, it took too long, or it could not read what it checks): "
+                                    "its changes are not being read"}]
+        return kept, json.loads(store.meta("counts", "null"))
+    store.set_meta("cut", "0")
+    store.tidy()
+    store.set_meta("checked", str(time.time()))
+    store.set_meta("findings", json.dumps(findings))
+    store.set_meta("counts", json.dumps(counts))
+    con.commit()
+    return findings, counts
+
+
+def read_run(store, path, name, base):
+    """What an account's run printed to PATH: (whole, findings, counts). Whole is a run that ended with its counts, in
+    no more than OUT_MOST bytes and LINE_MOST to a line, and whose every row agreed with what root sees of the file
+    (apply); anything else did not finish."""
+    findings, counts = [], None
+    with open(path, "rb") as f:
+        if os.fstat(f.fileno()).st_size > OUT_MOST:
+            return False, [], None
+        for line in iter(lambda: f.readline(LINE_MOST + 1), b""):
+            if counts is not None or len(line) > LINE_MOST:
+                return False, [], None
             try:
                 op = json.loads(line)
             except ValueError:
@@ -1071,64 +1244,74 @@ def check_account(uid, name, gid, home, trusted):
                     findings.append(item)
             elif op.get("op") == "counts" and isinstance(op.get("counts"), dict):
                 counts = {k: v for k, v in op["counts"].items() if isinstance(k, str) and isinstance(v, int)}
-            else:
-                apply(store, op, base)
-    if proc.returncode != 0:
-        # The account's own programs can stop or kill this run, and a run that does not end leaves the last one's
-        # findings standing: the second one in a row is a finding of its own, so that a check that cannot finish
-        # does not look like one that found nothing
-        con.rollback()
-        kept = json.loads(store.meta("findings", "[]"))
-        # Only an end by a signal or by timeout's own limit counts (as the watcher's readers do): a run that fails
-        # every time, such as a broken installation, is not something that stopped it
-        ended = proc.returncode < 0 or proc.returncode == 124 or proc.returncode >= 128
-        cut = 0
-        if ended:
-            cut = int(store.meta("cut", "0")) + 1 if (store.meta("cut", "0") or "0").isdigit() else 1
-            store.set_meta("cut", str(cut))
-            con.commit()
-        if cut >= 2:
-            kept = kept + [{"id": f"{name}:check-cut", "level": "normal", "tactic": "Execution", "account": name,
-                            "installation": "user",
-                            "text": f"The check of {name}'s own Flatpak installation did not finish {cut} times running"
-                                    " (something stopped it, or it took too long): its changes are not being read"}]
-        return kept, json.loads(store.meta("counts", "null"))
-    store.set_meta("cut", "0")
-    store.tidy()
-    store.set_meta("checked", str(time.time()))
-    store.set_meta("findings", json.dumps(findings))
-    store.set_meta("counts", json.dumps(counts))
-    con.commit()
-    return findings, counts
+            elif not apply(store, op, base):
+                return False, [], None
+    return counts is not None, findings, counts
 
 
 def account_finding(item, name):
-    """A finding the account's run printed, as it may be kept: the account's own, said to it"""
+    """A finding the account's run printed, as it may be kept: the account's own, said to it. It is always said: a
+    level of quiet is raised, so that a finding cannot be recorded without being heard."""
     if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in ("id", "text", "level", "tactic")):
         return None
     if item["level"] not in LEVELS or item["tactic"] not in TACTICS:
         return None
     kept = {k: item[k][:2000] for k in ("id", "text", "level", "tactic", "within", "app", "ref", "origin")
             if isinstance(item.get(k), str)}
+    if kept["level"] == "quiet":
+        kept["level"] = "normal"
     kept["id"] = f"{name}:{kept['id']}"
     kept["account"] = name
     kept["installation"] = "user"
     return kept
 
 
+def agrees(base, path, name, row):
+    """Whether ROW, which the account's run says it saw, is what root sees of the file itself (lstat, and for a file
+    that is its object, a link or an empty file, the object or the link too). Root never reads the account's files,
+    so what a digest or a launcher says is left to the run."""
+    st = lstat(f"{path}/{name}")
+    if st is None or row[1] not in (-1, st.st_ino) or tuple(row[2:9]) != (
+            st.st_ctime_ns, st.st_mtime_ns, st.st_size, st.st_nlink, st.st_mode, st.st_uid, st.st_gid):
+        return False
+    kind, ref = row[0], row[9]
+    # A dirty row (inode -1) never matches and is looked at again whatever it is: its kind says nothing
+    if row[1] == -1:
+        return True
+    if kind == "dir":
+        return stat.S_ISDIR(st.st_mode)
+    if kind in ("deployed", "copy", "empty", "export", "wrapper") and not stat.S_ISREG(st.st_mode):
+        return False
+    if kind == "link" or (kind == "own" and ref and ref.startswith("link:")):
+        return stat.S_ISLNK(st.st_mode) and readlink(f"{path}/{name}") == (ref[5:] if kind == "own" else ref)
+    if kind == "deployed":
+        if not isinstance(ref, str) or not re.fullmatch(r"[0-9a-f]{64}", ref):
+            return False
+        obj = lstat(f"{base}/repo/objects/{ref[:2]}/{ref[2:]}.file")
+        return obj is not None and (obj.st_dev, obj.st_ino) == (st.st_dev, st.st_ino)
+    if kind == "empty":
+        return st.st_size == 0
+    return True
+
+
 def apply(store, op, base):
-    """A change the account's run printed, written into its rows, about its own installation and nothing else"""
+    """A change the account's run printed, written into its rows, about its own installation and nothing else. False
+    when a row says something other than what root sees of the file: the run is then taken as not whole. An op that
+    is not well formed is left out, as it always was."""
     path = op.get("dir")
-    if not isinstance(path, str) or not (path == base or path.startswith(base + "/")) or "\0" in path:
-        return
+    if (not isinstance(path, str) or not (path == base or path.startswith(base + "/")) or "\0" in path
+            or ".." in path.split("/") or not is_text(path)):
+        return True
     kind = op.get("op")
     if kind == "put":
         name, row = op.get("name"), op.get("row")
-        if (isinstance(name, str) and name and "/" not in name and isinstance(row, list) and len(row) == 10
-                and row[0] in KINDS and all(isinstance(v, int) for v in row[1:9])
-                and (row[9] is None or isinstance(row[9], str))):
+        if (isinstance(name, str) and name and "/" not in name and is_text(name) and isinstance(row, list)
+                and len(row) == 10 and row[0] in KINDS and all(isinstance(v, int) for v in row[1:9])
+                and (row[9] is None or isinstance(row[9], str)) and (row[9] is None or is_text(row[9]))):
+            if not agrees(base, path, name, row):
+                return False
             store.put(path, name, tuple(row))
-    elif kind == "drop" and isinstance(op.get("name"), str):
+    elif kind == "drop" and isinstance(op.get("name"), str) and is_text(op["name"]):
         store.drop(path, op["name"])
     elif kind == "drop_tree":
         store.drop_tree(path)
@@ -1136,6 +1319,7 @@ def apply(store, op, base):
         store.put_deploy(path, [n for n in op["notes"] if isinstance(n, dict)], op.get("folder"))
     elif kind == "drop_deploy":
         store.drop_deploy(path)
+    return True
 
 
 # --- A check --------------------------------------------------------------------------------------------------------
@@ -1170,6 +1354,8 @@ def main():
                 store.ids.clear()
                 print(f"{name}: {error!r}", file=sys.stderr)
                 last["failed"].append(name)
+                finding(f"check-failed:{name}", "normal", "Execution",
+                        f"The check of the {name} could not finish ({type(error).__name__}): what it reads is not being checked")
                 return None
 
         last["system"] = part("system", lambda: check_system(store))
@@ -1189,6 +1375,10 @@ def main():
             except Exception as error:  # noqa: BLE001
                 print(f"account {uid}: {error!r}", file=sys.stderr)
                 last["failed"].append(name)
+                FINDINGS.append({"id": f"{name}:check-failed", "level": "normal", "tactic": "Execution", "account": name,
+                                 "installation": "user",
+                                 "text": f"The check of {name}'s own Flatpak installation could not finish "
+                                         f"({type(error).__name__}): its changes are not being read"})
                 continue
             FINDINGS.extend(found)
             if counts is not None:

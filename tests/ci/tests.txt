@@ -1,0 +1,114 @@
+# Every test of build_files/shared, as the Unit and Integration workflows run it (tests/ci/run.sh): one a line,
+# KIND then the command, run by bash from / inside the last published image with this checkout's system_files laid over
+# it and the checkout at $CTX (tests/ci/in-image.sh). $NODE is Node, $UI Amethystora UI's folder. The commands are
+# 20-tests.sh's own: change both together. tests/ci/run.sh --listed fails on a test file named in neither.
+#
+#   unit         the shell's and the scripts' logic in JavaScript, against the files themselves
+#   integration  a helper of the image against stand-ins for what it reads and runs
+#   lint         run by the Checks workflow's Lint job instead
+#   helper       started by another test, never alone
+#
+unit	$NODE $CTX/build_files/shared/test-agent-ask.mjs
+unit	$NODE $CTX/build_files/shared/test-agent-doing.mjs
+unit	$NODE $CTX/build_files/shared/test-agent-routines.mjs
+unit	$NODE $CTX/build_files/shared/test-bars-edge.mjs
+unit	$NODE $CTX/build_files/shared/test-charge-by.mjs
+unit	$NODE $CTX/build_files/shared/test-clipboard-pictures.mjs
+unit	$NODE $CTX/build_files/shared/test-desk-layouts.mjs
+unit	$NODE $CTX/build_files/shared/test-devices.mjs
+unit	$NODE $CTX/build_files/shared/test-flat-battery.mjs
+unit	$NODE $CTX/build_files/shared/test-hello.mjs "$UI" $CTX/po
+unit	$NODE $CTX/build_files/shared/test-pill-logic.mjs
+unit	$NODE $CTX/build_files/shared/test-plugins-clamp.mjs $CTX
+unit	$NODE $CTX/build_files/shared/test-put-away.mjs
+unit	$NODE $CTX/build_files/shared/test-search-calc.mjs
+unit	$NODE $CTX/build_files/shared/test-search-words.mjs
+unit	$NODE $CTX/build_files/shared/test-sets.mjs
+unit	$NODE $CTX/build_files/shared/test-settings-disposed.mjs /usr/share/gnome-shell/extensions/amethystora-*@arsslensoft.github.io
+unit	$NODE $CTX/build_files/shared/test-text-shortcuts.mjs /usr/libexec/amethystora-text-shortcuts
+unit	$NODE $CTX/build_files/shared/test-tiling-state.mjs
+unit	$NODE $CTX/build_files/shared/test-trim-anticheat-list.mjs
+unit	$NODE $CTX/build_files/shared/test-truth.mjs
+unit	$NODE $CTX/build_files/shared/test-your-year.mjs
+unit	$NODE $CTX/build_files/shared/check-guides.mjs "$UI" /usr/share/amethystora/manual /usr/lib /usr/share/applications
+integration	HELPER=/usr/libexec/amethystora-charge-limit bash $CTX/build_files/shared/test-charge-limit.sh
+integration	bash $CTX/build_files/shared/test-agent-ask-here.sh
+integration	bash $CTX/build_files/shared/test-agent-text.sh
+integration	bash $CTX/build_files/shared/test-app-integrity.sh
+integration	bash $CTX/build_files/shared/test-audit-home-rules.sh
+integration	bash $CTX/build_files/shared/test-backup-other.sh
+integration	bash $CTX/build_files/shared/test-bling.sh
+integration	bash $CTX/build_files/shared/test-bookmarks.sh
+integration	bash $CTX/build_files/shared/test-boot-guard.sh
+integration	bash $CTX/build_files/shared/test-brand.sh
+integration	bash $CTX/build_files/shared/test-bring-over.sh /usr/libexec/amethystora-bring-over
+integration	bash $CTX/build_files/shared/test-browser-policy.sh
+integration	bash $CTX/build_files/shared/test-camera.sh
+integration	bash $CTX/build_files/shared/test-captions.sh
+integration	bash $CTX/build_files/shared/test-changes-uninstall.sh
+integration	bash $CTX/build_files/shared/test-changes.sh
+integration	bash $CTX/build_files/shared/test-clipboard.sh
+integration	bash $CTX/build_files/shared/test-control-list-separators.sh
+integration	bash $CTX/build_files/shared/test-clean-copy-kinds.sh
+integration	bash $CTX/build_files/shared/test-cover-private.sh
+integration	bash $CTX/build_files/shared/test-dev-services.sh
+integration	bash $CTX/build_files/shared/test-disk-health.sh
+integration	bash $CTX/build_files/shared/test-dns-domains.sh
+integration	bash $CTX/build_files/shared/test-driver-status.sh
+integration	bash $CTX/build_files/shared/test-early-units.sh
+integration	bash $CTX/build_files/shared/test-file-find.sh
+integration	bash $CTX/build_files/shared/test-files-group.sh
+integration	bash $CTX/build_files/shared/test-get-through.sh /usr/libexec/amethystora-metered
+integration	bash $CTX/build_files/shared/test-gpu-compute.sh
+integration	bash $CTX/build_files/shared/test-grub-theme.sh
+integration	bash $CTX/build_files/shared/test-hid-keyboards.sh
+integration	bash $CTX/build_files/shared/test-if-found.sh
+integration	bash $CTX/build_files/shared/test-image-policy.sh
+integration	bash $CTX/build_files/shared/test-ips-modify.sh
+integration	bash $CTX/build_files/shared/test-kits.sh
+integration	bash $CTX/build_files/shared/test-lab-devices.sh
+integration	bash $CTX/build_files/shared/test-levels.sh "$UI/modules/pill/levels.js"
+integration	bash $CTX/build_files/shared/test-locked-poweroff.sh
+integration	bash $CTX/build_files/shared/test-mirror.sh
+integration	bash $CTX/build_files/shared/test-move-in.sh /usr/libexec/amethystora-move-in
+integration	bash $CTX/build_files/shared/test-notify-users.sh
+integration	bash $CTX/build_files/shared/test-pdf-sign.sh
+integration	bash $CTX/build_files/shared/test-photos.sh
+integration	bash $CTX/build_files/shared/test-plugins.sh $CTX
+integration	bash $CTX/build_files/shared/test-private-folder.sh
+integration	bash $CTX/build_files/shared/test-pull-key.sh
+integration	bash $CTX/build_files/shared/test-quarantine.sh
+integration	bash $CTX/build_files/shared/test-raid.sh
+integration	bash $CTX/build_files/shared/test-repo-pin.sh
+integration	bash $CTX/build_files/shared/test-reset-settings.sh
+integration	bash $CTX/build_files/shared/test-security-reader.sh
+integration	bash $CTX/build_files/shared/test-security-switches.sh
+integration	bash $CTX/build_files/shared/test-security-watch.sh
+integration	bash $CTX/build_files/shared/test-send-anyone.sh /usr/libexec/amethystora-send-anyone
+integration	bash $CTX/build_files/shared/test-sensor-records.sh
+integration	bash $CTX/build_files/shared/test-session-helpers.sh
+integration	bash $CTX/build_files/shared/test-setup.sh
+integration	bash $CTX/build_files/shared/test-snapshot-exclude.sh
+integration	bash $CTX/build_files/shared/test-share-screen.sh
+integration	bash $CTX/build_files/shared/test-sleep-report.sh
+integration	bash $CTX/build_files/shared/test-start-from-backup.sh
+integration	bash $CTX/build_files/shared/test-start-times.sh
+integration	bash $CTX/build_files/shared/test-tailscale.sh
+integration	bash $CTX/build_files/shared/test-theme-file.sh
+integration	bash $CTX/build_files/shared/test-theme-hooks.sh
+integration	bash $CTX/build_files/shared/test-theme-palette.sh
+integration	bash $CTX/build_files/shared/test-theme-render.sh
+integration	bash $CTX/build_files/shared/test-tidy-downloads.sh
+integration	bash $CTX/build_files/shared/test-translate.sh
+integration	bash $CTX/build_files/shared/test-update-check.sh
+integration	bash $CTX/build_files/shared/test-vault-keep.sh
+integration	bash $CTX/build_files/shared/test-vault.sh $CTX
+integration	bash $CTX/build_files/shared/test-whats-new.sh
+integration	bash $CTX/build_files/shared/test-while-playing.sh /usr/libexec/amethystora-metered
+integration	bash $CTX/build_files/shared/test-will-it-run.sh
+integration	bash $CTX/build_files/shared/test-wrong.sh
+integration	bash $CTX/build_files/shared/test-yara.sh
+integration	bash $CTX/build_files/shared/test-your-year.sh
+integration	bash $CTX/build_files/shared/test-zram-recompress.sh
+lint	bash $CTX/build_files/shared/test-ci-chain.sh
+helper	gjs -m $CTX/build_files/shared/test-clipboard-store.js

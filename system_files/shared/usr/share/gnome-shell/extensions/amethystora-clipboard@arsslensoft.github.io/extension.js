@@ -6,6 +6,7 @@
 
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
@@ -21,7 +22,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import { Registry, ClipboardEntry } from './registry.js';
-import { copyFits } from './pictures.js';
+import { copyFits, MAX_PICTURE_BYTES, MAX_TEXT_BYTES } from './pictures.js';
 import { DialogManager } from './confirmDialog.js';
 import { PrefsFields } from './constants.js';
 import { Keyboard } from './keyboard.js';
@@ -36,6 +37,8 @@ const INDICATOR_ICON = 'edit-paste-symbolic';
 const PASSWORD_HINT = 'x-kde-passwordManagerHint';
 // How long the app that copied may take to send what it copied (a large picture takes a moment)
 const CLIPBOARD_READ_TIMEOUT = 10000;
+// The most the password manager's mark may weigh
+const PASSWORD_HINT_BYTES = 1024;
 
 let DELAYED_SELECTION_TIMEOUT = 750;
 let MAX_REGISTRY_LENGTH       = 15;
@@ -398,7 +401,7 @@ const ClipboardIndicator = GObject.registerClass({
         });
         this.searchEntry = new St.Entry({
             name: 'searchEntry',
-            style_class: 'search-entry',
+            style_class: 'search-entry ci-search-entry',
             can_focus: true,
             hint_text: _('Type here to search...'),
             track_hover: true,
@@ -2142,22 +2145,35 @@ const ClipboardIndicator = GObject.registerClass({
         this.#updateIndicatorContent(entry);
     }
 
-    // What the clipboard holds as TYPE, its bytes copied (an empty array for nothing); given up after a while, since a
-    // copy is taken one at a time and an app that never answers would keep every later copy from being recorded.
-    // The GLib.Bytes St hands the callback is freed once it returns: only its data, copied in it, may outlive it
-    #read (type) {
+    // What the clipboard holds as TYPE, its bytes copied (an empty array for nothing), or null when it is longer than
+    // MOST. It is read through Mutter's own transfer, which takes a size and a cancellable (St's get_content takes
+    // neither), so a copy costs at most MOST + 1 bytes however much the app streams; the extra byte is how a longer one
+    // is told. Given up after a while, since a copy is taken one at a time and an app that never answers would keep
+    // every later copy from being recorded
+    #read (type, most) {
         return new Promise(resolve => {
+            const cancellable = new Gio.Cancellable();
+            const stream = Gio.MemoryOutputStream.new_resizable();
             let answered = false;
             const timer = setTimeout(() => {
                 answered = true;
+                cancellable.cancel();
                 console.warn(`Amethystora Clipboard: the app that copied did not send ${type} in ${CLIPBOARD_READ_TIMEOUT / 1000} s`);
                 resolve(new Uint8Array());
             }, CLIPBOARD_READ_TIMEOUT);
-            this.extension.clipboard.get_content(CLIPBOARD_TYPE, type, (clipBoard, bytes) => {
+            global.display.get_selection().transfer_async(Meta.SelectionType.SELECTION_CLIPBOARD, type, most + 1, stream, cancellable, (selection, result) => {
                 if (answered) return;
                 answered = true;
                 clearTimeout(timer);
-                resolve(bytes?.get_data() ?? new Uint8Array());
+                try {
+                    selection.transfer_finish(result);
+                    stream.close(null);
+                } catch {
+                    resolve(new Uint8Array());
+                    return;
+                }
+                const bytes = stream.steal_as_bytes();
+                resolve(bytes.get_size() > most ? null : bytes.toArray());
             });
         });
     }
@@ -2167,8 +2183,11 @@ const ClipboardIndicator = GObject.registerClass({
         // A password a password manager marks secret is neither recorded nor shown in the top bar; so is one whose
         // mark comes empty or never comes, as from a GTK app, which offers the type but cannot send it
         if (offered.includes(PASSWORD_HINT)) {
-            const hint = new TextDecoder().decode(await this.#read(PASSWORD_HINT)).trim();
-            if (hint === 'secret' || hint === '') return null;
+            const hint = await this.#read(PASSWORD_HINT, PASSWORD_HINT_BYTES);
+            // (a mark too long to be one is no copy to record either)
+            if (hint === null) return null;
+            const mark = new TextDecoder().decode(hint).trim();
+            if (mark === 'secret' || mark === '') return null;
         }
 
         const mimetypes = [
@@ -2189,7 +2208,11 @@ const ClipboardIndicator = GObject.registerClass({
             // Only what the app offers: asked for a type it did not offer, a Wayland app may send what it has
             // anyway (a picture's bytes taken for text), or never answer (and nothing is recorded again)
             if (!offered.includes(type)) continue;
-            const data = await this.#read(type);
+            const data = await this.#read(type, type.startsWith('image/') ? MAX_PICTURE_BYTES : MAX_TEXT_BYTES);
+            if (data === null) {
+                console.warn(`Amethystora Clipboard: a copy of ${type} was too large to record`);
+                return null;
+            }
             let result = null;
             // A one-time code Amethystora UI's pill copied (its modules/pill/code.js) is never recorded
             const secret = globalThis[Symbol.for('amethystora.clipboard.secret')];

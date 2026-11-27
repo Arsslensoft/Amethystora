@@ -1,0 +1,36 @@
+{
+  "name": "Security lab",
+  "description": "Look at traffic, programs and web apps you have the right to test.",
+  "apps": [
+    {
+      "app": "org.wireshark.Wireshark",
+      "name": "Wireshark",
+      "why": "Reads and takes apart packet captures made elsewhere."
+    },
+    {
+      "app": "org.zaproxy.ZAP",
+      "name": "ZAP",
+      "why": "Tests a web application for flaws."
+    },
+    {
+      "app": "org.ghidra_sre.Ghidra",
+      "name": "Ghidra",
+      "why": "Takes a program apart to read what it does."
+    },
+    {
+      "app": "re.rizin.cutter",
+      "name": "Cutter",
+      "why": "Reverse engineering in a friendlier window."
+    },
+    {
+      "app": "net.werwolv.ImHex",
+      "name": "ImHex",
+      "why": "Reads and edits the bytes of a file."
+    },
+    {
+      "app": "org.gnome.Boxes",
+      "name": "Boxes",
+      "why": "Runs a virtual machine to try things in."
+    }
+  ]
+}

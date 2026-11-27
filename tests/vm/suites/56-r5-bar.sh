@@ -274,6 +274,10 @@ in_session "ame desktop top-bar item clock left 0" >/dev/null
 census='(() => { const m = {}; const v = a => { const k = a.style_class || a.constructor.name; m[k] = (m[k] ?? 0) + 1; a.get_children().forEach(v); }; v(Main.uiGroup); m.statusArea = Object.keys(Main.panel.statusArea).length; m.uiClasses = Main.uiGroup.get_style_class_name(); m.ownBoxes = Object.prototype.hasOwnProperty.call(Main.layoutManager, "_updateBoxes"); return m; })()'
 off() { ev "Main.extensionManager.disableExtension('${UUID}'); 'x'" >/dev/null; wait_for 20 state_is 2 && sleep 1; }
 on() { ev "Main.extensionManager.enableExtension('${UUID}'); 'x'" >/dev/null; wait_for 20 state_is 1; }
+# One cycle first: GNOME builds a few parts of its own the first time (a row of the quick settings, a spinner) and keeps them, which
+# is not the extension's to take away; what is counted is what ten more cycles leave behind
+off
+on || true
 off
 ev "globalThis.vmlabCensus = ${census}; 'x'" >/dev/null
 same "11 off: the bar at the top, in GNOME's order" \

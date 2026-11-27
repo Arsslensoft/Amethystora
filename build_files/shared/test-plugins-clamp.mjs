@@ -20,7 +20,8 @@ for (const bad of ['/etc/passwd', '../x', '.hidden', 'a/b', 'file:///x', 'x y', 
 // The system's own icons are never a plugin's to draw
 for (const bad of ['media-record-symbolic', 'camera-web-symbolic', 'microphone-sensitivity-high-symbolic', 'call-start-symbolic', 'battery-caution-symbolic',
     'software-update-available-symbolic', 'security-high-symbolic', 'dialog-password-symbolic', 'org.amethystora.Vault', 'amethystora-security',
-    'network-wireless-symbolic', 'system-run-symbolic']) assert.equal(clamp.icon(bad), '', bad);
+    'network-wireless-symbolic', 'system-run-symbolic', 'airplane-mode-symbolic', 'bluetooth-active-symbolic', 'power-profile-balanced-symbolic',
+    'audio-volume-high-symbolic', 'night-light-symbolic', 'channel-secure-symbolic']) assert.equal(clamp.icon(bad), '', bad);
 assert.equal(clamp.icon('alarm-symbolic'), 'alarm-symbolic');
 // Nor a count on Amethystora's own launchers or Settings
 for (const bad of ['amethystora-security.desktop', 'org.amethystora.Vault.desktop', 'org.gnome.Settings.desktop']) assert.equal(clamp.dockApp(bad), false, bad);

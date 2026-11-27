@@ -8,6 +8,8 @@
 #   (unset)  every layer the image needs, found or built, then the image
 #   fprintd  fprintd, then stop (CI's first layers job)
 #   shared   the crates, the apps and the assets, then stop (CI's shared layers job)
+#   apps     the crates and the apps alone, then stop (the Unit workflow's Rust job: building the apps layer runs the
+#            crates' tests, and a layer found was built, and so tested, from the same files)
 #   flavor   fprintd, the kernel and both packages layers of the flavor, then stop (CI's flavor jobs)
 #   fetch    find the image's layers and build none, then stop (CI's image jobs, with a login to GHCR)
 # Every layer built is added to /tmp/amethystora-layers-built, "NAME TAG" a line, for CI to push and sign.
@@ -228,6 +230,9 @@ layers_run() {
             layers_apps || return 1
             layers_assets || return 1
             ;;
+        apps)
+            layers_apps || return 1
+            ;;
         flavor)
             layers_fprintd || return 1
             layers_packages || return 1
@@ -246,7 +251,7 @@ layers_run() {
             layers_packages || return 1
             ;;
         *)
-            echo "AMETHYSTORA_LAYERS is fprintd, shared, flavor, fetch or empty, not ${AMETHYSTORA_LAYERS}" >&2
+            echo "AMETHYSTORA_LAYERS is fprintd, shared, apps, flavor, fetch or empty, not ${AMETHYSTORA_LAYERS}" >&2
             return 1
             ;;
     esac

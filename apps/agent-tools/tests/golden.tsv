@@ -108,6 +108,30 @@ make the computer mute and open an app when i join the office wifi	skill/amethys
 ask my agent a question without opening a terminal	manual/agent-desktop#asking-in-the-pill*|knowledge/agent#in-the-pill*
 why does the pill ask me allow or not now for a command	manual/agent-desktop#questions-in-the-pill*|knowledge/agent#in-the-pill*
 is intel management engine amt spying on me, can i block it	manual/security#the-chip-under-the-system|manual/security#the-chip-under-the-system~2|manual/security#the-chip-under-the-system~3
+apps for 3d printing	manual/kits*|knowledge/architecture#where-software-goes*
+install everything i need for electronics design in one go	manual/kits*|knowledge/architecture#where-software-goes*
+what do i install to produce music or stream	manual/kits*|knowledge/architecture#where-software-goes*
+will this game run on linux with its anti cheat	manual/games#will-it-run*|knowledge/architecture#where-software-goes*
+is the anti cheat of this game supported on linux	manual/games#will-it-run*|knowledge/architecture#where-software-goes*
+stop backups while gaming	manual/games#while-you-play*|knowledge/desktop#notifications-and-do-not-disturb*
+hold notifications and updates while a game is running	manual/games#while-you-play*|knowledge/desktop#notifications-and-do-not-disturb*
+my backup did not run last night, I was playing a game	playbook/backups#*|manual/games#while-you-play*
+copy my files from windows	manual/move-in*|knowledge/move-in*
+get my documents and pictures off the old windows disk onto this computer	manual/move-in*|knowledge/move-in*
+the windows disk is encrypted with bitlocker, how do I open it to copy my files	manual/move-in#a-bitlocker-disk|knowledge/move-in*
+my onedrive files did not come across from windows	manual/move-in#onedrive|knowledge/move-in*
+how do i start the computer from the stick without changing any of its disks for an investigation	manual/forensic-start#*
+how do i mount an ext4 xfs or btrfs disk read only without replaying the journal or log	manual/forensic-start#*
+is the read only live start a hardware write blocker	manual/forensic-start#what-it-is-not*|manual/forensic-start#*
+start a postgres for my project	manual/dev-services#*|knowledge/dev#a-database-or-a-mail-catcher-for-a-project|ame/dev/service
+i need a redis or a mail catcher on my computer	manual/dev-services#*|knowledge/dev#a-database-or-a-mail-catcher-for-a-project|ame/dev/service
+which program is using port 8080	manual/dev-services#which-program-holds-a-port|knowledge/dev#which-program-holds-this-port|ame/dev/ports
+cuda in podman does not work	manual/hardware#a-graphics-card-in-a-container|playbook/gpu-compute#*|ame/dev/gpu
+can i use rocm in a container with my amd card	manual/hardware#a-graphics-card-in-a-container|playbook/gpu-compute#*|knowledge/dev#does-the-graphics-card-work-in-a-container
+lock when my usb key is pulled	manual/pull-the-key#*|knowledge/by-design#pulling-a-device-locks-or-powers-off-the-computer-only-with-pull-the-key-on
+power off the computer when a usb device is unplugged	manual/pull-the-key#*|knowledge/by-design#pulling-a-device-locks-or-powers-off-the-computer-only-with-pull-the-key-on
+st-link permission denied	knowledge/by-design#a-debug-probe-a-serial-adapter-or-a-logic-analyser-is-roots-until-lab-devices-are-on|manual/devices#lab-devices|manual/devices#lab-devices~2|playbook/device-does-nothing#*
+cannot open /dev/ttyUSB0 permission denied serial adapter	knowledge/by-design#a-debug-probe-a-serial-adapter-or-a-logic-analyser-is-roots-until-lab-devices-are-on|manual/devices#lab-devices|playbook/device-does-nothing#*
 use two accounts of claude code at the same time	manual/agent-profiles*|knowledge/agent#several-accounts-of-one-agent
 keep the agent inside my project and away from my ssh keys	manual/agent-sandbox*|knowledge/agent#an-agent-held-to-its-project
 the agent says read-only file system	manual/agent-sandbox#when-the-agent-says-read-only-file-system|manual/agent-sandbox#what-it-can-write|knowledge/agent#an-agent-held-to-its-project

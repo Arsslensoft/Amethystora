@@ -580,57 +580,94 @@ fn an_account_the_vault_cannot_read_is_refused_and_nothing_is_written() {
     assert_eq!(rig.status()["problem"]["name"], json!("identity-changed"));
 }
 
+/// A key made as the vault makes one, and its private bytes in base64, which a server must never see in the clear
+fn key_value() -> (Value, String) {
+    use amethystora_vault_core::keys::{self, KeyType};
+    let key = keys::generate(KeyType::X25519).unwrap();
+    let forms = key.public().unwrap();
+    let private = amethystora_vault_core::protocol::encode(key.as_bytes());
+    let public = json!({"type": "x25519", "pem": forms.spki_pem, "openssh": forms.openssh, "sha256": forms.sha256, "ssh_sha256": forms.ssh_sha256});
+    (json!({"key_kind": "exchange", "type": "x25519", "key": private, "exportable": true, "public": public, "comment": null}), private)
+}
+
 #[test]
-fn a_key_is_sent_only_sealed_and_only_when_chosen() {
-    let rig = rig("sealed", Settings::default());
+fn a_key_is_sent_only_when_chosen_and_as_a_plain_note_that_shows_a_server_nothing() {
+    let rig = rig("plainkey", Settings::default());
     rig.set_up();
-    rig.put("key", "k1", "A key", json!({"key_kind": "ssh", "exportable": true}), json!({"private": "PRIVATE-KEY-MATERIAL"}));
-    rig.put("key", "k2", "Locked in", json!({"key_kind": "ssh", "exportable": false}), json!({"private": "NEVER"}));
+    let ((first_value, secret), (never_value, never)) = (key_value(), key_value());
+    rig.put("key", "k1", "A key", json!({"key_kind": "exchange", "exportable": true}), first_value);
+    rig.put("key", "k2", "Locked in", json!({"key_kind": "exchange", "exportable": false}), never_value);
     assert_eq!(rig.connect()["ok"], json!(true));
     rig.synced();
     assert_eq!(rig.server_ciphers(), 0, "off until chosen");
     // Chosen, after the person says so
     let before = rig.outside.asked();
-    assert_eq!(rig.ask(json!({"op": "sync-choose", "kind": "key", "id": "k1", "choice": "sealed"}))["ok"], json!(true));
+    assert_eq!(rig.ask(json!({"op": "sync-choose", "kind": "key", "id": "k1", "choice": "on"}))["ok"], json!(true));
     assert_eq!(rig.outside.asked(), before + 1);
     // A key made not to leave is not offered, whatever the choice
-    assert_eq!(rig.ask(json!({"op": "sync-choose", "kind": "key", "id": "k2", "choice": "sealed"}))["problem"], json!("not-exportable"));
     assert_eq!(rig.ask(json!({"op": "sync-choose", "kind": "key", "id": "k2", "choice": "on"}))["problem"], json!("not-exportable"));
-    assert_eq!(rig.ask(json!({"op": "sync-choose", "kind": "data-key", "id": "x", "choice": "sealed"}))["problem"], json!("not-syncable"));
+    assert_eq!(rig.ask(json!({"op": "sync-choose", "kind": "data-key", "id": "x", "choice": "on"}))["problem"], json!("not-syncable"));
     until(|| (rig.server_ciphers() == 1).then_some(()));
     let fake = rig.fake.lock().unwrap();
-    assert!(fake.seen.iter().all(|seen| !seen.body.contains("PRIVATE-KEY-MATERIAL") && !seen.body.contains("NEVER")));
+    assert!(fake.seen.iter().all(|seen| !seen.body.contains(&secret) && !seen.body.contains(&never)));
     let content = cipher::open(&fake.ciphers[0], &fake.user).unwrap().content;
-    assert_eq!(content.name, "Amethystora sealed item");
-    assert!(!content.notes.unwrap().contains("PRIVATE"));
+    assert_eq!(content.kind, cipher::NOTE);
+    assert_eq!(content.marker.as_deref(), Some(cipher::MARKER_KEY));
+    assert!(content.name != "Amethystora sealed item" && !amethystora_vault_core::sync::map::is_sealed_note(&content));
+}
+
+#[test]
+fn sealed_is_gone_and_is_refused_as_a_new_word_for_an_item_or_a_kind_with_a_word_of_its_own() {
+    let rig = rig("nosealed", Settings::default());
+    rig.set_up();
+    rig.put("key", "k1", "A key", json!({"key_kind": "exchange", "exportable": true}), key_value().0);
+    assert_eq!(rig.connect()["ok"], json!(true));
+    rig.synced();
+    let before = rig.outside.asked();
+    for request in [json!({"op": "sync-choose", "kind": "key", "id": "k1", "choice": "sealed"}), json!({"op": "sync-kind", "kind": "keys", "choice": "sealed"})] {
+        let answer = rig.ask(request);
+        assert_eq!((answer["ok"].clone(), answer["problem"].clone()), (json!(false), json!("sealed-gone")), "{answer}");
+    }
+    // Nothing was asked of the person, nothing was changed, and nothing went
+    assert_eq!(rig.outside.asked(), before);
+    assert_eq!(rig.status()["kinds"]["keys"], json!("off"));
+    assert!(rig.status()["choices"].get("key.k1").is_none());
+    assert_eq!(rig.server_ciphers(), 0);
 }
 
 #[test]
 fn a_kind_is_one_switch_asked_once_that_covers_what_is_added_later() {
     let rig = rig("kind", Settings::default());
     rig.set_up();
-    rig.put("key", "k1", "A key", json!({"key_kind": "ssh", "exportable": true}), json!({"private": "PRIVATE-KEY-MATERIAL"}));
-    rig.put("key", "k2", "Locked in", json!({"key_kind": "ssh", "exportable": false}), json!({"private": "NEVER"}));
+    let ((first_value, first), (never_value, never)) = (key_value(), key_value());
+    rig.put("key", "k1", "A key", json!({"key_kind": "exchange", "exportable": true}), first_value);
+    rig.put("key", "k2", "Locked in", json!({"key_kind": "exchange", "exportable": false}), never_value);
     assert_eq!(rig.connect()["ok"], json!(true));
     rig.synced();
     let status = rig.status();
     assert_eq!(status["kinds"]["keys"], json!("off"));
     assert_eq!(status["kinds"]["passwords"], json!("on"));
-    // Sealed, for the whole kind, after one question that says what it is
+    // On, for the whole kind, after one question that says what it is
     let before = rig.outside.asked();
-    assert_eq!(rig.ask(json!({"op": "sync-kind", "kind": "keys", "choice": "sealed"}))["ok"], json!(true));
+    assert_eq!(rig.ask(json!({"op": "sync-kind", "kind": "keys", "choice": "on"}))["ok"], json!(true));
     assert_eq!(rig.outside.asked(), before + 1);
-    assert_eq!(rig.outside.said.lock().unwrap().asked.last().unwrap().message, say::SYNC_KIND_SEALED);
+    assert_eq!(rig.outside.said.lock().unwrap().asked.last().unwrap().message, say::SYNC_KIND_ON);
     until(|| (rig.server_ciphers() == 1).then_some(()));
-    assert_eq!(rig.status()["kinds"]["keys"], json!("sealed"));
+    // The run ends, and keeps its link, before another item is added: a cipher the vault made and lost its link to is not one it trashes
+    until(|| {
+        let status = rig.status();
+        (status["linked"] == json!(1) && status["running"] != json!(true)).then_some(())
+    });
+    assert_eq!(rig.status()["kinds"]["keys"], json!("on"));
     // One added later follows it; a key made not to leave never goes
-    rig.put("key", "k3", "Another", json!({"key_kind": "ssh", "exportable": true}), json!({"private": "LATER-KEY"}));
+    let (later_value, later) = key_value();
+    rig.put("key", "k3", "Another", json!({"key_kind": "exchange", "exportable": true}), later_value);
     // Asked again while the run of the first choice is still at it
     until(|| (rig.ask(json!({"op": "sync-now"}))["ok"] == json!(true)).then_some(()));
     assert_eq!(rig.server_ciphers(), 2);
     {
         let fake = rig.fake.lock().unwrap();
-        assert!(fake.seen.iter().all(|seen| !seen.body.contains("NEVER") && !seen.body.contains("LATER-KEY") && !seen.body.contains("PRIVATE-KEY-MATERIAL")));
+        assert!(fake.seen.iter().all(|seen| !seen.body.contains(&never) && !seen.body.contains(&later) && !seen.body.contains(&first)));
     }
     // Off moves the copies to the server's trash, after a question of its own
     let before = rig.outside.asked();

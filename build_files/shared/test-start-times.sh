@@ -47,6 +47,9 @@ esac
 EOF
 cat >"${WORK}/bin/journalctl" <<EOF
 #!/usr/bin/bash
+for a in "\$@"; do
+    [[ "\${a}" == _PID=1 ]] && exec jq -c 'select(._PID == "1")' "${WORK}/journal"
+done
 cat "${WORK}/journal"
 EOF
 cat >"${WORK}/bin/systemd-analyze" <<EOF
@@ -74,7 +77,7 @@ echo '{"deployments": []}' >"${WORK}/deployments"
 
 begun=7d4958e842da4a758f6c1cdc7b36dcc5
 done_=39f53479d3a045ac8e11786248231fbf
-line() { printf '{"UNIT": "%s", "MESSAGE_ID": "%s", "__MONOTONIC_TIMESTAMP": "%s"}\n' "$1" "$2" "$3"; }
+line() { printf '{"UNIT": "%s", "MESSAGE_ID": "%s", "__MONOTONIC_TIMESTAMP": "%s", "_PID": "1"}\n' "$1" "$2" "$3"; }
 
 # --- recording ----------------------------------------------------------------------------------------------------
 echo 15000000 >"${WORK}/finish"
@@ -105,6 +108,15 @@ same "a start is measured once a boot" "$(wc -l <"${FILE}")" 1
 } >"${WORK}/journal"
 record
 same "the time spent unlocking is left out" "$(tail -n 1 "${FILE}" | cut -f2)" 11.0
+# A pair of lines an account sent itself (no _PID of 1) shortens nothing
+{
+    printf '{"UNIT": "systemd-cryptsetup@x.service", "MESSAGE_ID": "%s", "__MONOTONIC_TIMESTAMP": "100000", "_PID": "4242"}\n' "${begun}"
+    printf '{"UNIT": "systemd-cryptsetup@x.service", "MESSAGE_ID": "%s", "__MONOTONIC_TIMESTAMP": "9000000", "_PID": "4242"}\n' "${done_}"
+} >"${WORK}/journal"
+cp "${FILE}" "${WORK}/seconds.keep"
+record
+same "lines not written by PID 1 are not an unlock" "$(tail -n 1 "${FILE}" | cut -f2)" 15.0
+cp "${WORK}/seconds.keep" "${FILE}"
 : >"${WORK}/journal"
 
 # A soft reboot starts no kernel, and a start that has not finished has nothing to say

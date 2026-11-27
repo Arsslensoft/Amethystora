@@ -89,7 +89,8 @@ to close counts as closed: it fails closed.
 
 **Never ask** is chosen in the window, after it says what you give up: any program of your account can then take that item
 unasked. The list of names needs an open vault and no approval. Taking a secret *out* (a key, a PFX file, every backup code, a
-QR code) always asks every time, whatever the setting.
+QR code) always asks every time, whatever the setting. Backup codes come one at a time, and the next one asks again once you
+have marked one used.
 
 ### The recovery key
 

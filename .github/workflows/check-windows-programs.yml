@@ -6,12 +6,17 @@ on:
   pull_request:
     paths:
       - system_files/shared/usr/share/amethystora/windows-programs.json
+      - system_files/shared/usr/share/amethystora/kits/*.json
       - .github/workflows/check-windows-programs.yml
 
 # What opening a Windows program offers instead (amethystora-windows-program) names apps on Flathub by their IDs, in
 # system_files/shared/usr/share/amethystora/windows-programs.json. An app can leave Flathub or change its ID, and the
 # offer would then fail as it installed: this asks Flathub's API for each ID, weekly and whenever the map changes, and
 # fails on one Flathub no longer has. The image build only checks the map's shape (20-tests.sh).
+#
+# The kits (ame apps kit, system_files/shared/usr/share/amethystora/kits) name Flathub apps the same way, and the second
+# job asks Flathub for each, weekly and whenever a kit changes: an ID Flathub does not have, or an app it has marked end of
+# life, fails it, so that a kit never offers what `ame apps kit add` cannot install.
 
 permissions: {}
 
@@ -41,3 +46,31 @@ jobs:
             fi
           done
           [[ "${missing}" == 0 ]]
+
+  kits:
+    name: Kits' Flathub IDs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Ask Flathub
+        run: |
+          set -euo pipefail
+          bad=0
+          for id in $(jq -r '.flatpaks.system[].app' system_files/shared/usr/share/amethystora/kits/*.json | sort -u); do
+            status="$(curl -s -o answer.json -w '%{http_code}' --retry 3 "https://flathub.org/api/v2/appstream/${id}")"
+            if [[ "${status}" != 200 ]]; then
+              echo "::error::${id} is not on Flathub (HTTP ${status})"
+              bad=$((bad + 1))
+            elif [[ "$(jq -r '.is_eol // false' answer.json)" == true ]]; then
+              echo "::error::${id} is end of life on Flathub"
+              bad=$((bad + 1))
+            fi
+          done
+          [[ "${bad}" == 0 ]]

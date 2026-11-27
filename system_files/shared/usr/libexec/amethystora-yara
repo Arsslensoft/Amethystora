@@ -66,14 +66,16 @@ due() {
     return 1
 }
 
-# Whether ClamAV loads FILE with nothing left out: clamscan on it alone, and not a word of a rule it could not
-# parse or load
+# Whether ClamAV loads the files with nothing left out: clamscan on them together, as clamd loads its folder, and
+# not a word of a rule it could not parse or load, or of a name used twice
 loads() {
-    local errors empty="${WORK}/empty"
+    local errors file empty="${WORK}/empty"
+    local -a databases=()
+    for file in "$@"; do databases+=(-d "${file}"); done
     # A plain file to scan: clamscan refuses /dev/null as a file it does not scan
     [[ -f "${empty}" ]] || : >"${empty}"
-    errors="$(timeout 120 clamscan --quiet --no-summary -d "$1" "${empty}" 2>&1 >/dev/null)" || return 1
-    ! grep -qiE "yyerror|failed to parse|malformed|can't|cannot|error|skipping|empty database" <<<"${errors}"
+    errors="$(timeout 120 clamscan --quiet --no-summary "${databases[@]}" "${empty}" 2>&1 >/dev/null)" || return 1
+    ! grep -qiE "yyerror|failed to parse|malformed|can't|cannot|error|skipping|empty database|duplicate" <<<"${errors}"
 }
 
 # The pieces of a set that load, a failing piece's rules tried one by one, into OUT; their credits kept
@@ -97,7 +99,8 @@ assemble() {
 }
 
 update() {
-    local source archive pieces out kept tag
+    local source archive pieces out kept tag other
+    local -a others
     install -d -m 0755 "${WORK}"
     clear_leftovers
     trap clear_leftovers EXIT
@@ -142,7 +145,16 @@ update() {
         fi
         assemble "${pieces}" "${pieces}/all.yar"
         kept="$(grep -cE '^[[:space:]]*((private|global)[[:space:]]+)*rule[[:space:]]' "${pieces}/all.yar")"
-        if [[ "${kept}" -gt 0 ]] && loads "${pieces}/all.yar"; then
+        # The other sets on, as they are in ClamAV's folder: the new one has to load beside them
+        others=()
+        for other in "${SOURCES[@]}"; do
+            [[ "${other}" != "${source}" && -s "${DATABASE}/amethystora-yara-${other}.yar" ]] && on "${other}" &&
+                others+=("${DATABASE}/amethystora-yara-${other}.yar")
+        done
+        if [[ "${kept}" -gt 0 ]] && grep -qE '^[[:space:]]*include([^[:alnum:]_]|$)' "${pieces}/all.yar"; then
+            # ClamAV would read the file an include names when it starts, which nothing here has tested
+            echo "${source}'s rules have an include directive; the ones there were stay." >&2
+        elif [[ "${kept}" -gt 0 ]] && loads "${pieces}/all.yar" "${others[@]}"; then
             # In ClamAV's folder whole or not at all, and readable by clamd
             install -m 0644 "${pieces}/all.yar" "${out}.new" && mv "${out}.new" "${out}"
             # The credits of the rules kept, for what a match is called
@@ -151,7 +163,7 @@ update() {
                 "${pieces}/credits.tsv" >"${WORK}/${source}.credits"
             echo "${source}: ${kept} rules"
         else
-            echo "${source}'s rules did not load; the ones there were stay." >&2
+            echo "${source}'s rules did not load, alone or beside the other sets; the ones there were stay." >&2
         fi
         rm -rf "${pieces}"
     done

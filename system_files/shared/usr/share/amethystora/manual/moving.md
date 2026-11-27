@@ -2,7 +2,8 @@
 
 Ways to bring your things from another computer, and to send a file to someone far away. Each says what
 it reads, what it copies and what it never touches, and none sends anything until you start it. For a phone
-or another computer on your own network, see [Send to nearby](phone-sharing.md#send-to-nearby).
+or another computer on your own network, see [Send to nearby](phone-sharing.md#send-to-nearby). For the Windows
+disk of this computer, see [Move in from Windows](move-in.md).
 
 ## Move to this computer
 

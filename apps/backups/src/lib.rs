@@ -323,6 +323,7 @@ impl Backups {
         let me = self.me.clone();
         let paths = vec![
             "/var/home/.snapshots".into(),
+            "/etc/amethystora/snapshot-excludes".into(),
             live::home(".config/amethystora"),
             live::home(".local/state/amethystora/backup-last-success"),
         ];
@@ -758,6 +759,48 @@ impl Backups {
             }
             this.load_now(true, true).await;
         });
+    }
+
+    // --- What the backup leaves out --------------------------------------------------------------------
+
+    /// A folder of the home, from the window's own folder dialog, left out of the daily backup from its next run
+    pub(crate) fn leave_out(&self) {
+        let this = self.rc();
+        glib::spawn_future_local(async move {
+            let dialog = gtk::FileDialog::builder()
+                .title(t!("Leave a folder out of the backup"))
+                .accept_label(t!("Leave out"))
+                .initial_folder(&gio::File::for_path(&this.home))
+                .modal(true)
+                .build();
+            let Ok(folder) = dialog.select_folder_future(Some(&this.shell.window)).await else { return };
+            let Some(path) = folder.path() else { return };
+            let path = std::fs::canonicalize(&path).unwrap_or(path);
+            // Only a folder inside the home: the helper refuses anything else again
+            if path == this.home || !path.starts_with(&this.home) {
+                this.state.borrow_mut().banner = Some(Banner { failed: true, text: t!("Only a folder inside your home folder can be left out."), detail: String::new() });
+                this.render();
+                return;
+            }
+            this.exclude("add", &path.to_string_lossy()).await;
+        });
+    }
+
+    /// A pattern the list just read put back into the backup (`remove`), or the image's list again (`reset`)
+    pub(crate) fn include(&self, verb: &'static str, pattern: String) {
+        let known = self.state.borrow().status.as_ref().is_some_and(|status| verb == "reset" || status.excludes.entries.iter().any(|e| e.pattern == pattern));
+        if !known {
+            return;
+        }
+        let this = self.rc();
+        glib::spawn_future_local(async move { this.exclude(verb, &pattern).await });
+    }
+
+    async fn exclude(self: &Rc<Self>, verb: &str, pattern: &str) {
+        if let Err(detail) = backend::exclude(verb, pattern).await {
+            self.state.borrow_mut().banner = Some(Banner { failed: true, text: t!("That did not work."), detail });
+        }
+        self.load_now(true, true).await;
     }
 
     // --- Backing up now -------------------------------------------------------------------------------

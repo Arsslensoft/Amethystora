@@ -1,0 +1,9 @@
+; What Fedora's SELinux policy lacks for clamd as the image starts it, installed by build_files/base/08-hardening.sh.
+; tests/vm/suites/38-clamd-sandbox.sh checks that clamd starts without a denial.
+
+; clamd@scan.socket hands clamd its socket, and libsystemd's sd_listen_fds() (systemd 258 and later) then checks
+; LISTEN_PIDFDID: it opens a pidfd of its own process and asks fstatfs() whether it lies on pidfs. antivirus_t may
+; not read the attributes of that file system, so every start was a denial in the audit log (which the security
+; watcher reports while SELINUX_DENIALS is on) and libsystemd skipped the check that the sockets are clamd's own.
+; Reading a file system's attributes gives nothing else.
+(allow antivirus_t pidfs_t (filesystem (getattr)))

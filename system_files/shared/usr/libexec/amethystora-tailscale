@@ -9,8 +9,9 @@
 #   amethystora-tailscale status       whether it is on, off or follows an earlier login
 set -euo pipefail
 
-CHOICE=/var/lib/amethystora/tailscale
-STATE=/var/lib/tailscale/tailscaled.state
+# AMETHYSTORA_TAILSCALE_ROOT is a stand-in root for test-tailscale.sh, and empty on a machine
+CHOICE="${AMETHYSTORA_TAILSCALE_ROOT:-}/var/lib/amethystora/tailscale"
+STATE="${AMETHYSTORA_TAILSCALE_ROOT:-}/var/lib/tailscale/tailscaled.state"
 
 # What the owner chose, or nothing when nobody has: on or off
 choice() { cat "${CHOICE}" 2>/dev/null || true; }

@@ -61,7 +61,8 @@ export function passes(notification) {
 // The launcher IDs a notification's app goes by, each as APP.desktop
 function idsOf(notification) {
     const source = notification.source;
-    return [source?._appId, source?.app?.get_id?.()].filter(Boolean)
+    // GNOME has named a source's app more than one way
+    return [source?._appId, source?.appId, source?.app_id, source?.app?.get_id?.(), source?._app?.get_id?.()].filter(id => typeof id === 'string' && id)
         .map(id => (id.endsWith('.desktop') ? id : `${id}.desktop`));
 }
 
@@ -95,6 +96,7 @@ export class Hold {
         this.plate = 'quiet';
         this._focus = null;
         this._presenting = false;
+        this._playing = false;
     }
 
     enable() {
@@ -337,6 +339,8 @@ export class Hold {
     _currentReason() {
         if (this._presenting)
             return 'presenting';
+        if (this._playing)
+            return 'playing';
         if (this._quiet) {
             if (this._capture.recording)
                 return 'recording';
@@ -435,6 +439,14 @@ export class Hold {
         if (this._presenting === on)
             return;
         this._presenting = on;
+        this._update();
+    }
+
+    // While you play (modules/power/playing.js): a reason of its own, with a mark of its own in the pill, so this has none
+    setPlaying(on) {
+        if (this._playing === on)
+            return;
+        this._playing = on;
         this._update();
     }
 
@@ -656,6 +668,8 @@ export class Hold {
             return _('Quiet while sharing');
         case 'presenting':
             return _('Quiet while presenting');
+        case 'playing':
+            return _('Quiet while you play');
         case 'night': {
             const span = this.nightSpan();
             const hours = Math.floor(span.to);
@@ -686,7 +700,8 @@ export class Hold {
     }
 
     _show() {
-        if (!this._reason) {
+        // Playing has the Playing mark, which says what is held: no second mark for the same thing
+        if (!this._reason || this._reason === 'playing') {
             this._end();
             return;
         }
@@ -721,6 +736,7 @@ export class Hold {
             sharing: _('the screen is shared'),
             recording: _('the screen is recorded'),
             presenting: _('you present'),
+            playing: _('you play'),
             night: _('it is night'),
         }[this._reason] ?? '';
         const held = this.quietHeld;

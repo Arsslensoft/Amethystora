@@ -32,6 +32,16 @@ flate2 = "1"
 # The Vault (plans/done/PLAN-vault.md): key generation, X.509 and PKCS#12 from Fedora's libcrypto, and memory that wipes itself
 openssl = "0.10"
 zeroize = "1"
+# Kemlock's formats (vault-core's kemlock module, crypto.md): pure Rust, nothing from libcrypto. ML-KEM-1024 and ML-DSA-65
+# from their seeds, SHA-3, HKDF, the curves and OPAQUE-3DH (RFC 9807) over ristretto255
+ml-kem = { version = "0.3", features = ["zeroize"] }
+ml-dsa = { version = "0.1", default-features = false, features = ["alloc", "rand_core", "zeroize"] }
+sha3 = { version = "0.11", default-features = false }
+hkdf = "0.13"
+x25519-dalek = "3"
+ed25519-dalek = "3"
+# opaque-ke 4 is on digest 0.10 and rand 0.8, so its SHA-512 is sha2 0.10, which vault-core names beside the workspace's 0.11
+opaque-ke = { version = "4", default-features = false, features = ["ristretto255"] }
 amethystora-ui = { path = "common" }
 amethystora-update = { path = "update" }
 amethystora-security = { path = "security" }
@@ -70,4 +80,23 @@ opt-level = 3
 [profile.dev.package.aes]
 opt-level = 3
 [profile.dev.package.aes-gcm]
+opt-level = 3
+# The Kemlock formats (vault-core's kemlock tests): Argon2id at its default cost, ML-KEM-1024, ML-DSA-65 and the curves
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.ml-kem]
+opt-level = 3
+[profile.dev.package.ml-dsa]
+opt-level = 3
+[profile.dev.package.module-lattice]
+opt-level = 3
+[profile.dev.package.keccak]
+opt-level = 3
+[profile.dev.package.sha3]
+opt-level = 3
+[profile.dev.package.shake]
+opt-level = 3
+[profile.dev.package.curve25519-dalek]
 opt-level = 3

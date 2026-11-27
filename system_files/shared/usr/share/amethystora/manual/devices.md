@@ -11,21 +11,21 @@ older laser printers are included for the rest. Add a printer in **Settings → 
 ## Keyboards, mice and security keys
 
 - **Gaming mice:** the service that configures them is included; install **Piper** from Bazaar to change buttons,
-  lighting and resolution.
+  lighting and resolution. Piper works from an administrator's account.
 - **Remapping keys:** `ame security input-remapper` turns on Input Remapper
   ([Security](devices-security.md#key-remapping) explains why it starts off).
 - **FIDO2 security keys** can replace your password: [Security](logins.md#security-keys).
 
 ### Keyboard configurators
 
-VIA, Vial, Keychron Launcher, ZSA's Oryx and Keymapp, and Wootility reach Keychron, Lemokey, ZSA, Vial and Wooting
-keyboards for whoever is at the machine, through the keyboard's configuration channel, never the one its keys are typed
-on. Other keyboards are kept from them and from every other program, because what a
-configurator reads is every key typed. To configure another one, give it to whoever is at the machine with its vendor ID
-from `lsusb`, then plug it in again:
+VIA, Vial, Keychron Launcher, ZSA's Oryx and Keymapp, Wootility, Solaar and lighting apps such as OpenRGB reach a
+keyboard for whoever is at the machine through its configuration channel, never the one its keys are typed on, whoever
+made it: what a configurator reads is every key typed. A keyboard that offers configuration only on the interface it
+types on (some Bluetooth ones) is no longer reachable by those apps without root. To configure one anyway, give it to
+whoever is at the machine with its vendor ID from `lsusb`, then plug it in again:
 
 ```bash
-echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="1234", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-keyboard.rules
+echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="1234", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/72-zz-keyboard.rules
 ```
 
 ## Game controllers
@@ -80,6 +80,28 @@ ame apps opentabletdriver on
 Set the pen's pressure, its buttons and the part of the screen the tablet covers in **OpenTabletDriver**, in the app
 grid. `ame apps opentabletdriver off` takes it all away, and the kernel's drivers come back after a restart. The
 **Drawing tablets** switch on [Control](control.md)'s **Apps** page does either in a terminal.
+
+## Lab devices
+
+Debug probes, USB serial adapters and logic analysers belong to root until you say otherwise, so a flashing tool or a
+debugger from Flathub, or one you installed yourself, says *permission denied* on them. One command gives them to you,
+the person at the machine:
+
+```bash
+ame system lab-devices list   # which of the devices plugged in now it covers
+ame system lab-devices on     # says what it gives, asks, and copies its rules into /etc
+ame system lab-devices off
+```
+
+- It covers ST-LINK, J-Link, DAPLink, Black Magic and Raspberry Pi probes, the USB port of ESP32 chips, FTDI, CP210x,
+  CH340 and PL2303 serial adapters, Arduino Uno and Leonardo boards, and Saleae and sigrok logic analysers. Each is given
+  by its vendor and product, to you and to the apps that may reach devices, never to every account or over SSH.
+- A debug probe reads and writes the memory of the board it is connected to, firmware included. A serial adapter is a
+  modem's too: a program of yours that opens one can talk to whatever is on its other end. That is why it is a choice.
+- Radios (RTL-SDR, HackRF, Airspy, bladeRF, SDRplay) and many analysers need nothing: the system already gives them to
+  you. Keyboards are never given this way, whatever chip they are built on.
+- The same switch is **Lab devices** on [Control](control.md)'s **System** page. A device already plugged in may need to be
+  plugged in again. Security's report says when it is on.
 
 ## Cameras
 

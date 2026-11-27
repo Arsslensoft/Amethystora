@@ -72,8 +72,11 @@ export class Plugins {
     _sync() {
         if (this.on && !this._host)
             this._start();
-        else if (!this.on && this._host)
+        else if (!this.on && (this._host || this._plugins)) {
             this._stop();
+            // The desktop's cards draw what they were last told: they are told there is nothing now
+            this._tellListeners();
+        }
     }
 
     _start() {

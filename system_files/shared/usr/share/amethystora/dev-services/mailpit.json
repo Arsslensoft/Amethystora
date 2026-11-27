@@ -1,0 +1,12 @@
+{
+    "name": "mailpit",
+    "title": "Mailpit, a mail catcher",
+    "aliases": ["mail"],
+    "image": "docker.io/axllent/mailpit@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce",
+    "tag": "v1.33",
+    "size_mb": 14,
+    "ports": [{"port": 1025}, {"port": 8025}],
+    "volume": "/data",
+    "env": {"MP_DATABASE": "/data/mailpit.db", "MP_SMTP_AUTH_ACCEPT_ANY": "1", "MP_SMTP_AUTH_ALLOW_INSECURE": "1"},
+    "connect": "smtp://127.0.0.1:${PORT}, and the mail in a browser at the second port"
+}

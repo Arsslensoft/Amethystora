@@ -45,6 +45,7 @@ KEYS = (['background', 'foreground', 'accent', 'cursor', 'selection_foreground',
 COLOUR_FILE_MAX = 1024 * 1024
 PICTURE_MAX = 64 * 1024 * 1024
 MAX_SIDE = 16384
+MAX_PIXELS = 64 * 1000 * 1000
 # A look file and what each of its members may weigh
 LOOK_MAX = 25 * 1024 * 1024
 LOOK_MEMBERS = {'look.conf': 4096, 'colors.toml': 16384, 'wallpaper.png': 24 * 1024 * 1024}
@@ -266,6 +267,8 @@ def local_file(path, largest):
     if any(ord(c) < 32 or ord(c) == 127 for c in path):
         raise Refused('the file has a control character in its name')
     real = os.path.realpath(path)
+    if any(ord(c) < 32 or ord(c) == 127 for c in real):
+        raise Refused('the file is a link to a file with a control character in its name')
     if any(real == p or real.startswith(p + '/') for p in PSEUDO):
         raise Refused('the file is not a file of the computer')
     try:
@@ -404,8 +407,8 @@ def decoded(data, only_png=False):
     if only_png and data[:8] != b'\x89PNG\r\n\x1a\n':
         raise Refused('the picture is not a PNG')
     size = header_size(data[:64]) or (jpeg_size(data) if data[:2] == b'\xff\xd8' else None)
-    if size is None or not (0 < size[0] <= MAX_SIDE and 0 < size[1] <= MAX_SIDE):
-        raise Refused('the picture is larger than 16384 pixels a side, or says no size')
+    if size is None or not (0 < size[0] <= MAX_SIDE and 0 < size[1] <= MAX_SIDE and size[0] * size[1] <= MAX_PIXELS):
+        raise Refused('the picture is larger than 16384 pixels a side or 64 million pixels, or says no size')
     GdkPixbuf, GLib = gdk()
     try:
         loader = GdkPixbuf.PixbufLoader.new_with_type('png') if only_png else GdkPixbuf.PixbufLoader()

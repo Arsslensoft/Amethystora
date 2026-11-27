@@ -145,7 +145,11 @@ pub fn next(service: &mut Service, peer: &Rc<Peer>, body: &Value) -> Result<Next
     must_be_open(service, uid)?;
     let id = item_id(body)?;
     let id_there = id.clone();
-    Ok(service.with_approval(uid, KIND_BACKUP_CODES, &id_there, Action::Use, say::USE_ITEM, false, move |service, vault| {
+    // After a code was marked used, the next one asks again (`Service::stepped`), however the item is set
+    let (vault_there, _, _) = service.locate(uid, KIND_BACKUP_CODES, &id, None)?;
+    let force = service.stepped(uid, &vault_there, &id);
+    Ok(service.with_approval(uid, KIND_BACKUP_CODES, &id_there, Action::Use, say::USE_ITEM, force, move |service, vault| {
+        service.set_stepped(uid, vault, &id, false);
         flat(read::<BackupService>(service, uid, vault, KIND_BACKUP_CODES, &id).map(|item| {
             let (left, low) = counts(&item);
             let at = codes::next_unused(&item);
@@ -169,6 +173,9 @@ fn mark(service: &mut Service, uid: u32, vault: &str, id: &str, index: usize, us
     let store = service.store_of(uid, vault).map_err(Next::refuse)?;
     let approval = setting(store, id);
     keep(service, uid, vault, &item, approval)?;
+    if used {
+        service.set_stepped(uid, vault, id, true);
+    }
     let (left, low) = counts(&item);
     Ok(Next::Answer(json!({"ok": true, "used_at": used_at, "left": left, "low": low})))
 }

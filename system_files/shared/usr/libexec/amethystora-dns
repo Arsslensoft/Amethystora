@@ -15,7 +15,8 @@
 #                                          wants a login first (amethystora-dns-portal.service, a user unit)
 #   amethystora-dns domains                as root: take the search domains a Wi-Fi or wired network
 #                                          handed out off it, but those only a network can have (see below)
-#   amethystora-dns domains-watch          as root: `domains` again whenever NetworkManager reports a change
+#   amethystora-dns domains-watch          as root: `domains` again whenever systemd-resolved is handed a link's
+#                                          domains, and after NetworkManager reports a change
 #                                          (amethystora-dns-domains.service, started by `on`, stopped by `off`)
 #
 # The switch is two files, and nothing in /etc/amethystora/security.conf:
@@ -34,9 +35,9 @@
 # network that hands out "com", or the name of a bank, would take every lookup under it back, in plain text, and
 # answer it. NetworkManager has no setting that drops a lease's domains and keeps its servers (ignore-auto-dns
 # drops both, and the servers are what the connectivity check and a login page's pause need), and a dispatcher
-# script is not used here, so `domains` (run by a root service that wakes on `nmcli monitor`, as the portal's
-# watcher does) takes the search domains a lease or router advertisement gave a Wi-Fi or wired network off it, but those under a name
-# only a network has (DOMAINS_KEPT). Never touched: a VPN's or Tailscale's, the connection's own DNS search domains
+# script is not used here, so `domains` (run by a root service that wakes on systemd-resolved's own signals, which say a link's
+# domains changed, and on `nmcli monitor`, as the portal's watcher does) takes the search domains a lease or router advertisement
+# gave a Wi-Fi or wired network off it, but those under a name only a network has (DOMAINS_KEPT). Never touched: a VPN's or Tailscale's, the connection's own DNS search domains
 # (ipv4.dns-search, ipv6.dns-search) and a domain routed on purpose, which begins with "~".
 #
 # A pause is a third file, in /run, after the first in order and so over it: it empties the servers and
@@ -139,13 +140,14 @@ DOMAINS_KEPT='(^|\.)(local|lan|home|home\.arpa|internal|intranet|private|corp|lo
 # a name only a network has: see the top. Not a VPN's or Tailscale's (other kinds of device), nor those the connection itself
 # lists in its DNS search domains (ipv4.dns-search, ipv6.dns-search), nor the ones routed on purpose, which begin with "~".
 # Idempotent, and quiet when there is nothing to take off; resolved keeps what is set until the network goes away or
-# NetworkManager sets its domains again, which is when the watcher runs this once more.
+# NetworkManager sets its domains again, which is when the watcher runs this once more. A network that is still connecting is
+# looked at too: NetworkManager hands resolved its domains before it calls the device connected.
 domains() {
     local device type state uuid line own domain regex='^Link [0-9]+ \(([^)]+)\):(.*)$' all kept current
     command -v resolvectl >/dev/null || return 0
     command -v nmcli >/dev/null || return 0
     while IFS=: read -r device type state uuid; do
-        [[ "${state}" == connected && "${type}" =~ ^(ethernet|wifi)$ && -n "${uuid}" ]] || continue
+        [[ "${state}" == connected || "${state}" == "connecting"* ]] && [[ "${type}" =~ ^(ethernet|wifi)$ && -n "${uuid}" ]] || continue
         # What the connection itself lists, one domain to a word, whatever separates them
         own=" $(nmcli -g ipv4.dns-search,ipv6.dns-search connection show "${uuid}" 2>/dev/null | tr ',\n' '  ' | tr '[:upper:]' '[:lower:]') "
         # `--` so that nothing a network or a connection names is taken for an option
@@ -164,21 +166,38 @@ domains() {
     done < <(nmcli -t -f DEVICE,TYPE,STATE,CON-UUID device 2>/dev/null)
 }
 
-# As root, from amethystora-dns-domains.service. NetworkManager sets a network's domains just before it reports the network
-# connected, and again at its next change, so each event is followed by two passes, one second and four seconds after it.
+# One line for each thing that can have changed a link's domains, "resolved" or "nm" first. systemd-resolved says so itself
+# (PropertiesChanged on a link) when NetworkManager hands it a link's domains, at a connect and at a lease that changed, which
+# `nmcli monitor` prints no line for; NetworkManager's own signals for a new IP configuration and `nmcli monitor` come before it has
+# handed them over. When one of the readers ends the rest are ended too, and the unit starts this again.
+domain_events() {
+    LC_ALL=C nmcli monitor | sed -u 's/^/nm /' &
+    if command -v gdbus >/dev/null; then
+        gdbus monitor --system --dest org.freedesktop.resolve1 | sed -u 's/^/resolved /' &
+        gdbus monitor --system --dest org.freedesktop.NetworkManager | grep --line-buffered -E 'IP[46]Config' | sed -u 's/^/nm /' &
+    fi
+    wait -n || true
+    # shellcheck disable=SC2046
+    kill $(jobs -p) 2>/dev/null || true
+}
+
+# As root, from amethystora-dns-domains.service. What resolved says it now has is looked at at once. What NetworkManager says is
+# followed by two passes, one second and four seconds after it, since it tells resolved a network's domains just after it
+# reports the network, and again at its next change.
 domains_watch() {
-    local _
+    local source _ later=""
     command -v nmcli >/dev/null || exit 0
-    while read -r _; do
+    while read -r source _; do
         [[ -e "${RESOLVED_DROP_IN}" ]] || exit 0
-        sleep 1
-        domains
-        sleep 3
-        domains
-        # What came in meanwhile is the same change
-        while read -r -t 0.2 _; do :; done
-    done < <(LC_ALL=C nmcli monitor 2>/dev/null)
-    # nmcli monitor ends only when it fails, and the unit starts this again
+        if [[ "${source}" == nm ]]; then
+            # Passes still waiting are replaced by two that count from this one
+            [[ -z "${later}" ]] || kill "${later}" 2>/dev/null || true
+            { sleep 1; domains; sleep 3; domains; } &
+            later=$!
+        else
+            domains
+        fi
+    done < <(domain_events 2>/dev/null)
     exit 1
 }
 

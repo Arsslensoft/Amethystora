@@ -172,6 +172,8 @@ kill "${PEER_PID}" 2>/dev/null
 
 # A3-A5: on, it is back, a laptop, paired; a file from it lands in its folder; the top bar draws a computer
 in_session "ame desktop phone computers on" >/dev/null 2>&1
+# A file another computer sends waits for a card with Accept; the laptop of this suite is let through, as before
+in_session "ame desktop phone ask-first never" >/dev/null 2>&1
 # The program hears the setting from dconf a moment after gsettings has written it
 computers_on() { [[ "$(root_prop Computers)" == true ]]; }
 if wait_for 5 computers_on; then ok "A3 Computers true on the bus"; else not_ok "A3 Computers true on the bus" "found: $(root_prop Computers)"; fi
@@ -244,6 +246,7 @@ computer_icon() { [[ " $(icon) " == *" computer-symbolic "* ]]; }
 check "A9 the top bar draws the computer" wait_for 10 computer_icon
 
 # A7: off again, it leaves the bus, and its pairing stays
+in_session "ame desktop phone ask-first computers" >/dev/null 2>&1
 in_session "ame desktop phone computers off" >/dev/null 2>&1
 gone() { ! listed; }
 check "A7 off: the laptop leaves the program's list" wait_for 10 gone

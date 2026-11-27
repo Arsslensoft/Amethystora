@@ -326,7 +326,9 @@ const PYTHON = ['usr/libexec/amethystora-text-shortcuts',
     // The Help window's helpers (plans/ui-ideas/r7/spec-help.md), and how it finds what Show me points at
     'usr/libexec/amethystora-wrong', 'usr/libexec/amethystora-changes',
     // Bring everything from your old computer (R7-48)
-    'usr/libexec/amethystora-bring-over'];
+    'usr/libexec/amethystora-bring-over', 'usr/libexec/amethystora-move-in',
+    // For developers: a service in one line and which port holds what (ame dev service, ports), and the graphics card in a container (ame dev gpu)
+    'usr/libexec/amethystora-dev-services', 'usr/libexec/amethystora-gpu-compute'];
 const SHELL = ['usr/libexec/amethystora-security-status', 'usr/libexec/amethystora-app-permissions', 'usr/libexec/amethystora-layout-offer',
     'usr/libexec/amethystora-control-list', 'usr/libexec/amethystora-security-config', 'usr/libexec/amethystora-hardening',
     'usr/libexec/amethystora-phone-link-notice', 'usr/libexec/amethystora-deja-dup-notice', 'usr/libexec/amethystora-widgets-moved-notice',
@@ -335,7 +337,7 @@ const SHELL = ['usr/libexec/amethystora-security-status', 'usr/libexec/amethysto
     'usr/libexec/amethystora-agentic-off-notice', 'usr/libexec/amethystora-private-folder', 'usr/libexec/amethystora-windows-program',
     // Files' scripts menu: its entries' names, and what the three scripts say
     'usr/libexec/amethystora-folder-colour', 'usr/libexec/amethystora-back-in-time', 'usr/share/amethystora/user-setup.hooks.d/24-files-menu.sh',
-    'usr/libexec/amethystora-clean-copy', 'usr/libexec/amethystora-start-times', 'usr/libexec/amethystora-pdf-sign', 'usr/libexec/amethystora-share-screen',
+    'usr/libexec/amethystora-clean-copy', 'usr/libexec/amethystora-will-it-run', 'usr/libexec/amethystora-start-times', 'usr/libexec/amethystora-pdf-sign', 'usr/libexec/amethystora-share-screen',
     // Send to anyone, which says where a file passes before it fetches Warp (R7-66)
     'usr/libexec/amethystora-send-anyone',
     // Restart while you are away: its notice of a night that did not restart
@@ -353,12 +355,14 @@ const SHELL = ['usr/libexec/amethystora-security-status', 'usr/libexec/amethysto
     'usr/libexec/amethystora-plugins',
     // What `ame pill` runs: a script live in the pill (R7-03)
     'usr/libexec/amethystora-pill',
+    // The kits: the apps for a line of work (their own words are read from usr/share/amethystora/kits/about, below)
+    'usr/libexec/amethystora-kit',
     // The text shortcuts' helper, in Python, whose _("...") is read as an extension's is
     ...PYTHON,
     'usr/share/gnome-shell/extensions/amethystora-logo-menu@arsslensoft.github.io/extension.js',
     // Amethystora Clipboard's text actions, Amethystora's own file in it, in domain amethystora
     'usr/share/gnome-shell/extensions/amethystora-clipboard@arsslensoft.github.io/textActions.js',
-    ...['agent', 'apps', 'backup', 'changelog', 'desktop', 'pill', 'plugin', 'report', 'security', 'system', 'update', 'vault'].map((group) => `usr/share/amethystora/just/${group}.just`),
+    ...['agent', 'apps', 'backup', 'changelog', 'desktop', 'dev', 'pill', 'plugin', 'report', 'security', 'system', 'update', 'vault'].map((group) => `usr/share/amethystora/just/${group}.just`),
     // Amethystora UI: every module, however deep it is split
     ...jsFiles('usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io')];
 
@@ -437,6 +441,18 @@ function shellMessages() {
                 found.set(key, entry);
             }
         });
+    }
+    // The kits' words (ame apps kit, Control's Kits) are data, read from the files beside each kit: its name, what it is for and
+    // why each app is in it. amethystora-kit and Control's list look them up as they are, so the English is the message
+    const about = path.join(root, 'usr/share/amethystora/kits/about');
+    for (const file of fs.existsSync(about) ? fs.readdirSync(about).filter((name) => name.endsWith('.json')).sort() : []) {
+        const script = `usr/share/amethystora/kits/about/${file}`;
+        const kit = JSON.parse(fs.readFileSync(path.join(about, file), 'utf8'));
+        for (const id of [kit.name, kit.description, ...(kit.apps || []).map((app) => app.why)].filter((word) => word)) {
+            const entry = found.get(`${id}\u0000`) || { id, plural: null, files: new Set(), comment: '' };
+            entry.files.add(script);
+            found.set(`${id}\u0000`, entry);
+        }
     }
     // The phone link's program (apps/connect) and Move to this computer (apps/move) are not shell programs but speak through the
     // same catalogs: tr("...") and trf("...", &[("name", value)]) of src/text.rs, whose {name} placeholders msgfmt checks as

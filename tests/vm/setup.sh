@@ -13,5 +13,6 @@ docker rm -f amevm >/dev/null 2>&1 || true
 docker run --rm --privileged --pid=host alpine nsenter -t 1 -m -- sh -c \
     'test -c /dev/kvm || { grep -q AuthenticAMD /proc/cpuinfo && modprobe kvm_amd || modprobe kvm_intel; }' || true
 # The host's /dev, where the partitions of a loop device appear as bootc makes them
-docker run -d --name amevm --init --privileged -v /dev:/dev -v amevm-vm:/vm -v amevm-storage:/var/lib/containers amethystora-vm-lab
+# VMLAB_VOLUME puts /vm in a folder of the host instead of the volume (the Lab workflow, which hands disks between jobs)
+docker run -d --name amevm --init --privileged -v /dev:/dev -v "${VMLAB_VOLUME:-amevm-vm}:/vm" -v amevm-storage:/var/lib/containers amethystora-vm-lab
 docker exec amevm test -c /dev/kvm || echo "setup: no /dev/kvm in the container: the VMs will not start" >&2

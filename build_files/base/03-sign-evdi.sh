@@ -3,7 +3,8 @@
 # `signer` stage of layers/kernel.Containerfile: Fedora's own image, pinned by digest, which holds nothing of the kernel
 # layer's filesystem but evdi's module as a file (/in/evdi.ko.xz). Three steps, each its own RUN with no network, and
 # only the middle one with the key:
-#   unpack  xz decompresses the module (a parser, run without the key)
+#   unpack  xz decompresses the module (a parser, run without the key), and modinfo checks that it is evdi's, built for
+#           the image's kernel
 #   sign    sign-file appends the signature, which reads the module's bytes and parses nothing, with the key read from
 #           the secret mount and never copied
 #   pack    xz compresses it as the kernel's own build does, and modinfo checks the signature names the certificate
@@ -31,6 +32,9 @@ case "${STEP}" in
 unpack)
     mkdir -p "${WORK}"
     xz -dc /in/evdi.ko.xz >"${WORK}/evdi.ko"
+    # Only evdi's module, built for this kernel, is what the key is ever used on
+    [[ "$(modinfo -F name "${WORK}/evdi.ko")" == evdi ]]
+    [[ "$(modinfo -F vermagic "${WORK}/evdi.ko")" == "${KERNEL} "* ]]
     ;;
 sign)
     if [[ ! -s /run/secrets/AKMODS_PRIVKEY ]]; then

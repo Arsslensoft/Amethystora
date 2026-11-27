@@ -50,7 +50,7 @@ reboot_and_continue() { exit 100; }
 # The next phase in this same boot, for what outlasts one phase's 30 minutes
 continue_phase() { exit 101; }
 # usb_next JSON: before that next phase, USB devices plugged out and then in, as a person would, by name
-# (run.mjs's USB_DEVICES: stick, stick2, keyboard): {"unplug": ["stick"], "plug": ["stick", "keyboard"]}
+# (run.mjs's USB_DEVICES: stick, stick2, keyboard, serial): {"unplug": ["stick"], "plug": ["stick", "keyboard"]}
 usb_next() {
     install -d -m 0700 /var/lib/vmlab-tests
     printf '%s\n' "$1" >/var/lib/vmlab-tests/usb.json
@@ -72,7 +72,7 @@ screen_next() {
 # typed at its prompt, which the next phase finds counted in VMLAB_PROMPTS. A later plain restart keeps the
 # machine as that start left it. {"itself": true} is no power cycle: run.mjs restarts nothing and waits for the
 # restart the phase left to happen after it, a soft reboot too; {"powers_off": true} waits for the machine to
-# power itself off, then starts it.
+# power itself off, then starts it (USB devices a usb_next asked to unplug are unplugged first, for a power off that pulling one makes).
 next_boot() {
     install -d -m 0700 /var/lib/vmlab-tests
     printf '%s\n' "$1" >/var/lib/vmlab-tests/next-boot.json

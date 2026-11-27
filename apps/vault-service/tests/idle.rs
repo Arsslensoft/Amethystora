@@ -138,8 +138,23 @@ fn what_fails_keeps_nothing_open() {
         assert_eq!(service.deadline().unwrap(), start, "{request}");
     }
     // What succeeded is use
-    assert_eq!(ask(&mut service, &peer, json!({"op": "list"}))["ok"], json!(true));
+    assert_eq!(ask(&mut service, &peer, json!({"op": "put", "kind": "k", "name": "n", "value": 1}))["ok"], json!(true));
     assert!(service.deadline().unwrap() > start);
+}
+
+/// J-4: a list reads no secret, so asking for it never keeps a vault from closing
+#[test]
+fn a_list_does_not_keep_a_vault_open() {
+    let Fixture { mut service, peer, _folder } = open_vault();
+    assert_eq!(ask(&mut service, &peer, json!({"op": "set-idle", "minutes": 1}))["ok"], json!(true));
+    let start = service.deadline().unwrap();
+    for kind in [json!({"op": "list"}), json!({"op": "auth-list"}), json!({"op": "codes-list"})] {
+        std::thread::sleep(Duration::from_millis(5));
+        assert_eq!(ask(&mut service, &peer, kind.clone())["ok"], json!(true), "{kind}");
+        assert_eq!(service.deadline().unwrap(), start, "{kind}");
+    }
+    service.tick(start);
+    assert!(!service.is_open(1000));
 }
 
 /// F9: a backup being brought in is held for one account at a time, and only while it keeps coming: each account with a session
@@ -159,4 +174,29 @@ fn a_backup_brought_in_is_held_for_one_account_and_not_for_long() {
     assert!(left <= Duration::from_secs(60), "{left:?}");
     service.tick(Instant::now() + Duration::from_secs(61));
     assert_eq!(ask(&mut service, &other, chunk(0))["ok"], json!(true));
+}
+
+/// J-6: chunks that keep coming do not hold the one place for ever, nor does starting again, and its account may not take it
+/// straight back
+#[test]
+fn a_backup_brought_in_holds_the_place_for_its_life_at_most() {
+    let Fixture { mut service, peer, _folder } = open_vault();
+    let other = Rc::new(Peer { uid: 1001, pid: 2, pidfd: None });
+    service.staged_life = Duration::from_millis(300);
+    let chunk = |offset: usize| json!({"op": "vault-restore-put", "offset": offset, "data": b64("part of a backup")});
+    assert_eq!(ask(&mut service, &peer, chunk(0))["ok"], json!(true));
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(ask(&mut service, &peer, chunk(16))["ok"], json!(true));
+    // Starting again keeps the life it began with
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(ask(&mut service, &peer, chunk(0))["ok"], json!(true));
+    assert_eq!(ask(&mut service, &other, chunk(0))["why"], json!("failed"));
+    std::thread::sleep(Duration::from_millis(150));
+    // Past its life: the next chunk finds nothing held, and the place is the other account's
+    assert_eq!(ask(&mut service, &peer, chunk(16))["why"], json!("bad-request"));
+    assert_eq!(ask(&mut service, &peer, chunk(0))["why"], json!("failed"));
+    assert_eq!(ask(&mut service, &other, chunk(0))["ok"], json!(true));
+    // The account that held it may try again once the other is done with it and its own wait is over
+    service.tick(Instant::now() + Duration::from_secs(61));
+    assert_eq!(ask(&mut service, &peer, chunk(0))["ok"], json!(true));
 }

@@ -109,7 +109,10 @@ echo "# the new account's shell: $(pgrep -a -u "${NEW}" gnome-shell | head -n 1 
 revealed() { (($(reveal_lines) >= 1)); }
 wait_for 30 revealed
 same "9 the reveal ran once at this login" "$(reveal_lines)" 1
-same "9 the reveal ends on the desktop, not in the overview GNOME starts in" "$(ev "Main.overview.visible")" false
+# ...unless GNOME's welcome dialog of a first login is over the overview, which then stays under it as GNOME has it
+# (a56eabfa: the overview hiding under the dialog took its keyboard)
+same "9 the reveal ends on the desktop, not in the overview GNOME starts in, but under a dialog" \
+    "$(ev "Main.overview.visible === Main.layoutManager.modalDialogGroup.get_children().some(d => d.visible && !!d.dialogLayout)")" true
 same "9 the top bar is whole" "$(ev 'Main.layoutManager.panelBox.opacity')" 255
 same "9 no sky is left in the shell's top group" \
     "$(ev "Main.layoutManager.uiGroup.get_children().filter(c => c.name === 'amethystoraRevealCover').length")" 0
@@ -121,8 +124,16 @@ same "9 no sky is left in the shell's top group" \
 # and no tip may show
 shows_welcome() { atspi gnome-shell has "Take Tour"; }
 welcome_gone() { ! atspi gnome-shell has "Take Tour"; }
+greeting_gone() { [[ "$(ev "${UI}.get('hello').state")" != showing ]]; }
 if wait_for 60 shows_welcome; then
     sleep 2
+    # Seen through the greeting's dim, the dialog stood behind the words and was taken for the thing to close
+    if ! greeting_gone; then
+        same "11 GNOME's welcome dialog is unseen under the greeting" "$(ev 'Main.layoutManager.modalDialogGroup.opacity')" 0
+        keys esc
+        wait_for 5 greeting_gone
+        same "11 it comes back as the greeting ends" "$(ev 'Main.layoutManager.modalDialogGroup.opacity')" 255
+    fi
     keys esc
     wait_for 10 welcome_gone || keys esc
     wait_for 20 welcome_gone || not_ok "GNOME's welcome dialog did not close with Escape"

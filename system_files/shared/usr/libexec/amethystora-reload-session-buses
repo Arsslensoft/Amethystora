@@ -4,10 +4,15 @@
 # tell: the apps it installed that start over D-Bus (Text Editor, Weather, Clocks...) then did nothing when
 # opened from the app grid of a session that was there before them, until its next login.
 
+# The login screen's greeter is an account GDM makes for the while (gdm-greeter, uid 60578 and up), which `id` may not
+# find from here: it opens no apps, so it is passed over, as any account with no group to be found is
+# AMETHYSTORA_RUN_USER is a stand-in for /run/user, for test-session-helpers.sh
+run="${AMETHYSTORA_RUN_USER:-/run/user}"
 for uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{ print $1 }'); do
-    [[ "${uid}" =~ ^[0-9]+$ && -S "/run/user/${uid}/bus" ]] || continue
-    timeout 10 setpriv --reuid="${uid}" --regid="$(id -g "${uid}")" --clear-groups \
-        env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+    [[ "${uid}" =~ ^[0-9]+$ && -S "${run}/${uid}/bus" ]] || continue
+    gid="$(id -g "${uid}" 2>/dev/null)" || continue
+    timeout 10 setpriv --reuid="${uid}" --regid="${gid}" --clear-groups \
+        env XDG_RUNTIME_DIR="${run}/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=${run}/${uid}/bus" \
         busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig >/dev/null 2>&1
 done
 exit 0

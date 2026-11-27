@@ -29,7 +29,10 @@ pub const UNPAIRED_LINE: usize = 64 * 1024;
 pub const CONTROL_LINE: usize = 16 * 1024 * 1024;
 
 pub const PAIR_WAIT_SECS: i64 = 30;
-pub const PAIR_FRESH_SECS: i64 = 1800;
+/// How far a pairing request's timestamp may be from our clock, either way: phones and computers set their clocks from the
+/// network, so what is left is a few seconds, and the timestamp is part of what two people compare, so that only the few
+/// values of a window this short can be chosen by whoever sits between them
+pub const PAIR_FRESH_SECS: i64 = 120;
 pub const PAIR_REQUESTS_PER_MINUTE: usize = 3;
 /// Prompts waiting for the person at once, over every device
 pub const PAIR_PROMPTS_AT_ONCE: usize = 3;
@@ -56,6 +59,9 @@ pub const UNPAIRED_DEVICES: usize = 8;
 /// Unpaired devices with a connection from one source (an IPv4 address, or an IPv6 /64), so that one neighbour cannot hold every slot.
 /// Beyond it, or beyond `UNPAIRED_DEVICES`, the oldest unpaired connection with no pairing waiting is closed for the new one.
 pub const UNPAIRED_PER_SOURCE: usize = 2;
+/// A device that has just connected and is not paired is not made room from for another source's, so that the person has this
+/// long to ask it to pair: when every slot is younger than this, the new connection is the one let go
+pub const UNPAIRED_GRACE: Duration = Duration::from_secs(60);
 
 pub const PAYLOAD_ACCEPT_WAIT: Duration = Duration::from_secs(60);
 pub const PAYLOAD_IDLE: Duration = Duration::from_secs(60);

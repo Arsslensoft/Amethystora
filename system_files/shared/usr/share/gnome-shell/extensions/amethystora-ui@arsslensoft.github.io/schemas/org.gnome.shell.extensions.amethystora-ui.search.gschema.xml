@@ -99,5 +99,10 @@
       <summary>Your photos, by what is in them</summary>
       <description>After "photo:" and a few words, the pictures of Pictures that look like what was described, found by a small model that reads each photo once on this computer while it is on mains power and left alone. What it works out is kept sealed in the Vault. `ame desktop search photos` also starts and stops that reading. Off as the image ships.</description>
     </key>
+    <key name="game" type="b">
+      <default>true</default>
+      <summary>Will a game run?</summary>
+      <description>After "game:" and a game's name, what a community list of games and their anti-cheat says of it on Linux, from a copy in the image: nothing is looked up on the network. It says what the list says, with the day its entry changed, and never that a game will run. `ame desktop search game` turns it off.</description>
+    </key>
   </schema>
 </schemalist>

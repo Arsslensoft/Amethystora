@@ -38,6 +38,15 @@ aes = "0.9"
 hmac = "0.13"
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+# Kemlock Server's formats (src/kemlock, crypto.md): ML-KEM-1024, ML-DSA-65, X25519, Ed25519, SHA-3, HKDF and OPAQUE
+ml-kem.workspace = true
+ml-dsa.workspace = true
+sha3.workspace = true
+hkdf.workspace = true
+x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+opaque-ke.workspace = true
+sha2-010 = { package = "sha2", version = "0.10", default-features = false }
 
 [features]
 # Lets a test reach a server on a test network over plain http (plans/vault-sync/IMPLEMENTERS.md 3). Nothing shipped has it.

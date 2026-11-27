@@ -141,6 +141,9 @@ or **Guest login** on Security's **Settings** page, under Logins. It says what i
 - Guest is a standard account: it cannot install apps for the machine or change its settings. Parental controls can be
   set on it like on any account.
 - Only the login screen lets Guest in without a password. The text consoles, SSH, `sudo` and `su` refuse it.
+- When a guest logs out, and again before the next one logs in if the computer lost power meanwhile, what Guest left
+  behind is removed: files in the shared temporary folders, its name and picture on the login screen, its print jobs,
+  the Wi-Fi networks it saved for itself and the Bluetooth devices it paired.
 - What a guest does online is done from your network and your address.
 - Turned off, a guest still logged in is logged out, and the account is deleted.
 - Security's report lists it while it is on, and warns if part of it is missing.

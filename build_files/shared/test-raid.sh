@@ -370,6 +370,119 @@ if [[ ${EUID} -eq 0 ]]; then
     fi
 fi
 
+# What a disk's maker wrote reaches the terminal cleaned: no escape sequence from a model name
+cp "${T}/lsblk.json" "${T}/lsblk.plain"
+jq -c '(.blockdevices[] | select(.name == "sdb") | .model) = "Evil\u001b]52;c;eA==\u0007 Disk"' "${T}/lsblk.plain" >"${T}/lsblk.json"
+shown="$("${RAID}" status)"
+cp "${T}/lsblk.plain" "${T}/lsblk.json"
+grep -q "Evil" <<<"${shown}"
+[[ "${shown}" != *$'\x1b'* && "${shown}" != *$'\a'* ]] || { echo "the status holds a control character"; false; }
+
+# Which disks are a pool's is what root wrote: the UUIDs on the pool's /etc/crypttab lines, and a mapping or
+# partition made for it, never a partition label alone. The functions are the helper's own; sudo is left out.
+fn() {  # NAME: a function of the helper, a one-line one or up to its closing brace
+    awk -v f="$1" 'index($0, f "() {") == 1 { print; if ($0 ~ /\}[[:space:]]*$/) next; p = 1; next }
+        p { print } p && /^}/ { p = 0 }' "${RAID}"
+}
+(
+    PB="${T}/pb"
+    mkdir -p "${PB}" "${AMETHYSTORA_RAID_ROOT}/run"
+    EVENTS="${T}/events" FAIL="${T}/addfail"
+    export EVENTS FAIL
+    cat >"${PB}/lsblk" <<'EOF'
+#!/usr/bin/bash
+[[ " $* " == *" -J "* ]] && cat "${STAND_IN}/lsblk.pool"
+EOF
+    cat >"${PB}/cryptsetup" <<'EOF'
+#!/usr/bin/bash
+cmd="$1"
+shift
+case "${cmd}" in
+    luksDump) echo '{"keyslots": {"0": {}, "1": {}}}' ;;
+    luksAddKey)
+        args=("$@")
+        slot=""
+        for ((i = 0; i < ${#args[@]}; i++)); do [[ "${args[i]}" == --new-key-slot ]] && slot="${args[i + 1]}"; done
+        cat >/dev/null
+        grep -qxF "${args[-2]}" "${FAIL}" 2>/dev/null && exit 1
+        echo "add ${args[-2]} ${slot}" >>"${EVENTS}"
+        ;;
+    luksKillSlot) echo "kill $2 $3" >>"${EVENTS}" ;;
+    *) echo "cryptsetup ${cmd} $*" >>"${EVENTS}" ;;
+esac
+EOF
+    cat >"${PB}/gum" <<'EOF'
+#!/usr/bin/bash
+case "$1" in
+    input) ;;
+    style) echo "shown" >>"${EVENTS}"; echo "$*" >"${STAND_IN}/gum.args"; cat >"${STAND_IN}/gum.in" ;;
+esac
+EOF
+    chmod +x "${PB}"/*
+    PATH="${PB}:${PATH}"
+    as_root() { "$@"; }
+    R="${AMETHYSTORA_RAID_ROOT}"
+    CRYPTTAB="${R}/etc/crypttab"
+    KEYS="${R}/etc/cryptsetup-keys.d"
+    LUKS_PBKDF=(--pbkdf pbkdf2 --pbkdf-force-iterations 1000)
+    for f in box root_tmp crypt_lines_of pool_luks_parts pool_btrfs_devices new_recovery_key normalise_key add_recovery spare_slot recovery_for; do
+        eval "$(fn "${f}")"
+    done
+
+    # data has two disks in its crypttab lines; a stranger's LUKS partition is labelled as the pool's ninth
+    cat >"${CRYPTTAB}" <<EOF
+raid-data-1 UUID=aaaa0001 /etc/cryptsetup-keys.d/raid-data.key luks,discard,nofail
+raid-data-2 UUID=aaaa0002 /etc/cryptsetup-keys.d/raid-data.key luks,discard,nofail
+EOF
+    cat >"${T}/lsblk.pool" <<'EOF'
+{"blockdevices": [
+ {"path": "/dev/sdm1", "fstype": "crypto_LUKS", "uuid": "aaaa0001", "partlabel": "raid-data-1"},
+ {"path": "/dev/sdq1", "fstype": "crypto_LUKS", "uuid": "aaaa0002", "partlabel": "raid-data-2"},
+ {"path": "/dev/sdx1", "fstype": "crypto_LUKS", "uuid": "ffff0009", "partlabel": "raid-data-9"},
+ {"path": "/dev/sdn1", "fstype": "crypto_LUKS", "uuid": "aaaa0003", "partlabel": "raid-data-3"}]}
+EOF
+    [[ "$(pool_luks_parts data /dev/sdn1 | paste -sd,)" == /dev/sdm1,/dev/sdq1 ]] || { echo "pool_luks_parts: the pool's own disks only"; false; }
+    [[ "$(pool_luks_parts data /dev/sdn1 /dev/sdq1)" == /dev/sdm1 ]] || { echo "pool_luks_parts: the disk leaving is left out"; false; }
+
+    # A new recovery key: in a spare slot of every disk, and shown, before any old slot goes; the key is never on gum's command line
+    : >"${EVENTS}"
+    recovery_for data /dev/sdn1 </dev/null >/dev/null 2>&1
+    mapfile -t events <"${EVENTS}"
+    [[ "${events[*]}" == "add /dev/sdm1 2 add /dev/sdq1 2 add /dev/sdn1 1 shown kill /dev/sdm1 1 add /dev/sdm1 1 kill /dev/sdm1 2 kill /dev/sdq1 1 add /dev/sdq1 1 kill /dev/sdq1 2" ]] ||
+        { echo "recovery_for's steps: ${events[*]}"; false; }
+    grep -qE '^ +[a-z]{8}(-[a-z]{8}){7}$' "${STAND_IN}/gum.in" || { echo "the key was not handed to gum on standard input"; false; }
+    grep -qE '[a-z]{8}-[a-z]{8}' "${STAND_IN}/gum.args" && { echo "the recovery key is on gum's command line"; false; }
+    # A disk that does not take the new key stops it with every old key still in place
+    echo /dev/sdq1 >"${FAIL}"
+    : >"${EVENTS}"
+    ! recovery_for data /dev/sdn1 </dev/null >/dev/null 2>&1
+    ! grep -q '^kill\|^shown' "${EVENTS}" || { echo "an old key went, or a key was shown, before every disk had the new one"; false; }
+    rm -f "${FAIL}"
+
+    # Unencrypted, a pool is opened by a partition made for it, not by any filesystem with its UUID; encrypted, by its mappings
+    : >"${CRYPTTAB}"
+    cat >"${T}/lsblk.pool" <<'EOF'
+{"blockdevices": [
+ {"path": "/dev/sdz1", "fstype": "btrfs", "uuid": "bbbb0001", "partlabel": null},
+ {"path": "/dev/sdn1", "fstype": "btrfs", "uuid": "bbbb0001", "partlabel": "raid-joined-1"}]}
+EOF
+    [[ "$(pool_btrfs_devices joined bbbb0001)" == /dev/sdn1 ]] || { echo "pool_btrfs_devices: a stranger's btrfs was taken"; false; }
+    echo 'raid-data-1 UUID=aaaa0001 none luks' >"${CRYPTTAB}"
+    cat >"${T}/lsblk.pool" <<'EOF'
+{"blockdevices": [
+ {"path": "/dev/mapper/other", "fstype": "btrfs", "uuid": "bbbb0002", "partlabel": null},
+ {"path": "/dev/mapper/raid-data-1", "fstype": "btrfs", "uuid": "bbbb0002", "partlabel": null}]}
+EOF
+    [[ "$(pool_btrfs_devices data bbbb0002)" == /dev/mapper/raid-data-1 ]] || { echo "pool_btrfs_devices: an encrypted pool's own mapping"; false; }
+
+    # What root mounts on, copies through and writes into is made by root, where only root can write
+    dir="$(root_tmp)"
+    [[ -d "${dir}" && "${dir}" == "${R}/run/"* ]] || { echo "root_tmp made ${dir}"; false; }
+    rmdir "${dir}"
+)
+# ...and no folder of that kind is made as the account, which the helper's own steps would mount on or copy through
+[[ -z "$(grep -n 'mktemp' "${RAID}" | grep -vE 'as_root mktemp -d -p |mktemp -d -p /run')" ]] || { echo "a folder is made as the account"; false; }
+
 # Nothing above touched a disk, and without a terminal create refuses before it asks anything
 [[ ! -s "${LOG}" ]]
 "${RAID}" create </dev/null >/dev/null 2>&1 && false

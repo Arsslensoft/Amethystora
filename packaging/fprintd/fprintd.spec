@@ -7,12 +7,13 @@
 # fprintd release every week (.github/renovate.json5).
 #
 # Patches 1 to 6 are upstream's, from fprintd's master after 1.94.5: the signals go to the client that
-# claimed the reader alone, the VerifyFingerMatched signal, and the test mock's support for it. Patch 7 is
-# Amethystora's: pam_fprintd's duress=allow|deny options (pam_fprintd(8)). The patches are GPL-2.0-or-later,
+# claimed the reader alone, the VerifyFingerMatched signal, and the test mock's support for it. Patches 7 and
+# 8 are Amethystora's: pam_fprintd's duress=allow|deny options (pam_fprintd(8)), and its taking fprintd's
+# signals from fprintd's own connection only. The patches are GPL-2.0-or-later,
 # as fprintd is. README.md says how to make them again.
 Name:		fprintd
 Version:	1.94.5
-Release:	6.1.amethystora%{?dist}
+Release:	6.2.amethystora%{?dist}
 Summary:	D-Bus service for Fingerprint reader access
 
 # man page is GFDL-1.1-or-later
@@ -27,6 +28,7 @@ Patch:		0004-tests-dbusmock-fprintd-Cleanup-the-emission-code.patch
 Patch:		0005-tests-dbusmock-fprintd-Add-VerifyFingerMatched-signa.patch
 Patch:		0006-tests-dbusmock-fprintd-Report-an-enrolled-finger-on-.patch
 Patch:		0007-pam-Start-Amethystora-s-duress-action-on-the-duress-.patch
+Patch:		0008-pam-Take-fprintd-s-signals-from-its-own-connection-o.patch
 
 BuildRequires:	meson
 BuildRequires:	gcc
@@ -116,6 +118,9 @@ fi
 %{_datadir}/dbus-1/interfaces/net.reactivated.Fprint.Manager.xml
 
 %changelog
+* Mon Nov 16 2026 Arsslen Idadi <arsslens021@gmail.com> - 1.94.5-6.2.amethystora
+- pam_fprintd: Take fprintd's signals from its own connection only
+
 * Sun Oct 11 2026 Arsslen Idadi <arsslens021@gmail.com> - 1.94.5-6.1.amethystora
 - Send the device's signals to the claiming client alone (upstream 6396302)
 - Add the VerifyFingerMatched signal (upstream 38f1104)

@@ -1,0 +1,12 @@
+# gitleaks, run by the Checks workflow's Security job on a pull request's own commits: its own rules, but for the
+# made-up secrets the tests are full of. A made-up one anywhere else is marked on its line with `gitleaks:allow`.
+# GitHub's secret scanning and push protection look at every push besides.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Made-up secrets in tests"
+paths = [
+    '''(^|/)tests/''',
+    '''^build_files/shared/test-[^/]+$''',
+]

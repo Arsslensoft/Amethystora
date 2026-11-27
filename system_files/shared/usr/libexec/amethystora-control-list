@@ -395,10 +395,14 @@ read_in_background sandbox /usr/libexec/amethystora-agent-tools sandbox list --j
 read_in_background policy amethystora-agent policy --json
 read_in_background plugins /usr/libexec/amethystora-plugins list --json
 read_in_background webapps amethystora-webapp list --json
+read_in_background kits /usr/libexec/amethystora-kit list --json
 read_in_background image /usr/bin/amethystora-rollback-helper --choices
 read_in_background bling amethystora-bling status
 read_in_background backgrounds amethystora-theme bg list
 read_in_background raid /usr/libexec/amethystora-raid status --json
+# Move in from Windows: whether the partition table shows something that may be Windows (it mounts nothing and asks for no password)
+read_in_background move-in /usr/libexec/amethystora-move-in find --offer
+read_in_background lab-devices /usr/libexec/amethystora-lab-devices status
 read_in_background start-times /usr/libexec/amethystora-start-times status --fields
 # Devices kept from waking the computer: only a machine that kept one has the rules file, and only that one asks the helper
 [[ -s /etc/udev/rules.d/90-amethystora-wake.rules ]] && read_in_background wake-devices /usr/libexec/amethystora-sleep-report list --names
@@ -1722,6 +1726,8 @@ search_item remembered "${ gettext "Files by what you remember"; }" \
     "${ gettext "“pdf from last week” or “big videos” finds files by their kind, date and size, from GNOME's own file index."; }"
 search_item plugins "${ gettext "Plugins"; }" \
     "${ gettext "What each plugin that asks for search last printed, when you type its prefix. What you type never goes to a plugin."; }"
+search_item game "${ gettext "Will it run?"; }" \
+    "${ gettext "Type game: and a game's name to see what a community list says of its anti-cheat on Linux, from a copy in this system."; }"
 # Offered and off (plans/ui-ideas/spec-later.md): bookmarks, Notes while unlocked, and files by meaning
 search_item bookmarks "${ gettext "Bookmarks"; }" \
     "${ gettext "Firefox's bookmarks, never its history, read from a copy of its bookmarks file. Firefox is left as it is."; }"
@@ -2894,6 +2900,14 @@ if [[ "${GAMES}" == on ]]; then
         "${ gettext "Heroic, for Epic, GOG and Amazon, and Lutris, for games from anywhere else."; }" "" games#games
 fi
 
+# While a game is registered with GameMode: banners wait, performance on mains, the account's timed backup waits (off by default)
+[[ "${ ended power; }" == 0 ]] || REASON="${ gettext "Amethystora UI is not installed."; }"
+switch_choices false ame desktop while-playing
+USAGE="ame desktop while-playing on|off"
+item apps while-playing switch "${ gettext "While you play"; }" \
+    "${ gettext "While a game is registered with GameMode, banners wait, the power mode is performance when you are plugged in, and your timed backup and the containers' upgrade wait, six hours at most. Everything goes back when the game ends."; }" \
+    "${ power_onoff while-playing; }" games#while-you-play
+
 # waydroid-container.service is enabled when Android is set up: the recipe's own test reads root's files
 if [[ "${ said waydroid-enabled; }" == enabled ]]; then
     ANDROID=on
@@ -2956,6 +2970,30 @@ EXTRA="$(jq -nc --argjson list "${WEBAPPS}" '{webapps: $list, commands: {
 USAGE="ame apps webapps install"
 item apps webapps webapps "${ gettext "Web apps"; }" \
     "${ gettext "Sites in a window of their own, with a launcher in the app grid."; }" "" web-apps
+
+# Kits: the apps for a line of work, a row each. Add is `ame apps kit add` in a terminal, which shows what it installs and asks
+# first; Show says why each app is in it. The kits' words are theirs: amethystora-kit gives each kit's name and description in
+# the session's language too (title, summary), in the background, from the catalogs check-translations.js fills from the about files.
+if [[ "${ ended kits; }" == 0 ]]; then
+    EXTRA="$(jq -c --arg inside "${ gettext "In it:"; }" --arg here "${ gettext "Installed here:"; }" \
+        --arg add "${ gettext "Add…"; }" --arg show "${ gettext "Show…"; }" '
+        if type == "array" and length > 0 then {rows: [.[] | {
+            id: .id,
+            title: (.title // .name),
+            text: ((.summary // .description) + " " + $inside + " " + ([.apps[].name] | join(", ")) + "."
+                + (if any(.apps[]; .installed) then " " + $here + " " + ([.apps[] | select(.installed) | .name] | join(", ")) + "." else "" end)),
+            state: "plain",
+            actions: [{id: "show", title: $show, terminal: true, command: ["ame", "apps", "kit", "show", .id]},
+                      {id: "add", title: $add, terminal: true, command: ["ame", "apps", "kit", "add", .id]}]}]} else empty end' <<<"${ said kits; }" 2>/dev/null)" || EXTRA=""
+fi
+if [[ -n "${EXTRA}" ]]; then
+    GROUP="${ gettext "Kits"; }"
+    USAGE="ame apps kit list|show KIT|add KIT|remove KIT"
+    item apps kits rows "${ gettext "Apps for a line of work"; }" \
+        "${ gettext "Each kit is the apps people in one line of work use, from Flathub. Adding one shows the apps first, asks, and changes nothing else."; }" \
+        "" kits
+    GROUP=""
+fi
 
 # The apps hidden, renamed or given another icon in the app grid (its menu, or `ame desktop app`), each with the way
 # back; shown only when there is one. Nothing but the app grid's own settings: no launcher of the account's own.
@@ -3623,6 +3661,15 @@ USAGE="ame system bring-over"
 item system bring-over action "${ gettext "Bring everything from your old computer"; }" \
     "${ gettext "Your folders and bookmarks from the disk of another computer you plugged in. The disk is mounted read-only and nothing is written to it (an XFS or btrfs disk that was not shut down cleanly asks first); an encrypted one asks for its recovery key, which is not kept; no password is read."; }" \
     "" moving#bring-everything-from-your-old-computer
+# Move in from Windows: the first look offers it too, only while the partition table shows a disk that may hold Windows
+COMMAND=(ame system move-in)
+TERMINAL=true
+BUTTON="${ gettext "Move in…"; }"
+[[ "${ ended move-in; }" == 0 ]] || REASON="${ gettext "No Windows disk was found."; }"
+USAGE="ame system move-in"
+item system move-in action "${ gettext "Move in from Windows"; }" \
+    "${ gettext "The Documents, Pictures, Music, Videos and Desktop of a Windows account, from its disk. The disk is only read, never changed; a BitLocker disk asks for its recovery key, which is not kept; a file you already have is never replaced."; }" \
+    "" move-in
 GROUP=""
 
 # The pools of disks, as `amethystora-raid status --json` has them, and the system's disks when it spans
@@ -3816,6 +3863,16 @@ item system disk-warning switch "${ gettext "A warning before the disk fails"; }
     "${ gettext "Reads the health of the system's disk each hour, leaving it asleep if it sleeps, and says once if it begins to fail."; }" \
     "${DISK_WARNING}" disks#when-a-disk-may-be-failing
 GROUP=""
+
+# Seat access to debug probes, USB serial adapters and logic analysers: its rules file in /etc is the switch, which the helper
+# copies only after saying what it gives (a terminal)
+# on only for the image's own file: a file of that name that is not is drift, which the helper calls changed
+if [[ "${ said lab-devices; }" == on ]]; then LAB_DEVICES=on; else LAB_DEVICES=off; fi
+switch_choices true ame system lab-devices
+USAGE="ame system lab-devices on|off"
+item system lab-devices switch "${ gettext "Lab devices"; }" \
+    "${ gettext "Debug probes, USB serial adapters and logic analysers given to you, the person at the machine, so that flashing and debugging tools open them without a password. They are root's as the image ships."; }" \
+    "${LAB_DEVICES}" devices#lab-devices
 
 # What the notice after a night's battery kept from waking the computer, with the way back here: that notice is said once,
 # and a dismissed one is gone. The helper's names are plain text; a device with no name shows its ID

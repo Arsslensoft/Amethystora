@@ -65,6 +65,14 @@ done
 [[ "$("${CONFIG}" TRIAGE)" == on && "$("${CONFIG}" --profile)" == light ]] || fail "a profile touched what sends away"
 "${CONFIG}" profile default
 [[ "$("${CONFIG}" TRIAGE)" == off ]] || fail "back to the defaults left what sends away on"
+# Pull the key is a lock of the person's own, like walk-away lock: no profile but off and default touches it
+"${CONFIG}" set PULL_KEY lock
+for profile in light balanced thorough; do
+    "${CONFIG}" profile "${profile}"
+    [[ "$("${CONFIG}" PULL_KEY)" == lock && "$("${CONFIG}" --profile)" == "${profile}" ]] || fail "profile ${profile} touched pull the key"
+done
+"${CONFIG}" profile default
+[[ "$("${CONFIG}" PULL_KEY)" == off ]] || fail "back to the defaults left pull the key on"
 # Every setting is in the file, said or as a comment, where somebody editing it by hand finds it
 for key in $("${CONFIG}" --list --json | jq -r '.settings[].key'); do
     grep -qE "^#?${key}=" /etc/amethystora/security.conf || fail "${key} is not in security.conf"
@@ -249,6 +257,17 @@ printf 'kernel strict\ntime\nkernel-args init_on_free=1\npackage-cooldown strict
 "${HARDENING}" is-on time || fail "a stricter setting turned on"
 "${HARDENING}" is-on kernel-args init_on_free=1 || fail "an extra kernel argument turned on"
 "${HARDENING}" is-on package-cooldown || fail "a level counts as on"
+# Verified Flathub apps only is on while the Flathub remote carries the subset as well, not on the switch's word alone
+FLATHUB="${AMETHYSTORA_HARDENING_ROOT}/var/lib/flatpak/repo/config"
+mkdir -p "${FLATHUB%/*}"
+printf 'flathub-verified\n' >>"${AMETHYSTORA_HARDENING_ROOT}/etc/amethystora/hardening-on"
+"${HARDENING}" is-on flathub-verified && fail "flathub-verified is on with no Flathub remote saying so"
+printf '[remote "flathub"]\nurl=https://example.org\nxa.subset=verified\nxa.subset-is-set=true\n' >"${FLATHUB}"
+"${HARDENING}" is-on flathub-verified || fail "flathub-verified is off with the remote's subset set"
+printf '[remote "flathub"]\nurl=https://example.org\nxa.subset=\nxa.subset-is-set=true\n[remote "other"]\nxa.subset=verified\n' >"${FLATHUB}"
+"${HARDENING}" is-on flathub-verified && fail "flathub-verified is on after the remote's subset was taken away"
+rm "${FLATHUB}"
+sed -i '/^flathub-verified$/d' "${AMETHYSTORA_HARDENING_ROOT}/etc/amethystora/hardening-on"
 MANAGED="$("${HARDENING}" managed)"
 grep -qxP 'sysctl.d/61-amethystora-strict.conf\tfile' <<<"${MANAGED}" || fail "managed: the strict kernel settings"
 grep -qxP 'chrony.conf\tfile' <<<"${MANAGED}" || fail "managed: the time servers"

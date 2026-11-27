@@ -30,6 +30,8 @@ use crate::peer::Peer;
 const DRAFT_PATIENCE: Duration = Duration::from_secs(15 * 60);
 /// A backup brought in or read out goes chunk after chunk, with nothing asked in between: what waits longer than this was left
 pub(crate) const STAGED_PATIENCE: Duration = Duration::from_secs(60);
+/// Whatever its chunks, a backup brought in holds the one place for this long at most, and its account may not start another for as long again
+pub(crate) const STAGED_LIFE: Duration = Duration::from_secs(10 * 60);
 /// Room left in the account's quota for the index and the meta, which a write takes again
 const SPARE: u64 = 64 * 1024;
 /// The purpose whose key is also on the chip, released while the vault is closed
@@ -142,6 +144,10 @@ pub struct Service {
     drafts: HashMap<u32, (Draft, Instant)>,
     /// A backup being brought in, a chunk at a time, until a restore uses it or it is not wanted (`plugs/moving.rs`)
     pub(crate) staged: HashMap<u32, (Vec<u8>, Instant)>,
+    /// When each account's backup being brought in began, kept after its life ran out for as long again (a restart of the same one keeps it)
+    pub(crate) staging: HashMap<u32, Instant>,
+    /// How long one holds the place: a field so that a test need not wait
+    pub staged_life: Duration,
     /// A backup being read out, a chunk at a time: made once at its first chunk and let go after its last (`plugs/moving.rs`)
     pub(crate) made: HashMap<u32, (Vec<u8>, Instant)>,
     /// Counts closings, each account's and everyone's, so that an opening that took its time does not undo one that came
@@ -161,7 +167,7 @@ fn no_secret<T>(_: T) -> Next {
 impl Service {
     pub fn new(config: Config, chip: Arc<dyn Chip>, outside: Box<dyn Outside>) -> Service {
         vaults::sweep_forgotten(&config.state);
-        Service { config, chip, outside, sessions: HashMap::new(), drafts: HashMap::new(), staged: HashMap::new(), made: HashMap::new(), closes: HashMap::new(), closes_of_all: 0, closed: Vec::new(), sync: crate::sync::Hub::default() }
+        Service { config, chip, outside, sessions: HashMap::new(), drafts: HashMap::new(), staged: HashMap::new(), staging: HashMap::new(), staged_life: STAGED_LIFE, made: HashMap::new(), closes: HashMap::new(), closes_of_all: 0, closed: Vec::new(), sync: crate::sync::Hub::default() }
     }
 
     /// Whether the account is served at all: it has a login session, or it has none and lingers. The second is served the
@@ -202,7 +208,8 @@ impl Service {
         let idle = self.sessions.values().map(|session| session.last_use + session.idle);
         let drafts = self.drafts.values().map(|(_, since)| *since + DRAFT_PATIENCE);
         let staged = self.staged.values().chain(self.made.values()).map(|(_, since)| *since + STAGED_PATIENCE);
-        idle.chain(drafts).chain(staged).chain(self.sync.deadline()).min()
+        let lives = self.staged.keys().filter_map(|uid| self.staging.get(uid)).map(|began| *began + self.staged_life);
+        idle.chain(drafts).chain(staged).chain(lives).chain(self.sync.deadline()).min()
     }
 
     pub fn tick(&mut self, now: Instant) {
@@ -212,8 +219,17 @@ impl Service {
             self.close(uid);
         }
         self.drafts.retain(|_, (_, since)| *since + DRAFT_PATIENCE > now);
-        self.staged.retain(|_, (_, since)| *since + STAGED_PATIENCE > now);
+        self.expire_staged(now);
         self.made.retain(|_, (_, since)| *since + STAGED_PATIENCE > now);
+    }
+
+    /// Lets go of a backup brought in that stopped coming, or that has held the place for its whole life: the second is
+    /// remembered for as long again, so that the same account cannot take the place straight back
+    pub(crate) fn expire_staged(&mut self, now: Instant) {
+        let (staging, life) = (&self.staging, self.staged_life);
+        self.staged.retain(|uid, (_, since)| *since + STAGED_PATIENCE > now && staging.get(uid).is_none_or(|began| *began + life > now));
+        let staged = &self.staged;
+        self.staging.retain(|uid, began| *began + life * 2 > now && (staged.contains_key(uid) || *began + life <= now));
     }
 
     /// Closes what this account has open: the keys are wiped as they drop
@@ -223,6 +239,7 @@ impl Service {
         self.sessions.remove(&uid);
         self.drafts.remove(&uid);
         self.staged.remove(&uid);
+        self.staging.remove(&uid);
         self.sync.closed(uid);
         if self.sessions.is_empty() {
             self.outside.unwatch();
@@ -235,6 +252,7 @@ impl Service {
         self.sessions.clear();
         self.drafts.clear();
         self.staged.clear();
+        self.staging.clear();
         self.sync.closed_all();
         self.outside.unwatch();
     }
@@ -1063,12 +1081,30 @@ impl Service {
         Ok(done)
     }
 
+    /// Whether a backup-codes item had a code marked used since the person last answered a question for its next one: the next code
+    /// then asks, whatever the item's setting, so that reading one code at a time never adds up to reading them all on one yes
+    pub(crate) fn stepped(&self, uid: u32, vault: &str, id: &str) -> bool {
+        self.sessions.get(&uid).is_some_and(|session| session.approved.contains_key(&format!("{vault}/backup-codes.{id}#stepped")))
+    }
+
+    pub(crate) fn set_stepped(&mut self, uid: u32, vault: &str, id: &str, on: bool) {
+        if let Some(session) = self.sessions.get_mut(&uid) {
+            let key = format!("{vault}/backup-codes.{id}#stepped");
+            if on {
+                session.approved.insert(key, None);
+            } else {
+                session.approved.remove(&key);
+            }
+        }
+    }
+
     /// An approval was for that item: one taken away is not to be remembered for a new one by the same name
     pub(crate) fn forget_approved(&mut self, uid: u32, vault: &str, kind: &str, id: &str) {
         if let Some(session) = self.sessions.get_mut(&uid) {
             session.approved.remove(&format!("{vault}/{kind}.{id}"));
             // And the yes with a window of its own that `with_window` keeps apart
             session.approved.remove(&format!("{vault}/{kind}.{id}#window"));
+            session.approved.remove(&format!("{vault}/{kind}.{id}#stepped"));
         }
     }
 
@@ -1239,7 +1275,8 @@ impl Service {
         }
     }
 
-    /// Reading the list of names needs an open vault and no approval
+    /// Reading the list of names needs an open vault and no approval, and is not a use: it reads no secret, so asking for it never
+    /// keeps a vault from closing
     pub(crate) fn list(&mut self, uid: u32, kind: Option<&str>) -> Next {
         let Some(session) = self.sessions.get(&uid) else { return self.closed_or_not_set_up(uid) };
         let mut items = Vec::new();
@@ -1248,7 +1285,6 @@ impl Service {
                 items.push(json!({"vault": store.id(), "kind": entry.kind, "id": entry.id, "name": entry.name, "meta": entry.meta, "approval": entry.approval.name(), "changed": entry.changed}));
             }
         }
-        self.touch(uid);
         Next::Answer(json!({"ok": true, "items": items}))
     }
 

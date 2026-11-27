@@ -1,0 +1,28 @@
+# Amethystora: what a keyboard types stays root's, whichever maker built it. Rule files that come with the base image
+# (Solaar's 42-logitech-unify-permissions.rules, OpenRGB's 60-openrgb.rules) and the game controller files
+# (71-*-gdu.rules) give the user at the seat (uaccess) every node of a device by its vendor and product, including the
+# interfaces and nodes keys are typed on, and 73-seat-late.rules then turns the tag into a grant for the user and for
+# every Flatpak that may reach /dev. Their configuration interfaces, which only a maker's own app talks to, keep it.
+#
+# This file sorts after every file that adds the tag and before 73-seat-late.rules, and only ever takes a grant away.
+# 71-amethystora-keyboard-interfaces.rules does the same for ZSA, Wooting and the V-USB/Teensy keyboards, only a
+# little earlier. Security keys (ID_SECURITY_TOKEN, the security-device tag) are left as they are.
+ACTION=="remove", GOTO="amethystora_keyboards_end"
+
+# hidraw: the helper reads the node's report descriptor, once, and says whether the interface declares a keyboard or
+# keypad. A descriptor it cannot read counts as one.
+SUBSYSTEM=="hidraw", TAG=="uaccess", ENV{AMETHYSTORA_HID_KEYBOARD}=="", ENV{ID_SECURITY_TOKEN}!="1", TAG!="security-device", IMPORT{program}="/usr/bin/python3 -I /usr/libexec/amethystora-hid-vendor-only %S%p"
+SUBSYSTEM=="hidraw", ENV{AMETHYSTORA_HID_KEYBOARD}=="1", ENV{AMETHYSTORA_HID_VENDOR_ONLY}!="1", ENV{ID_SECURITY_TOKEN}!="1", TAG!="security-device", TAG-="uaccess", MODE="0600"
+
+# input: systemd gives the user at the seat joysticks and remote controls (70-uaccess.rules), and the controller files
+# a game controller's touchpad and motion sensors. A keyboard's event node never has it, and neither does any other
+# node that carries keys, unless it is a joystick or a remote control.
+SUBSYSTEM=="input", ENV{ID_INPUT_KEYBOARD}=="?*", TAG-="uaccess"
+SUBSYSTEM=="input", ENV{ID_INPUT_KEY}=="?*", ENV{ID_INPUT_JOYSTICK}!="?*", ENV{ID_REMOTE_CONTROL}!="1", TAG-="uaccess"
+
+# USB device nodes: with the node a program can detach the driver and read the keyboard's endpoint. A device that holds
+# a boot keyboard and nothing but HID interfaces loses it; the bootloaders 50-zsa.rules gives on purpose have none.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", TAG=="uaccess", ENV{ID_USB_INTERFACES}=="*:030101:*", ENV{ID_SECURITY_TOKEN}!="1", TAG!="security-device", IMPORT{program}="/usr/bin/python3 -I /usr/libexec/amethystora-hid-vendor-only usb %E{ID_USB_INTERFACES}"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{AMETHYSTORA_USB_KEYBOARD}=="1", TAG-="uaccess"
+
+LABEL="amethystora_keyboards_end"

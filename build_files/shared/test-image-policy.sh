@@ -84,8 +84,12 @@ printf 'http=proxy.acme.example:3128\nhttps=[fd00::1]:3129\nignore=localhost,*.a
 export GNUPGHOME="${T}/gnupg"
 mkdir -m 0700 "${GNUPGHOME}"
 gpg --batch --passphrase '' --quick-generate-key "Acme apps <apps@acme.example>" ed25519 sign never 2>/dev/null
-KEY="$(gpg --export apps@acme.example | base64 -w0)"
 FPR="$(gpg --with-colons --fingerprint apps@acme.example | awk -F: '$1 == "fpr" { print $10; exit }')"
+# A subkey is part of the pinned key, and a second key in the blob is not
+gpg --batch --passphrase '' --quick-add-key "${FPR}" cv25519 encr never 2>/dev/null
+KEY="$(gpg --export apps@acme.example | base64 -w0)"
+gpg --batch --passphrase '' --quick-generate-key "Other <other@acme.example>" ed25519 sign never 2>/dev/null
+TWO_KEYS="$(gpg --export apps@acme.example other@acme.example | base64 -w0)"
 remote() { printf '[Flatpak Repo]\nTitle=Acme apps\nUrl=%s\nGPGKey=%s\n' "$1" "${KEY}" >"${DIR}/flatpak-remotes/acme.flatpakrepo"; }
 remote https://flatpak.acme.example/repo/
 echo "${FPR}" >"${DIR}/flatpak-remotes/acme.fingerprint"
@@ -183,9 +187,14 @@ network; echo "servers=10.0.0.53" >"${DIR}/dns"; refused "a DNS server without t
 network; echo "servers=10.0.0.53#dns.acme.example" >"${DIR}/dns"; refused "DNS outside a build"
 network; echo "0000000000000000000000000000000000000000" >"${DIR}/flatpak-remotes/acme.fingerprint"; refused "a remote whose key is not the one pinned"
 network; rm "${DIR}/flatpak-remotes/acme.fingerprint"; refused "a remote without a fingerprint"
+network; KEY="${TWO_KEYS}" remote https://flatpak.acme.example/repo/; refused "a remote whose key file holds a second key"
+network; printf 'http=proxy.acme.example:3128\nignore=a.example b.example\n' >"${DIR}/proxy"; refused "an ignore list with a space in it"
 network; remote http://flatpak.acme.example/repo/; refused "a remote over http"
 network; remote https://flatpak.acme.example/repo/; echo "Filter=/etc/x" >>"${DIR}/flatpak-remotes/acme.flatpakrepo"; refused "a remote with a key Flatpak would read a file for"
 network; cp "${DIR}/flatpak-remotes/acme.flatpakrepo" "${DIR}/flatpak-remotes/flathub.flatpakrepo"; refused "a remote standing in for Flathub"
+network; vpn "csd_wrapper=wrapper"; refused "a VPN naming a program to run"
+network; vpn "ca=acme-ca.crt"; refused "a VPN naming a certificate by a relative path"
+network; { echo "a line that is not a certificate"; cat "${T}/ca.crt"; } >"${DIR}/vpn/acme-ca.crt"; refused "a certificate file with text around it"
 network; vpn "password=hunter2"; refused "a VPN with a password"
 network; vpn "static-key=/etc/pki/amethystora-vpn/acme-ca.crt"; refused "a VPN with a key's file"
 network; vpn "cert=/home/alice/alice.crt"; refused "a VPN naming a file outside its certificates"
@@ -193,6 +202,11 @@ network; printf '\n[vpn-secrets]\npassword=hunter2\n' >>"${DIR}/vpn/acme.nmconne
 network; cat "${T}/ca.key" >>"${DIR}/vpn/acme-ca.crt"; refused "a certificate with its private key"
 network; sed -i "s/^service-type=.*/service-type=org.freedesktop.NetworkManager.nonexistent/" "${DIR}/vpn/acme.nmconnection"; refused "a VPN plugin the image lacks"
 network; sed -i "s/^type=vpn/type=ethernet/" "${DIR}/vpn/acme.nmconnection"; refused "a connection that is no VPN"
+# ...and an ignore list is the text it is, whatever the build's folder holds
+network; printf 'http=proxy.acme.example:3128\nignore=localhost,*.acme.example\n' >"${DIR}/proxy"
+mkdir "${T}/glob"; touch "${T}/glob/a;b.acme.example"
+(cd "${T}/glob" && "${POLICY}" "${DIR}" --root "${ROOT}" >/dev/null) || { echo "the proxy's ignore list was expanded as a pattern"; exit 1; }
+grep -qx "no_proxy=localhost,\*.acme.example" "${ROOT}/etc/environment.d/60-image-proxy.conf"
 network
 cat >"${DIR}/vpn/wg.nmconnection" <<'EOF'
 [connection]

@@ -78,9 +78,15 @@ else
     not_ok "nothing listens on ${PORT}" "$(ss -Htulnp 2>&1 | head -n 20)"
 fi
 
-# The security watcher expects exactly this listener: its name, cut to fifteen characters by the kernel, and port
-# against the image's own allowances (allow.d/listeners, one glob a line)
-program="$(ss -Htlnp "sport = :${PORT}" 2>/dev/null | sed -nE 's/.*users:\(\("([^"]+)".*/\1/p' | head -n 1)"
+# The security watcher expects exactly this listener: the file the listening process runs, in the system's own mount
+# namespace, and its port, against the image's own allowances (allow.d/listeners, one glob a line). The name ss shows
+# is the process's own to choose, so the image's entries no longer go by it
+pid="$(ss -Htlnp "sport = :${PORT}" 2>/dev/null | sed -nE 's/.*users:\(\("[^"]+",pid=([0-9]+).*/\1/p' | head -n 1)"
+program=""
+if [[ -n "${pid}" && "$(readlink "/proc/${pid}/ns/mnt" 2>/dev/null)" == "$(readlink /proc/1/ns/mnt)" ]]; then
+    program="$(readlink "/proc/${pid}/exe" 2>/dev/null)"
+    program="${program% (deleted)}"
+fi
 allowed=""
 while read -r glob; do
     [[ -z "${glob}" || "${glob}" == \#* ]] && continue

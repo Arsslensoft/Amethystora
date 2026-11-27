@@ -44,13 +44,14 @@ kinds() { # mat2 -s output on stdin
             make | model | lens* | serialnumber | *cameraserial* | *bodyserial* | ownername | *exposure* | fnumber | iso | \
                 focallength* | flash | whitebalance | meteringmode)
                 FOUND[camera]=1 ;;
-            *date* | *time* | *modified* | *created*)
-                FOUND[time]=1 ;;
             author | artist | dc:creator | *lastmodifiedby | *initial-creator | copyright | owner | by-line | \
                 xpauthor | company | manager)
                 FOUND[author]=1 ;;
             *revision* | *history* | *editing* | documentid | instanceid | *derivedfrom* | totaltime | xmpmm:*)
                 FOUND[history]=1 ;;
+            # After the author and edit history, whose "last modified by" and "total time" its patterns would take
+            *date* | *time* | *modified* | *created*)
+                FOUND[time]=1 ;;
             software | producer | creator | *generator | application | creatortool | *application*)
                 FOUND[program]=1 ;;
             # How the picture or the file itself is stored, which says nothing about anyone

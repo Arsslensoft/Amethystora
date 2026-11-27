@@ -15,6 +15,8 @@ this does for them.
     atspi.py APP check TEXT [on|off]       sets the check box or switch named TEXT
     atspi.py APP text                      prints everything the window says, one line each
     atspi.py APP tree                      prints the tree: role, name, states
+    atspi.py '*' which TEXT                prints the name of the application that shows TEXT
+    atspi.py '*' windows                   prints every application's windows, by name
 
 APP is the program's name, as AT-SPI lists it (amethystora-backups). TEXT matches when a name or text
 contains it. Exits 1, saying why, when what was asked for is not there.
@@ -180,6 +182,25 @@ def main(argv):
     if len(argv) < 3:
         fail(__doc__)
     name, command, rest = argv[1], argv[2], argv[3:]
+    # Any application: which one shows TEXT (a dialog another process draws, such as the desktop portal's file chooser), or
+    # every application's windows, by name
+    if name == "*":
+        desktop = Atspi.get_desktop(0)
+        apps = [a for a in (desktop.get_child_at_index(i) for i in range(desktop.get_child_count())) if a is not None]
+        if command == "which":
+            for each in apps:
+                if find(each, rest[0]):
+                    print(each.get_name() or "")
+                    return
+            sys.exit(1)
+        if command == "windows":
+            for each in apps:
+                for i in range(each.get_child_count()):
+                    window = each.get_child_at_index(i)
+                    if window is not None:
+                        print(f"{each.get_name()}: {window.get_role_name()} {window.get_name()!r}")
+            return
+        fail("with *, only which TEXT and windows")
     app = application(name)
     if app is None and command != "wait":
         fail(f"no application named {name} on the accessibility bus")
@@ -240,6 +261,14 @@ def main(argv):
         checked = node.get_state_set().contains(Atspi.StateType.CHECKED)
         if checked != want:
             activate(node)
+            # A switch whose action does nothing (libadwaita's on GNOME 51 may take the press and not the toggle) is pressed
+            # by the pointer, as a person would
+            time.sleep(1.5)
+            if node.get_state_set().contains(Atspi.StateType.CHECKED) != want:
+                try:
+                    pointer_click(node)
+                except Exception as error:
+                    print(f"the pointer could not press it: {error}", file=sys.stderr)
         return
     if command == "text":
         for node, _ in walk(app):

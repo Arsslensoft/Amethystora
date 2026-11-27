@@ -15,3 +15,9 @@ grub2:
     - name: "Try or install Amethystora, in basic graphics mode"
       linux: "/images/pxeboot/vmlinuz quiet rhgb root=live:CDLABEL=Amethystora-Live enforcing=0 rd.live.image systemd.tty.term.console=dumb nomodeset"
       initrd: "/images/pxeboot/initrd.img"
+    # The forensic start (iso/live/forensic, manual: forensic-start.md): amethystora.forensic=1 is what its units look for,
+    # the rest keeps the initramfs and systemd from swapping, resuming, assembling or activating anything on the disks. A
+    # menu entry has no help text: its name says what it is and is not. No quote in it, which Titanoboa writes between quotes
+    - name: "Start without touching the disks (software read-only, not a hardware write blocker)"
+      linux: "/images/pxeboot/vmlinuz quiet rhgb root=live:CDLABEL=Amethystora-Live enforcing=0 rd.live.image systemd.tty.term.console=dumb amethystora.forensic=1 systemd.swap=0 fstab=0 noswap systemd.zram=0 systemd.gpt_auto=0 noresume rd.auto=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.luks=0 rd.multipath=0 nodmraid noiswmd"
+      initrd: "/images/pxeboot/initrd.img"

@@ -64,12 +64,15 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
  * prunes it), and the programs only it needs are not loaded at all. */
 const volatile __u32 enabled_keys = 0;
 
-/* Set by the daemon after loading: its own process, which is never recorded, and the slot its own opens write
- * the opened folder's inode to, which is how it learns what to put in the maps */
+/* Set by the daemon after loading: its own process, which is never recorded, the one thread of it that opens the
+ * folders to watch, and the slot that thread's opens write the opened folder's inode to, which is how it learns
+ * what to put in the maps */
 struct sensor_globals {
 	__u32 self_tgid;
-	__u32 pad;
+	__u32 registrar_tid;
 	__u64 registered_inode;
+	__u32 host_mnt; /* the host's mount namespace, which the daemon compares each event's with */
+	__u32 pad;
 };
 struct sensor_globals globals = {};
 
@@ -159,6 +162,8 @@ struct {
  * kernel and not always emitted): there it resolves to 0 and the bpf() tamper check below becomes a no-op,
  * rather than failing the whole load. Where it is present, the check works. */
 extern const struct file_operations bpf_link_fops __ksym __weak;
+/* The initial namespaces, which are the host's: __weak for the same reason, host_mnt then stays 0 */
+extern struct nsproxy init_nsproxy __ksym __weak;
 
 static __always_inline void count_drop(void)
 {
@@ -174,16 +179,12 @@ static __always_inline struct scratch *grab(void)
 	__u32 slot = 0;
 	struct scratch *s = bpf_map_lookup_elem(&scratch, &slot);
 
-	if (s && !s->busy) {
-		s->busy = 1;
+	if (s && __sync_val_compare_and_swap(&s->busy, 0, 1) == 0)
 		return s;
-	}
 	slot = 1;
 	s = bpf_map_lookup_elem(&scratch, &slot);
-	if (s && !s->busy) {
-		s->busy = 1;
+	if (s && __sync_val_compare_and_swap(&s->busy, 0, 1) == 0)
 		return s;
-	}
 	count_drop();
 	return NULL;
 }
@@ -261,6 +262,22 @@ static __always_inline __u32 read_keys(struct inode *dir, const unsigned char *n
 	keys = d->read_keys;
 	*id = d->id;
 	if (d->flags & SDIR_HAS_FILES) {
+		f = single(dir, name, len);
+		if (f)
+			keys |= f->read_keys;
+	}
+	return keys;
+}
+
+/* What a rename or a link of NAME in DIR touches: the keys watching its writes, and those watching reads of it as a
+ * single file, since a secret moved or linked under another name is read there unwatched */
+static __always_inline __u32 moved_keys(struct inode *dir, const unsigned char *name, __u32 len, __u32 *id)
+{
+	__u32 keys = write_keys(dir, name, len, id);
+	struct dir_info *d = folder(dir);
+	struct file_info *f;
+
+	if (d && (d->flags & SDIR_HAS_FILES)) {
 		f = single(dir, name, len);
 		if (f)
 			keys |= f->read_keys;
@@ -448,13 +465,28 @@ static __always_inline __u32 put_path(struct scratch *s, __u32 pos, int slot, in
 	return pos + len + 1;
 }
 
-/* Who did it, as audit's SYSCALL record says it, and the system call it was in */
+/* The number of a mount namespace, or 0 on a kernel that names it otherwise */
+static __always_inline __u32 ns_number(struct mnt_namespace *ns)
+{
+	if (!ns || !bpf_core_field_exists(ns->ns.inum))
+		return 0;
+	return BPF_CORE_READ(ns, ns.inum);
+}
+
+static __always_inline __u32 mount_ns(struct task_struct *task)
+{
+	return ns_number(BPF_CORE_READ(task, nsproxy, mnt_ns));
+}
+
+/* Who did it, as audit's SYSCALL record says it, and the system call it was in; and the mount namespace it did it in,
+ * since the program's path below is the one that namespace gives it */
 static __always_inline void actor(struct sensor_event *e, struct task_struct *task)
 {
 	const struct cred *cred = BPF_CORE_READ(task, cred);
 	struct tty_struct *tty = BPF_CORE_READ(task, signal, tty);
 	struct pt_regs *regs = (struct pt_regs *)bpf_task_pt_regs(task);
 
+	e->own_mnt = mount_ns(task);
 	e->pid = BPF_CORE_READ(task, tgid);
 	e->ppid = BPF_CORE_READ(task, real_parent, tgid);
 	e->auid = BPF_CORE_READ(task, loginuid.val);
@@ -547,7 +579,11 @@ int BPF_PROG(file_open, struct file *file, int ret)
 	bool write;
 
 	if ((__u32)(bpf_get_current_pid_tgid() >> 32) == globals.self_tgid) {
-		globals.registered_inode = (__u64)BPF_CORE_READ(file, f_inode);
+		if ((__u32)bpf_get_current_pid_tgid() == globals.registrar_tid) {
+			globals.registered_inode = (__u64)BPF_CORE_READ(file, f_inode);
+			if (!globals.host_mnt)
+				globals.host_mnt = ns_number(BPF_CORE_READ(&init_nsproxy, mnt_ns));
+		}
 		return 0;
 	}
 	/* Input-device opens are a program of their own (file_open_input), so this one stays within the
@@ -798,11 +834,11 @@ int BPF_PROG(vfs_link_exit, struct dentry *old_dentry, struct mnt_idmap *idmap, 
 	__u32 keys, keys_old, id = 0, id_old = 0, pos = 0, nr;
 	const char *given = NULL;
 
-	if (!(enabled_keys & WRITE_KEYS))
+	if (!(enabled_keys & (WRITE_KEYS | READ_KEYS)))
 		return 0;
-	keys = write_keys(dir, BPF_CORE_READ(new_dentry, d_name.name), BPF_CORE_READ(new_dentry, d_name.len), &id);
+	keys = moved_keys(dir, BPF_CORE_READ(new_dentry, d_name.name), BPF_CORE_READ(new_dentry, d_name.len), &id);
 	old_dir = BPF_CORE_READ(old_dentry, d_parent, d_inode);
-	keys_old = write_keys(old_dir, BPF_CORE_READ(old_dentry, d_name.name), BPF_CORE_READ(old_dentry, d_name.len),
+	keys_old = moved_keys(old_dir, BPF_CORE_READ(old_dentry, d_name.name), BPF_CORE_READ(old_dentry, d_name.len),
 			      &id_old);
 	if (!(keys | keys_old))
 		return 0;
@@ -845,14 +881,14 @@ int BPF_PROG(vfs_rename_entry, struct renamedata *rd)
 	struct stash *st;
 	__u32 keys, id = 0, id2 = 0;
 
-	if (!(enabled_keys & WRITE_KEYS))
+	if (!(enabled_keys & (WRITE_KEYS | READ_KEYS)))
 		return 0;
 	old_dentry = BPF_CORE_READ(rd, old_dentry);
 	new_dentry = BPF_CORE_READ(rd, new_dentry);
 	old_dir = BPF_CORE_READ(rd, old_parent, d_inode);
 	new_dir = BPF_CORE_READ(rd, new_parent, d_inode);
-	keys = write_keys(old_dir, BPF_CORE_READ(old_dentry, d_name.name), BPF_CORE_READ(old_dentry, d_name.len), &id) |
-	       write_keys(new_dir, BPF_CORE_READ(new_dentry, d_name.name), BPF_CORE_READ(new_dentry, d_name.len), &id2);
+	keys = moved_keys(old_dir, BPF_CORE_READ(old_dentry, d_name.name), BPF_CORE_READ(old_dentry, d_name.len), &id) |
+	       moved_keys(new_dir, BPF_CORE_READ(new_dentry, d_name.name), BPF_CORE_READ(new_dentry, d_name.len), &id2);
 	if (!keys)
 		return 0;
 	task = bpf_get_current_task_btf();
@@ -878,7 +914,7 @@ int BPF_PROG(vfs_rename_exit, struct renamedata *rd, int ret)
 	__u32 keys, pos = 0, nr;
 	const char *given = NULL;
 
-	if (!(enabled_keys & WRITE_KEYS))
+	if (!(enabled_keys & (WRITE_KEYS | READ_KEYS)))
 		return 0;
 	st = bpf_task_storage_get(&stash, task, 0, 0);
 	if (!st || !st->rename_keys)
@@ -1248,16 +1284,6 @@ int BPF_PROG(delete_module_exit, const struct pt_regs *regs, long ret)
 /* --- Another program's memory ------------------------------------------------------------------------------ */
 
 #define PTRACE_MODE_ATTACH 0x02
-
-/* The number of a task's mount namespace, or 0 on a kernel that names it otherwise */
-static __always_inline __u32 mount_ns(struct task_struct *task)
-{
-	struct mnt_namespace *ns = BPF_CORE_READ(task, nsproxy, mnt_ns);
-
-	if (!ns || !bpf_core_field_exists(ns->ns.inum))
-		return 0;
-	return BPF_CORE_READ(ns, ns.inum);
-}
 
 /* Attaching to another program, or reaching into its memory, by a login. ptrace's attach and seize,
  * process_vm_readv and process_vm_writev, pidfd_getfd and opening /proc/PID/mem each ask the LSMs, Yama among them,

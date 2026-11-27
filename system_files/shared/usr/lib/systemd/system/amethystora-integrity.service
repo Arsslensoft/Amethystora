@@ -1,6 +1,10 @@
 [Unit]
 Description=Installed apps and the system's files, checked against their updates
 Documentation=file:///usr/share/amethystora/manual/security.md
+OnFailure=amethystora-scan-alert@%n.service
+# A skipped run counts as a start: the first start's Flatpak installs touch the path's file faster than five a
+# second, and the limit would fail the service and the path for the whole boot
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot

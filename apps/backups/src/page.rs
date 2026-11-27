@@ -1255,8 +1255,58 @@ impl Backups {
             )
             .upcast(),
         ));
+        body.push(Some(self.excludes_list().upcast()));
         body.push(Some(ui::label(&t!("Nothing on this machine deletes from the repository, so old backups build up. Thin them out from somewhere else, as the manual explains."), &["faint", "small"]).upcast()));
         Self::card("archive", &title, &text, tag, body)
+    }
+
+    /// A path inside the home as ~/..., anything else (a pattern) as it is
+    fn shown_pattern(&self, pattern: &str) -> String {
+        let home = format!("{}/", self.home.to_string_lossy());
+        pattern.strip_prefix(&home).map(|rel| format!("~/{rel}")).unwrap_or_else(|| pattern.to_string())
+    }
+
+    /// What the backup leaves out: what was left out here, each with the way to back it up again, the image's own list in one
+    /// sentence (`ame backup exclude` lists it), and a folder chosen to leave out
+    fn excludes_list(&self) -> gtk::Box {
+        let excludes = self.state.borrow().status.as_ref().map(|status| status.excludes.clone()).unwrap_or_default();
+        let inside = ui::vbox(6, &["excludes"]);
+        inside.append(&heading(&t!("Left out of the backup"), "h4"));
+        let image = excludes.entries.iter().filter(|e| e.shipped).count() as f64;
+        inside.append(&ui::limit(
+            &pretty(
+                &t!(
+                    "{count, plural, one {The image's list leaves out # pattern: caches, the trash, containers, virtual machines and what a tool rebuilds by itself. A folder left out is not in the next backup; the backups made before keep it.} other {The image's list leaves out # patterns: caches, the trash, containers, virtual machines and what a tool rebuilds by itself. A folder left out is not in the next backup; the backups made before keep it.}}",
+                    count = image
+                ),
+                &["setting-text"],
+            ),
+            640,
+        ));
+        for entry in excludes.entries.iter().filter(|e| !e.shipped) {
+            let row = ui::hbox(10, &["exclude-row"]);
+            let shown = ui::label(&self.shown_pattern(&entry.pattern), &["code"]);
+            shown.set_direction(gtk::TextDirection::Ltr);
+            shown.set_ellipsize(pango::EllipsizeMode::Middle);
+            shown.set_hexpand(true);
+            shown.set_xalign(0.0);
+            row.append(&shown);
+            let pattern = entry.pattern.clone();
+            let back = self.button(&t!("Back it up"), Look { small: true, ..Default::default() }, move |this| this.include("remove", pattern.clone()));
+            back.update_property(&[gtk::accessible::Property::Label(&t!("Back up {pattern} again", pattern = self.shown_pattern(&entry.pattern)))]);
+            row.append(&back);
+            inside.append(&row);
+        }
+        inside.append(
+            &Self::actions(
+                vec![
+                    Some(self.button(&t!("Leave a folder out…"), Look { icon: Some("folder"), ..Default::default() }, |this| this.leave_out()).upcast()),
+                    excludes.own.then(|| self.button(&t!("Back to the image's list"), Look::default(), |this| this.include("reset", String::new())).upcast()),
+                ],
+                &["actions"],
+            ),
+        );
+        inside
     }
 
     fn snapshots_card(&self) -> gtk::Box {
@@ -1275,6 +1325,14 @@ impl Backups {
                 ])
                 .upcast(),
             ));
+        }
+        let left_out = self.state.borrow().status.as_ref().map(|status| status.left_out.clone()).unwrap_or_default();
+        if snapshots.on && !left_out.is_empty() {
+            let folders = ui::label(&i18n::list(&left_out.iter().map(|rel| format!("~/{rel}")).collect::<Vec<_>>()), &["code"]);
+            folders.set_direction(gtk::TextDirection::Ltr);
+            folders.set_wrap(true);
+            folders.set_xalign(0.0);
+            body.push(Some(Self::facts(vec![Some((t!("Left out"), folders.upcast()))]).upcast()));
         }
         if snapshots.on && !snapshots.covers {
             body.push(Some(Self::callout("check", "", &t!("Your home folder is not under /var/home, so the snapshots do not cover it."), Vec::new()).upcast()));

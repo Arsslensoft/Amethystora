@@ -60,7 +60,6 @@ jobs:
     needs: [plan]
     if: >-
       ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' ||
-      github.event.merge_group.base_ref == 'refs/heads/main' ||
       (inputs.stream_name == 'beta' && github.ref == 'refs/heads/beta')) }}
     runs-on: ubuntu-26.04
     environment: release
@@ -114,7 +113,6 @@ jobs:
     needs: [plan]
     if: >-
       ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' ||
-      github.event.merge_group.base_ref == 'refs/heads/main' ||
       (inputs.stream_name == 'beta' && github.ref == 'refs/heads/beta')) }}
     runs-on: ubuntu-26.04
     environment: release
@@ -168,7 +166,6 @@ jobs:
     needs: [plan, layers-fprintd]
     if: >-
       ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' ||
-      github.event.merge_group.base_ref == 'refs/heads/main' ||
       (inputs.stream_name == 'beta' && github.ref == 'refs/heads/beta')) }}
     runs-on: ubuntu-26.04
     environment: release
@@ -228,19 +225,18 @@ jobs:
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-26.04
     continue-on-error: false
-    # The keys are the release environment's, which admits only main, beta and the merge queue's branches,
+    # The keys are the release environment's, which admits only main and beta (never the merge queue's branches,
+    # which anyone who can push may create: they build with throwaway keys and publish nothing),
     # so a branch that changes PUBLISH in its own copy still gets none. The condition is PUBLISH's
     environment: >-
       ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' ||
-      github.event.merge_group.base_ref == 'refs/heads/main' ||
       (inputs.stream_name == 'beta' && github.ref == 'refs/heads/beta')) && 'release' || '' }}
     env:
-      # Only main publishes and signs: its schedule, its dispatches and the merge queue in front of it, and
+      # Only main publishes and signs: its schedule and its dispatches, and
       # the beta branch its own stream. Pull requests, and dispatches from any other branch, build and test
       # and publish nothing.
       PUBLISH: >-
         ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' ||
-        github.event.merge_group.base_ref == 'refs/heads/main' ||
         (inputs.stream_name == 'beta' && github.ref == 'refs/heads/beta')) }}
     strategy:
       fail-fast: false

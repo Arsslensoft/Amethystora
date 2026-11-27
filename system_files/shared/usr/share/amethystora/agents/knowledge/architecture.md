@@ -72,6 +72,18 @@ stops kargs.d from applying. There is no `dnf install` on the host. Sealed image
 - A Windows program: `/usr/libexec/amethystora-windows-program FILE` (what Files opens one with) scans it, says
   who signed it and offers the same app for Linux from `/usr/share/amethystora/windows-programs.json` before
   Bottles, from Flathub, granted X11 for the account alone; it asks in a terminal, so the user runs it.
+- The apps for a line of work, together: a kit (`ame apps kit list`, `show KIT`, `add KIT`, `remove KIT`; the kits are
+  `/usr/share/amethystora/kits/KIT.json`, a setup file of Flathub apps only, with `about/KIT.json` for the words). Electronics,
+  CAD and 3D printing, music production, streaming, game development, data science and a security lab. `list` and `show` are
+  read-only (run them); `add` is `ame setup apply` on the kit's file, which shows the apps and asks, and `remove` asks about each
+  app, so the user runs both. A kit never installs into the image, never layers a package and never takes anything away on `add`.
+  Suggest one when someone names a line of work, then `ame apps kit show KIT` to say what is in it.
+- Whether a game will run, asked before a download: `ame apps will-it-run NAME` (`/usr/libexec/amethystora-will-it-run NAME
+  [--json]`, read-only, no network, no password; run it). It says what a community list of games and their anti-cheat on
+  Linux says of the game, from a copy in `/usr/share/amethystora/anticheat-list.json` at one commit, with the day the
+  entry changed: supported, running, planned, broken or denied, or "The list does not say". Tell the user it is the list's
+  word, never that the game will run: the list knows the anti-cheat, not the game. A name that only resembles an entry is
+  "the closest entry", not an answer. `game:` in the search and the Windows programs handler say the same.
 
 ## User and system scope
 

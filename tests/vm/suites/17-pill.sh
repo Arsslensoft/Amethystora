@@ -10,6 +10,7 @@
 #   - sharing (Mutter's screen cast), the microphone, the camera and the location in the dots;
 #   - a link and a call from a stand-in phone, through the phone link's listeners;
 #   - an update staged as suite 89 stages one, never by hand;
+#   - the apps the computer comes with, while they install, through stand-ins for the unit, a list and a deploy;
 #   - the battery's view, live off and on, and ten disables and enables that leave nothing behind.
 # The lab draws without a GPU, where GNOME turns animations off by itself: the motion steps force them on
 # (global.force_animations) and put the switch back.
@@ -101,6 +102,12 @@ if ! wait_for 240 has_session || ! wait_for 120 pill_ready; then
     not_ok "the pill module did not start in the session"
     finish
 fi
+# While the first start's Flatpaks install, the pill rightly says so (pill/apps.js, 16b), and every step before 16b
+# expects it idle: the install ends first, and its Ready after it
+preinstall_done() { [[ "$(systemctl show -P SubState flatpak-preinstall.service)" != running ]]; }
+wait_for 1800 preinstall_done || not_ok "flatpak-preinstall.service still runs after 30 min" "$(systemctl status flatpak-preinstall.service --no-pager 2>&1 | tail -n 5)"
+no_apps_shown() { [[ "$(st .apps.view)" == null ]]; }
+wait_for 30 no_apps_shown || not_ok "the pill still says the apps install" "$(st .apps)"
 sleep 8
 ev "Main.overview.hide(); 'hidden'" >/dev/null
 # The account's own units write their logs here
@@ -110,8 +117,10 @@ FORCED="$(ev "global.force_animations")"
 # Whatever happens, the suites after this one find GNOME's animations and reduced motion as they were, and nothing
 # staged by step 16 is left for the next start
 STAGED_HERE=""
+APPS_HERE=""
 cleanup() {
     ev "global.force_animations = ${FORCED:-false}; 'restored'" >/dev/null 2>&1
+    [[ -z "${APPS_HERE}" ]] || apps_cleanup
     gs reset org.gnome.desktop.a11y.interface reduced-motion
     if [[ -n "${STAGED_HERE}" ]]; then
         rpm-ostree cleanup --pending >/dev/null 2>&1
@@ -247,7 +256,8 @@ left1="$(st .timer.left)"
 sleep 3
 left2="$(st .timer.left)"
 if ((left1 - left2 >= 2 && left1 - left2 <= 4)); then ok "5 it counts down"; else not_ok "5 it counts down" "${left1} then ${left2}"; fi
-keys "click:$(where "${PILL_ACTOR}")"
+# On the pill's own plate: the middle of the date menu can be the music's bubble beside it, whose card has a Pause too
+keys "click:$(where "${P}.clock.actor._plate")"
 for button in "+1 min" Pause Cancel; do
     check "5 the timer's card has ${button}" user_bus python3 "${HERE}/atspi.py" gnome-shell has "${button}"
 done
@@ -487,16 +497,32 @@ elif rm -rf "${TREE}" && mkdir -p "${TREE}/usr/share" && echo vmlab >"${TREE}/us
     update() { activity_is update; }
     check "16 the pill says an update is ready within 10 s" wait_for 10 update
     # The pill says Ready · restart until the soft reboot's helper, asked through pkexec, answers
-    quick_word() { [[ "$(st .text)" == '"Ready · quick restart"' ]]; }
-    if wait_for 20 quick_word; then ok "16 ...a quick one"; else
-        not_ok "16 ...a quick one" "found: $(st .text)" "the helper: $(/usr/libexec/amethystora-soft-reboot status 2>&1)"
+    quick_word() { [[ "$(st .text)" == '"Ready · soft reboot"' ]]; }
+    if wait_for 20 quick_word; then ok "16 ...a soft reboot"; else
+        not_ok "16 ...a soft reboot" "found: $(st .text)" "the helper: $(/usr/libexec/amethystora-soft-reboot status 2>&1)"
     fi
+    # Soft reboot runs the helper's restart from the pill. An app asking not to end the session makes the helper turn it
+    # down (exit 3, before it mounts anything; suite 89 holds that), so the pill opens GNOME's restart dialog instead,
+    # which is cancelled here: nothing restarts
+    user_bus systemd-run --user --unit=vmlab-pill-inhibit --collect --quiet -- \
+        gnome-session-inhibit --inhibit logout --reason "vmlab: a document not saved" sleep 600
+    inhibits() { [[ "$(in_session 'gdbus call --session --dest org.gnome.SessionManager --object-path /org/gnome/SessionManager --method org.gnome.SessionManager.IsInhibited 1')" == "(true,)" ]]; }
+    wait_for 30 inhibits || not_ok "16 gnome-session does not say anything inhibits logging out"
     keys "click:$(where "${PILL_ACTOR}")"
-    shell_click "Restart now"
-    updates_open() { [[ "$(ev "global.get_window_actors().some(a => a.meta_window.get_wm_class() === 'org.amethystora.Updates')")" == true ]]; }
-    check "16 Restart now opens System Updates" wait_for 15 updates_open
+    if user_bus python3 "${HERE}/atspi.py" gnome-shell has "A soft reboot finishes it" >/dev/null 2>&1; then
+        ok "16 the card says it is a soft reboot"
+    else
+        not_ok "16 the card says it is a soft reboot" "$(user_bus python3 "${HERE}/atspi.py" gnome-shell text 2>&1 | head -n 20)"
+    fi
+    shell_click "Soft reboot"
+    dialog() { [[ "$(ev "Main.layoutManager.modalDialogGroup.get_children().some(c => c.visible)")" == true ]]; }
+    check "16 Soft reboot, with an app holding the session, opens GNOME's restart dialog" wait_for 30 dialog
+    shell_click Cancel
+    no_dialog() { ! dialog; }
+    check "16 ...which is cancelled" wait_for 10 no_dialog
+    user_systemctl stop vmlab-pill-inhibit.service 2>/dev/null
     check "16 ...and restarts nothing" test -f /run/ostree/staged-deployment
-    ev "global.get_window_actors().filter(a => a.meta_window.get_wm_class() === 'org.amethystora.Updates').forEach(a => a.meta_window.delete(global.get_current_time())); 'closed'" >/dev/null
+    check "16 ...nor leaves the update mounted for one" bash -c '! mountpoint -q /run/nextroot'
     rpm-ostree cleanup --pending >/dev/null 2>&1
     no_update() { ! activity_is update; }
     check "16 the activity goes with the staged update" wait_for 10 no_update
@@ -507,6 +533,66 @@ rw ostree refs --repo="${REPO}" --delete vmlab/pill >/dev/null 2>&1
 rm -rf "${TREE}"
 systemctl start uupd.timer 2>/dev/null
 STAGED_HERE=""
+
+# --- 16b: the apps the computer comes with, while they install ------------------------------------------------------
+# Without the network: one more app on a list, a stand-in for the preinstall unit (sleeping, then failing), and a stand-in
+# deploy, so that the activity goes through installing, waiting and ready as on a new computer
+LIST=/etc/flatpak/preinstall.d/zz-vmlab.preinstall
+DROPIN=/run/systemd/system/flatpak-preinstall.service.d/vmlab.conf
+FAKE=/var/lib/flatpak/app/org.vmlab.NotThere
+apps_cleanup() {
+    rm -rf "${FAKE}" "${LIST}" "${DROPIN}"
+    systemctl daemon-reload
+    # The real unit again, as the other suites find it: done, nothing to do
+    systemctl restart flatpak-preinstall.service 2>/dev/null
+    preinstall_done() { [[ "$(systemctl show -P SubState flatpak-preinstall.service)" != running ]]; }
+    wait_for 300 preinstall_done
+}
+APPS_HERE=1
+stand_in() {
+    install -d "${DROPIN%/*}"
+    printf '[Service]\nExecStart=\nExecStart=%s\nRestartSec=60\n' "$1" >"${DROPIN}"
+    systemctl daemon-reload
+    systemctl restart flatpak-preinstall.service 2>/dev/null
+}
+install -d "${LIST%/*}"
+printf '[Flatpak Preinstall org.vmlab.NotThere]\nBranch=stable\nIsRuntime=false\n' >"${LIST}"
+stand_in '/usr/bin/sleep 600'
+# The part reads the lists as it starts
+gs set "${PILL}" live false
+sleep 1
+gs set "${PILL}" live true
+wait_for 30 pill_ready
+view_is() { [[ "$(st .apps.view)" == "\"$1\"" ]]; }
+if wait_for 15 view_is installing; then
+    ok "16b the pill says the apps are installing"
+    total="$(st .apps.total)"
+    same "16b ...all but the one on the stand-in list are in" "$(st .apps.done)" "$((total - 1))"
+    same "16b ...in its words" "$(st .text)" "\"Installing your apps · $((total - 1)) of ${total}\""
+    if [[ "$(st .moving)" != null ]]; then
+        ev "${P}._moving.reportForTest('flatpak', 'org.vmlab.NotThere', {}); 'ok'" >/dev/null
+        sleep 2
+        same "16b moving keeps the Flatpak pull, and says nothing of it" "$(st .moving.count) $(st .moving.kinds)" "1 []"
+        ev "${P}._moving.reportForTest('flatpak', 'org.vmlab.NotThere', null); 'ok'" >/dev/null
+    fi
+else
+    not_ok "16b the pill says the apps are installing" "found: $(st .apps)" "unit: $(systemctl show -P SubState flatpak-preinstall.service)"
+fi
+stand_in /usr/bin/false
+check "16b a try that fails: the apps wait" wait_for 20 view_is waiting
+waiting_words="$(st .text)"
+[[ "${waiting_words}" == '"Your apps try again soon"' || "${waiting_words}" == '"Your apps wait for the internet"' ]] &&
+    ok "16b ...in its words" || not_ok "16b ...in its words" "found: ${waiting_words}"
+install -d "${FAKE}/x86_64/stable/active"
+ln -s x86_64/stable "${FAKE}/current"
+touch /var/lib/flatpak/.changed
+check "16b the last one in: ready" wait_for 10 view_is ready
+same "16b ...in its words" "$(st .text)" '"Your apps are ready"'
+same "16b ...and nothing is followed any more" "$(st .apps.following)" false
+no_apps() { [[ "$(st .apps.view)" == null ]] && ! activity_is apps; }
+check "16b it goes after ten seconds" wait_for 20 no_apps
+apps_cleanup
+APPS_HERE=""
 
 # --- 17-19: the battery, live off, ten disables and enables ------------------------------------------------------------
 keys "move:$(where "Main.panel.statusArea.quickSettings._system")"

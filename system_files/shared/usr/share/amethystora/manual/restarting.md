@@ -26,7 +26,8 @@ why. **Restart** in the system menu always restarts the computer. Either way the
 - An app that asks not to end the session, for a document not yet saved, still gets its say: the restart is left to
   GNOME's own dialog, which names it.
 - The disk stays unlocked through a soft reboot, since the kernel keeps running: to have it locked again, shut down.
-- The [live pill](pill.md) says **Ready** when an update waits for the restart; its **Restart now** opens System Updates.
+- The [live pill](pill.md) says **Ready · soft reboot** when an update can be finished this way, and its **Soft reboot**
+  does it; otherwise it says **Ready · restart**.
 
 ## Picking up where you left off
 

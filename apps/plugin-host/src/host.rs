@@ -156,7 +156,7 @@ pub fn load(env: &Env, id: &str) -> Result<Loaded, String> {
         return Ok(Loaded { draft: true, id: id.into(), folder, manifest, grant: Grant::default() });
     };
     let folder = env.store.folder_of(id, &grant);
-    env.store.verify(&folder, &grant.digest).map_err(|e| format!("{e}; it is stopped until you decide what to do"))?;
+    env.store.verify_grant(id, &grant).map_err(|e| format!("{e}; it is stopped until you decide what to do"))?;
     let text = std::fs::read_to_string(folder.join("manifest.json")).map_err(|e| e.to_string())?;
     let manifest = Manifest::parse_with(&text, grant.shipped)?;
     if manifest.id != id {

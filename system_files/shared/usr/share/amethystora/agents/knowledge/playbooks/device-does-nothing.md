@@ -48,6 +48,8 @@ program cannot reach it: a keyboard configurator, Steam Input, a tablet driver, 
 9. **A DisplayLink dock's driver did not load.** Only a dock with a device of vendor `17e9` in `lsusb`: one
    whose video comes over USB-C's DisplayPort needs no driver. Tell: `ame system drivers` says `displaylink:`
    and what stands in the way, `mokutil --sb-state`, `cat /sys/kernel/security/lockdown`.
+10. **A debug probe, serial adapter or logic analyser is root's.** Tell: permission denied on it as the account, `lsusb` shows it,
+   `/etc/udev/rules.d/70-amethystora-lab-devices.rules` is absent; `ame system lab-devices list` names it as covered.
 
 ## Fix
 
@@ -74,7 +76,7 @@ the app again.
 
 Use the device at the machine. For another keyboard, the user gives it to the seat (root), with the vendor
 ID from `lsusb`, then plugs it in again:
-`echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="1234", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-keyboard.rules`.
+`echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="1234", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/72-zz-keyboard.rules`.
 Never `MODE="0666"`.
 
 ### 5. Blocked module
@@ -102,6 +104,15 @@ Linux's driver for MT7612U Wi-Fi sticks from loading.
 Secure Boot on: the user runs `ame security secure-boot` (root) (restart), and accepts the key on the blue
 screen. Secure Boot off: enrolling alone does nothing. The user turns Secure Boot on in the firmware and enrolls,
 or runs `ame security lockdown off` (root) (restart), which costs protection; never run either yourself.
+Driver loaded and still dark: DisplayLink's program runs in a sandbox drawn without a dock
+(`displaylink.service.d/20-amethystora-sandbox.conf`). Read `journalctl -u displaylink.service` first. The manual's
+common problems page gives the user the way to try without the sandbox, a link in `/etc` that they make and remove
+themselves. Never take the sandbox away yourself.
+
+### 10. Lab devices
+
+The user runs `ame system lab-devices on`: it says what it gives the person at the seat, asks, then plugging the device in
+again is enough. Serial adapters are a modem's too: say so. Never write a rule by hand with `MODE="0666"`.
 
 ## Verify
 
@@ -117,6 +128,7 @@ or runs `ame security lockdown off` (root) (restart), which costs protection; ne
   `ame apps gaming off` put it back unless the other still needs it; the second uninstalls Steam with its
   games: ask first.
 - A Flatpak app: `flatpak override --user --nodevice=input APP`.
-- The HID rule: `sudo rm /etc/udev/rules.d/70-keyboard.rules` (root), then plug the device in again.
+- The HID rule: `sudo rm /etc/udev/rules.d/72-zz-keyboard.rules` (root), then plug the device in again.
 - Each `ame security` switch above: the same command with `on`; key remapping with `off`.
 - The Xbox wireless adapter: `ame apps xbox-adapter off` (root) (restart).
+- Lab devices: `ame system lab-devices off` (root).

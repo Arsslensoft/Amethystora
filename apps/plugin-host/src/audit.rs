@@ -55,7 +55,7 @@ pub fn account_gid(uid: u32) -> Option<u32> {
 
 /// What the helper itself leaves in an account's folder
 fn helper_file(name: &str) -> bool {
-    matches!(name, "grants.json" | "history.jsonl" | ".lock" | "dev.json") || name.starts_with(".grants.json.new.")
+    matches!(name, "grants.json" | "history.jsonl" | ".lock" | "dev.json" | "dev.json.new") || name.starts_with(".grants.json.new.")
 }
 
 /// Every entry of the store, never through a link: whose it is and who may write it
@@ -97,10 +97,13 @@ pub fn store(store: &Store, owner: u32) -> (Vec<Finding>, Value) {
             continue;
         };
         accounts += 1;
-        for file in std::fs::read_dir(entry.path()).into_iter().flatten().flatten() {
-            let f = file.file_name().to_string_lossy().into_owned();
-            if !helper_file(&f) {
+        // What the helper keeps of an account is for that account and root alone (`Store::seal_account`, after every verb)
+        let others_read = |path: &Path| std::fs::symlink_metadata(path).is_ok_and(|m| m.permissions().mode() & 0o007 != 0);
+        for (path, f) in std::iter::once((entry.path(), String::new())).chain(std::fs::read_dir(entry.path()).into_iter().flatten().flatten().map(|file| (file.path(), file.file_name().to_string_lossy().into_owned()))) {
+            if !f.is_empty() && !helper_file(&f) {
                 out.push(Finding { id: format!("plugin-account-file:{uid}:{f}"), level: "critical", uid: Some(uid), plugin: None, text: format!("accounts/{uid}/{f} in the plugin store was not written by its helper") });
+            } else if others_read(&path) {
+                out.push(Finding { id: format!("plugin-account-open:{uid}:{f}"), level: "normal", uid: Some(uid), plugin: None, text: format!("accounts/{uid}/{f} in the plugin store can be read by other accounts: which plugins this account has is its own business") });
             }
         }
         let history = store.history(uid);
@@ -144,7 +147,7 @@ pub fn store(store: &Store, owner: u32) -> (Vec<Finding>, Value) {
             if !checked.insert((folder.display().to_string(), grant.digest.clone())) {
                 continue;
             }
-            if let Err(why) = store.verify(&folder, &grant.digest) {
+            if let Err(why) = store.verify_grant(id, grant) {
                 out.push(Finding {
                     id: format!("plugin-files:{id}:{}", grant.digest),
                     level: "critical",
@@ -245,9 +248,8 @@ mod tests {
         grants.plugins.insert("dev.example.a".into(), Grant { digest: digest.clone(), perms: vec!["network=a.example.com".into()], ..Grant::default() });
         store.write_grants(1000, &grants).unwrap();
         store.append_history(1000, json!({"action": "commit", "id": "dev.example.a"})).unwrap();
-        for d in [dir.join("accounts"), store.account_dir(1000)] {
-            std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        std::fs::set_permissions(dir.join("accounts"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(store.account_dir(1000), std::fs::Permissions::from_mode(0o750)).unwrap();
         let (found, summary) = super::store(&store, me());
         assert!(found.is_empty(), "{found:?}");
         assert_eq!(summary, json!({"accounts": 1, "plugins": 1, "network": 1}));
@@ -268,10 +270,11 @@ mod tests {
         // a changed byte, a file nobody writes, and a file others may write
         std::fs::write(folder.join("manifest.json"), b"{ }").unwrap();
         std::fs::write(store.account_dir(1000).join("extra"), b"").unwrap();
+        std::fs::set_permissions(store.account_dir(1000).join("history.jsonl"), std::fs::Permissions::from_mode(0o644)).unwrap();
         std::fs::set_permissions(folder.join("manifest.json"), std::fs::Permissions::from_mode(0o666)).unwrap();
         let (found, _) = super::store(&store, me());
         let ids: Vec<&str> = found.iter().map(|f| f.id.split(':').next().unwrap()).collect();
-        for id in ["plugin-files", "plugin-account-file", "plugin-store-mode", "plugin-unapproved"] {
+        for id in ["plugin-files", "plugin-account-file", "plugin-account-open", "plugin-store-mode", "plugin-unapproved"] {
             assert!(ids.contains(&id), "{id} in {ids:?}");
         }
         // A link anywhere in it

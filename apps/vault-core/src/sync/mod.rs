@@ -27,6 +27,8 @@ mod tests;
 mod kinds_tests;
 #[cfg(test)]
 mod kinds_review_tests;
+#[cfg(test)]
+mod sealed_gone_tests;
 
 /// `Bitwarden-Client-Version` (spec 3.1). What the client says it understands: at or above 2024.12.0 a server sends SSH key
 /// items, which are then counted and left alone; below 2026.2.0 Bitwarden's leaves out its types 6 to 8, which this client
@@ -70,8 +72,9 @@ pub mod lengths {
 }
 
 /// What a person may decide an item does in sync, and the kinds that never go at all, whatever anyone says. A kind has one choice,
-/// `off`, `on` (Plain: Bitwarden's own encryption alone, which every Bitwarden app opens) or `sealed` (a note only this vault opens),
-/// and an item may have a choice of its own, which wins.
+/// `off` or `on` (Bitwarden's own encryption alone, which every Bitwarden app opens; a kind Bitwarden has no type for goes as a plain
+/// secure note or SSH key item), and an item may have a choice of its own, which wins. There is no sealed choice: one an earlier version
+/// stored reads as `on`.
 pub mod kinds {
     pub const PASSWORD: &str = crate::items::KIND_PASSWORD;
     pub const ACCOUNT: &str = crate::items::KIND_ACCOUNT;

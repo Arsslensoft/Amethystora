@@ -370,6 +370,10 @@ done
 
 # Packages to exclude - common to all versions
 EXCLUDED_PACKAGES=(
+    # dnf's D-Bus daemon, which nothing in the image uses and whose polkit rule lets an administrator's programs run
+    # package transactions without a password, on a system whose /usr dnf cannot change
+    dnf5daemon-server
+    dnf5daemon-server-polkit
     cosign
     fedora-bookmarks
     fedora-chromium-config

@@ -1,0 +1,321 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arsslen Idadi <arsslens021@gmail.com>
+Date: Mon, 16 Nov 2026 13:05:29 -0500
+Subject: [PATCH 8/8] pam: Take fprintd's signals from its own connection only
+
+Once fprintd is running, ask the bus which connection owns
+net.reactivated.Fprint and match its signals on that connection's
+unique name, and have each handler ignore a message whose sender is
+another one. NameOwnerChanged counts only when the bus itself sent it.
+If the owner cannot be found, fingerprint authentication is unavailable
+and the stack goes on to the next module.
+---
+ pam/pam_fprintd.c             |  66 ++++++++++++++++++-
+ tests/pam/test_pam_fprintd.py | 120 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 183 insertions(+), 3 deletions(-)
+
+diff --git a/pam/pam_fprintd.c b/pam/pam_fprintd.c
+index 937d533..cb792d2 100644
+--- a/pam/pam_fprintd.c
++++ b/pam/pam_fprintd.c
+@@ -239,6 +239,8 @@ typedef struct
+ 
+   char         *driver;
+ 
++  char         *owner;
++
+   char         *duress_finger;
+   uid_t         uid;
+   char         *selected_finger;
+@@ -253,12 +255,25 @@ verify_data_free (verify_data *data)
+   free (data->selected_finger);
+   free (data->matched_finger);
+   free (data->driver);
++  free (data->owner);
+   free (data->dev);
+   free (data);
+ }
+ 
+ PF_DEFINE_AUTOPTR_CLEANUP_FUNC (verify_data, verify_data_free)
+ 
++/* A signal of fprintd's only counts when the connection that owns its name
++ * sent it. A match on a well-known name is not enough: the bus delivers a
++ * message sent straight to this connection whatever its sender is. */
++static bool
++is_from_fprintd (verify_data    *data,
++                 sd_bus_message *m)
++{
++  const char *sender = sd_bus_message_get_sender (m);
++
++  return sender != NULL && data->owner != NULL && strcmp (sender, data->owner) == 0;
++}
++
+ static int
+ verify_result (sd_bus_message *m,
+                void           *userdata,
+@@ -271,6 +286,9 @@ verify_result (sd_bus_message *m,
+   uint64_t done = false;
+   int r;
+ 
++  if (!is_from_fprintd (data, m))
++    return 0;
++
+   if (!sd_bus_message_is_signal (m, "net.reactivated.Fprint.Device", "VerifyStatus"))
+     {
+       pam_syslog (data->pamh, LOG_ERR, "Not the signal we expected (iface: %s, member: %s)",
+@@ -327,6 +345,9 @@ verify_finger_selected (sd_bus_message *m,
+   const char *finger_name = NULL;
+   pf_autofree char *msg = NULL;
+ 
++  if (!is_from_fprintd (data, m))
++    return 0;
++
+   if (sd_bus_message_read_basic (m, 's', &finger_name) < 0)
+     {
+       pam_syslog (data->pamh, LOG_ERR, "Failed to parse VerifyFingerSelected signal: %d", errno);
+@@ -366,6 +387,9 @@ verify_finger_matched (sd_bus_message *m,
+   verify_data *data = userdata;
+   const char *finger_name = NULL;
+ 
++  if (!is_from_fprintd (data, m))
++    return 0;
++
+   if (sd_bus_message_read_basic (m, 's', &finger_name) < 0)
+     return 0;
+ 
+@@ -523,6 +547,32 @@ get_property_string (sd_bus       *bus,
+ }
+ 
+ 
++/* The unique name of the connection that owns a well-known name */
++static char *
++get_name_owner (sd_bus     *bus,
++                const char *name)
++{
++  pf_auto (sd_bus_error) error = SD_BUS_ERROR_NULL;
++  pf_autoptr (sd_bus_message) reply = NULL;
++  const char *owner = NULL;
++
++  if (sd_bus_call_method (bus,
++                          "org.freedesktop.DBus",
++                          "/org/freedesktop/DBus",
++                          "org.freedesktop.DBus",
++                          "GetNameOwner",
++                          &error,
++                          &reply,
++                          "s",
++                          name) < 0)
++    return NULL;
++
++  if (sd_bus_message_read_basic (reply, 's', &owner) < 0 || owner == NULL || owner[0] != ':')
++    return NULL;
++
++  return strdup (owner);
++}
++
+ static int
+ verify_started_cb (sd_bus_message *m,
+                    void           *userdata,
+@@ -615,7 +665,7 @@ do_verify (sd_bus      *bus,
+ 
+   sd_bus_match_signal (bus,
+                        &verify_status_slot,
+-                       "net.reactivated.Fprint",
++                       data->owner,
+                        data->dev,
+                        "net.reactivated.Fprint.Device",
+                        "VerifyStatus",
+@@ -624,7 +674,7 @@ do_verify (sd_bus      *bus,
+ 
+   sd_bus_match_signal (bus,
+                        &verify_finger_selected_slot,
+-                       "net.reactivated.Fprint",
++                       data->owner,
+                        data->dev,
+                        "net.reactivated.Fprint.Device",
+                        "VerifyFingerSelected",
+@@ -635,7 +685,7 @@ do_verify (sd_bus      *bus,
+     {
+       sd_bus_match_signal (bus,
+                            &verify_finger_matched_slot,
+-                           "net.reactivated.Fprint",
++                           data->owner,
+                            data->dev,
+                            "net.reactivated.Fprint.Device",
+                            "VerifyFingerMatched",
+@@ -926,6 +976,11 @@ name_owner_changed (sd_bus_message *m,
+   const char *name = NULL;
+   const char *old_owner = NULL;
+   const char *new_owner = NULL;
++  const char *sender = sd_bus_message_get_sender (m);
++
++  /* Only the bus itself says who owns a name */
++  if (sender == NULL || strcmp (sender, "org.freedesktop.DBus") != 0)
++    return 0;
+ 
+   if (sd_bus_message_read (m, "sss", &name, &old_owner, &new_owner) < 0)
+     {
+@@ -967,6 +1022,11 @@ do_auth (pam_handle_t *pamh, const char *username)
+   if (data->dev == NULL)
+     return PAM_AUTHINFO_UNAVAIL;
+ 
++  /* fprintd is running now: its signals are the ones this connection sends */
++  data->owner = get_name_owner (bus, "net.reactivated.Fprint");
++  if (data->owner == NULL)
++    return PAM_AUTHINFO_UNAVAIL;
++
+   if (duress != DURESS_OFF)
+     data->duress_finger = read_duress_finger (username, &data->uid);
+ 
+diff --git a/tests/pam/test_pam_fprintd.py b/tests/pam/test_pam_fprintd.py
+index 9b36f5c..bca9f0a 100644
+--- a/tests/pam/test_pam_fprintd.py
++++ b/tests/pam/test_pam_fprintd.py
+@@ -30,6 +30,62 @@ PAM_AUTHINFO_UNAVAIL = 9
+ PAM_USER_UNKNOWN = 10
+ PAM_MAXTRIES = 11
+ 
++# A program of another account on the same bus: it finds the connection the
++# module made once the verification has started (the only new one) and sends
++# it, straight to it, what only fprintd may say. Prints "ready" when it is
++# listening, and how many times it sent when it is done.
++FORGER = r'''
++import sys, time, dbus
++from dbus.lowlevel import SignalMessage
++
++device, seconds, kinds, finger, owner = sys.argv[1:6]
++bus = dbus.SystemBus(private=True)
++daemon = dbus.Interface(bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus'), 'org.freedesktop.DBus')
++known = set(str(n) for n in daemon.ListNames())
++print('ready', flush=True)
++
++def send(target, path, iface, member, signature, *args):
++    m = SignalMessage(path, iface, member)
++    m.set_destination(target)
++    m.append(*args, signature=signature)
++    bus.send_message(m)
++
++sent = 0
++end = time.time() + float(seconds)
++while time.time() < end:
++    for name in set(str(n) for n in daemon.ListNames()) - known:
++        if not name.startswith(':') or name == bus.get_unique_name():
++            continue
++        for kind in kinds.split(','):
++            if kind == 'selected':
++                send(name, device, 'net.reactivated.Fprint.Device', 'VerifyFingerSelected', 's', 'any')
++            elif kind == 'matched':
++                send(name, device, 'net.reactivated.Fprint.Device', 'VerifyFingerMatched', 's', finger)
++            elif kind == 'status':
++                send(name, device, 'net.reactivated.Fprint.Device', 'VerifyStatus', 'sb', 'verify-match', True)
++            elif kind == 'owner':
++                send(name, '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'NameOwnerChanged', 'sss',
++                     'net.reactivated.Fprint', owner, '')
++        sent += 1
++    bus.flush()
++    time.sleep(0.05)
++print(sent, flush=True)
++'''
++
++def start_forger(device_path, kinds, finger='', seconds=3):
++    '''Start the forger, and return it once it is listening'''
++    owner = dbus.SystemBus(private=True).get_name_owner('net.reactivated.Fprint')
++    p = subprocess.Popen([sys.executable, '-c', FORGER, device_path, str(seconds), ','.join(kinds), finger, owner],
++                         stdout=subprocess.PIPE, universal_newlines=True)
++    assert p.stdout.readline().strip() == 'ready'
++    return p
++
++def forger_sent(p):
++    '''How many rounds the forger sent: none would make a test mean nothing'''
++    out = p.communicate(timeout=30)[0].strip()
++    assert p.returncode == 0
++    return int(out)
++
+ class TestPamFprintd(dbusmock.DBusTestCase):
+     '''Test pam_fprintd'''
+ 
+@@ -350,6 +406,48 @@ class TestPamFprintd(dbusmock.DBusTestCase):
+         self.assertEqual(len(res.errors), 0)
+         self.assertEqual(len(res.info), 0)
+ 
++    def test_pam_fprintd_ignores_signals_of_others(self):
++        self.setup_device()
++        script = [
++            ( 'verify-no-match', True, 4000 ),
++            ( 'verify-match', True, 1000 ),
++        ]
++        self.device_mock.SetVerifyScript(script)
++
++        # A match that nobody but another connection said, while fprintd is
++        # still looking at the finger
++        forger = start_forger(self.device_mock.object_path, ['selected', 'matched', 'status'], 'left-little-finger')
++
++        tc = pypamtest.TestCase(pypamtest.PAMTEST_AUTHENTICATE, expected_rv=PAM_SUCCESS)
++        res = pypamtest.run_pamtest("toto", "fprintd-pam-test", [tc], [ 'unused' ])
++        self.assertGreater(forger_sent(forger), 0)
++
++        # Only fprintd's own no match and then its own match counted
++        self.assertEqual(len(res.errors), 1)
++        self.assertRegex(res.errors[0], r'Failed to match fingerprint')
++
++        # PAM left the device claimed once it had its match
++        self.device_mock.VerifyStop()
++        self.device_mock.Release()
++
++    def test_pam_fprintd_ignores_name_owner_changed_of_others(self):
++        self.setup_device()
++        script = [
++            ( 'verify-match', True, 4000 ),
++        ]
++        self.device_mock.SetVerifyScript(script)
++
++        # Not the bus, so not a reason to give up on fprintd
++        forger = start_forger(self.device_mock.object_path, ['owner'])
++
++        tc = pypamtest.TestCase(pypamtest.PAMTEST_AUTHENTICATE, expected_rv=PAM_SUCCESS)
++        res = pypamtest.run_pamtest("toto", "fprintd-pam-test", [tc], [ 'unused' ])
++        self.assertGreater(forger_sent(forger), 0)
++        self.assertEqual(len(res.errors), 0)
++
++        self.device_mock.VerifyStop()
++        self.device_mock.Release()
++
+ @unittest.skipUnless(os.geteuid() == 0, 'the duress finger is only read from files of root')
+ class TestPamFprintdDuress(dbusmock.DBusTestCase):
+     '''Amethystora's duress finger: the account's file names it, the reader
+@@ -421,6 +519,11 @@ class TestPamFprintdDuress(dbusmock.DBusTestCase):
+         tc = pypamtest.TestCase(pypamtest.PAMTEST_AUTHENTICATE, expected_rv=expected_rv)
+         return pypamtest.run_pamtest(self.user, service, [tc], [ 'unused' ])
+ 
++    def authenticate_after(self, service, expected_rv, delay):
++        self.device_mock.SetVerifyScript([( 'verify-match', True, delay )])
++        tc = pypamtest.TestCase(pypamtest.PAMTEST_AUTHENTICATE, expected_rv=expected_rv)
++        return pypamtest.run_pamtest(self.user, service, [tc], [ 'unused' ])
++
+     def test_pam_duress_allow(self):
+         self.setup_device()
+         self.setup_duress_service()
+@@ -512,6 +615,23 @@ class TestPamFprintdDuress(dbusmock.DBusTestCase):
+                 self.device_mock.Release()
+         self.assertEqual(self.duress_runs(wait=0.5), [])
+ 
++    def test_pam_duress_ignores_signals_of_others(self):
++        # The reader matches the right ring finger, which is not the duress
++        # one. Another connection says that the duress finger matched.
++        self.setup_device()
++        self.setup_duress_service()
++        self.write_duress_finger('left-index-finger')
++
++        for service in ['fprintd-pam-test-duress-allow', 'fprintd-pam-test-duress-deny']:
++            with self.subTest(service=service):
++                forger = start_forger(self.device_mock.object_path, ['selected', 'matched', 'status'], 'left-index-finger')
++                res = self.authenticate_after(service, PAM_SUCCESS, 4000)
++                self.assertGreater(forger_sent(forger), 0)
++                self.assertEqual(len(res.errors), 0)
++                self.device_mock.VerifyStop()
++                self.device_mock.Release()
++        self.assertEqual(self.duress_runs(wait=0.5), [])
++
+     def test_pam_duress_without_service(self):
+         # Refused all the same: whether anything listens changes nothing on screen
+         self.setup_device()

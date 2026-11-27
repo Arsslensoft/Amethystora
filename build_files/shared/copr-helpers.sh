@@ -100,15 +100,13 @@ key_fingerprints() {
 # key signs, and dnf imports whatever key is there on first use. pin_repo_key fetches the one key a
 # repository file names, refuses it unless it is exactly the key with the fingerprint pinned here, keeps
 # it in /etc/pki/rpm-gpg and points the file at that copy, so that dnf never takes another key from the
-# server. Run it after the repository file is written and before anything is installed from it.
+# server. It ends by asking dnf what it reads from the file (`dnf5 repo info --json`), since some repository
+# files come from the repository's own server (Tailscale's, Docker's) and may write a value over several lines
+# or define more repositories than expected: every repository the file defines must check its packages'
+# signatures and name that one key file only. Run it after the repository file is written and before anything
+# is installed from it.
 pin_repo_key() {
-    local repo_file="$1" fingerprint="$2" url key
-    # Some repository files come from the repository's own server (Tailscale's, Docker's), which could
-    # turn off the very check the pinned key is for
-    if grep -Eiq '^[[:space:]]*(pkg_)?gpgcheck[[:space:]]*=[[:space:]]*(0|false|no|off)[[:space:]]*$' "${repo_file}"; then
-        echo "ERROR: ${repo_file} turns off the signature check of its packages"
-        return 1
-    fi
+    local repo_file="$1" fingerprint="$2" url key bad
     url="$(sed -n 's/^gpgkey[[:space:]]*=[[:space:]]*//p' "${repo_file}" | sort -u)"
     if [[ -z "${url}" || "${url}" == *[[:space:]]* ]]; then
         echo "ERROR: ${repo_file} does not name exactly one key: ${url}"
@@ -121,6 +119,16 @@ pin_repo_key() {
         return 1
     fi
     sed -i "s|^gpgkey[[:space:]]*=.*|gpgkey=file://${key}|" "${repo_file}"
+    bad="$(dnf5 repo info --all --json --disable-repo='*' | jq -r --arg f "${repo_file}" --arg k "file://${key}" '
+        [.[] | select(.repo_file_path == $f)] |
+        if length == 0 then "no repository" else .[] | select(.pkg_gpgcheck != true or .gpg_key != [$k]) | .id end')" || {
+        echo "ERROR: dnf could not say what it reads from ${repo_file}"
+        return 1
+    }
+    if [[ -n "${bad}" ]]; then
+        echo "ERROR: ${repo_file} does not check package signatures with the pinned key alone: ${bad//$'\n'/ }"
+        return 1
+    fi
 }
 
 # The Copr projects' signing keys, by fingerprint, as served on 2026-10-08. A project that changes its

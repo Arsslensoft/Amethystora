@@ -1,0 +1,15 @@
+name: Amethystora
+
+# Test code holds fixed keys and secrets on purpose. Where CodeQL does not honour these paths, and for Rust's
+# in-file unit tests, .github/codeql/filter-tests.mjs leaves the results out before the upload.
+paths-ignore:
+  - '**/tests/**'
+  - '**/test/**'
+  - 'tests/**'
+  - '**/tests.rs'
+  - '**/*_tests.rs'
+  - '**/test_*.py'
+  - 'build_files/shared/test-*'
+  - 'apps/vault-core/src/sync/fake.rs'
+  - 'apps/vault-core/src/kemlock/sync/fake.rs'
+  - 'apps/vault-core/src/kemlock/vectors.rs'

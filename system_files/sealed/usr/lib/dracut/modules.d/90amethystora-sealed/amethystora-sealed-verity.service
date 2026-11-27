@@ -1,8 +1,9 @@
-# Stops a sealed system whose files would not be verified (amethystora-sealed-verity). It halts: the
-# emergency target would let the boot continue, since the root account is locked, were it not for the
-# sealed command line's rd.shell=0 rd.emergency=halt, which also halt the boot where bootc's own unit
-# fails. It starts on either argument bootc names the image with: composefs.digest= since 1.17, and the
-# bare composefs=, which 1.17 still writes only for older clients.
+# Stops a sealed system whose files would not be verified, or are not the signed command line's image
+# (amethystora-sealed-verity). It halts: the emergency target would let the boot continue, since the root
+# account is locked, were it not for the sealed command line's rd.shell=0 rd.emergency=halt, which also
+# halt the boot where bootc's own unit fails. initrd-root-fs.target requires it (module-setup.sh), so the
+# boot cannot reach switch-root without it. It starts on either argument bootc names the image with:
+# composefs.digest= since 1.17, and the bare composefs=, which 1.17 still writes only for older clients.
 [Unit]
 Description=Check that the sealed system's files are verified
 DefaultDependencies=no

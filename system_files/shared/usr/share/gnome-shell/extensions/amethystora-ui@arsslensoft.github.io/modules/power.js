@@ -4,9 +4,12 @@
 // mouse, the keyboard, the headphones and the rest, with a notice once at 15 % (modules/power/devices.js). After a night
 // that emptied the battery, a notice says what woke the computer (modules/power/slept.js).
 //
+// While a game is registered with GameMode, banners and the account's timed backup wait and, on mains, the power mode is
+// performance (modules/power/playing.js).
+//
 // At 3% a flat battery closes the computer cleanly and keeps where the apps were (modules/power/flat.js).
 //
-// Five keys of org.gnome.shell.extensions.amethystora-ui.power (ame desktop power battery|busy|devices|flat|sleep, Control), read
+// Six keys of org.gnome.shell.extensions.amethystora-ui.power (ame desktop power battery|busy|devices|flat|sleep and ame desktop while-playing, Control), read
 // live; a part that is off has nothing connected and nothing made. Nothing new runs on a timer: the battery looks at the
 // processes when it is plugged in or out and when its menu opens, and the busy chip rides the meters' own reading
 // (without the meters there is no chip).
@@ -18,6 +21,7 @@ import {Busy} from './power/busy.js';
 import {DeviceBatteries} from './power/devices.js';
 import {ChargeBy} from './power/charge.js';
 import {FlatBattery} from './power/flat.js';
+import {Playing} from './power/playing.js';
 import {SleptReport, forgetSleep} from './power/slept.js';
 
 const SCHEMA = 'org.gnome.shell.extensions.amethystora-ui.power';
@@ -36,12 +40,14 @@ export class Power {
             'changed::flat-battery', () => this._sync(),
             'changed::charge-by-leaving', () => this._sync(),
             'changed::sleep-report', () => this._sync(),
+            'changed::while-playing', () => this._sync(),
             this);
         this._sync();
     }
 
     disable() {
         this._settings?.disconnectObject(this);
+        this._stop('_playing');
         this._stop('_charge');
         this._stop('_flat');
         this._stop('_slept');
@@ -63,6 +69,10 @@ export class Power {
             () => new DeviceBatteries(modules?.get('quick'), modules?.get('connect')));
         this._toggle('_flat', this._settings.get_boolean('flat-battery'), () => new FlatBattery(this._ext, this._settings));
         this._toggle('_charge', this._settings.get_boolean('charge-by-leaving'), () => new ChargeBy(this._ext));
+        // Told before it stops, so that it can tell the key from a lock
+        if (!this._settings.get_boolean('while-playing'))
+            this._playing?.keyOff();
+        this._toggle('_playing', this._settings.get_boolean('while-playing'), () => new Playing(this._ext));
         this._toggle('_slept', this._settings.get_boolean('sleep-report'), () => new SleptReport());
         if (!this._slept)
             forgetSleep();
@@ -115,6 +125,11 @@ export class Power {
 
     get flat() {
         return this._flat;
+    }
+
+    // While you play (power/playing.js), or null while it is off
+    get playing() {
+        return this._playing ?? null;
     }
 
     glassSurfaces() {

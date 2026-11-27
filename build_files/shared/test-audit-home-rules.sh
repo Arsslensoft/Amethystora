@@ -98,6 +98,8 @@ as 4204 touch "${R}/var/home/omega/.npmrc"
 O="${R}/var/home/omega"
 as 4204 mkdir -p "${O}/.config/glab-cli" "${O}/.azure" "${O}/.local/share/kwalletd"
 as 4204 touch "${O}/.pgpass" "${O}/.config/glab-cli/config.yml" "${O}/.azure/msal_token_cache.json" "${O}/.azure/azureProfile.json"
+# A profile folder whose name holds a line break gets no watch, and adds no line of its own to the list
+as 4204 bash -c 'd="$1/.config/chromium/a"$'"'"'\n'"'"'"tree credentials "; mkdir -p "$d" && : >"$d/Login Data"' _ "${R}/var/home/omega"
 printf 'CREDENTIALS=on\n' >"${T}/security.conf"
 AMETHYSTORA_SECURITY_CONF="${T}/security.conf" AMETHYSTORA_SENSOR_FORCE=sensor bash "${GENERATOR}"
 RUN="${R}/run/amethystora/sensor"
@@ -110,6 +112,9 @@ for file in .pgpass .config/glab-cli/config.yml .azure/msal_token_cache.json; do
 done
 grep -qx "read-tree credentials ${O}/.local/share/kwalletd" "${RUN}/watch.list" || { echo "KDE's wallets are not watched"; false; }
 grep -qF "${O}/.azure/azureProfile.json" "${RUN}/watch.list" && { echo "a file beside a secret is watched"; false; }
+grep -qE '^(tree|file|exec-tree|read-tree|read-file) [a-z-]+ /' "${RUN}/watch.list" &&
+    ! grep -vqE '^(tree|file|exec-tree|read-tree|read-file) [a-z-]+ /' "${RUN}/watch.list" &&
+    ! grep -qx "tree credentials /Login Data" "${RUN}/watch.list" || { echo "a path with a line break split the watch list"; false; }
 grep -qx 'identity sensor' "${RUN}/plan"
 [[ "$(stat -c %a "${RUN}/watch.list")" == 600 && "$(stat -c %a "${RUN}/plan")" == 600 ]] ||
     { echo "the plan or the watch list can be read by anyone"; false; }

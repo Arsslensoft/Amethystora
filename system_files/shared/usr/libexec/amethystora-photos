@@ -12,9 +12,10 @@
 #   amethystora-photos search WORD...  the photos nearest what was described, as JSON [{"path", "score"}]
 #   amethystora-photos search --stdin  the same, the words read from standard input (what the desktop's search does)
 #
-# Photos are read through GdkPixbuf, which reads every kind through glycin's sandboxed loaders: a picture somebody sent cannot
-# run code here. Nothing is opened in Private, in a folder that starts with a dot or through a link, and no file name is ever
-# logged or put in an error.
+# Photos are read through GdkPixbuf, and a file is decoded only when its first bytes are the signature of one of the kinds in
+# KINDS: those are read by glycin's sandboxed loaders, so a picture somebody sent cannot run code here, and anything else
+# (an XPM saved under the name x.jpg, whose loader is not glycin's) is skipped. Nothing is opened in Private, in a folder that
+# starts with a dot or through a link, and no file name is ever logged or put in an error.
 
 import base64
 import hashlib
@@ -274,8 +275,23 @@ def session(name):
     return onnxruntime.InferenceSession(os.path.join(data_folder(), name), options, providers=['CPUExecutionProvider'])
 
 
+# The signatures of KINDS: JPEG, PNG, GIF, BMP, TIFF (both byte orders), WebP (RIFF, then WEBP at 8) and HEIF or AVIF (a ftyp box)
+SIGNATURES = (b'\xff\xd8\xff', b'\x89PNG\r\n\x1a\n', b'GIF87a', b'GIF89a', b'BM', b'II*\x00', b'MM\x00*', b'II+\x00', b'MM\x00+')
+HEIF_BRANDS = (b'heic', b'heix', b'hevc', b'mif1', b'msf1', b'avif', b'avis')
+
+
+def is_picture(path):
+    """Whether the file starts as one of the kinds in KINDS, whatever it is named"""
+    with open(path, 'rb') as f:
+        head = f.read(16)
+    return (head.startswith(SIGNATURES) or (head[:4] == b'RIFF' and head[8:12] == b'WEBP') or
+            (head[4:8] == b'ftyp' and head[8:12] in HEIF_BRANDS))
+
+
 def picture_vector(model, path, np):
-    """One photo's vector, or None for a file that is not a picture this can read. Read through glycin."""
+    """One photo's vector; a file that does not start as a picture of KINDS raises ValueError before anything decodes it."""
+    if not is_picture(path):
+        raise ValueError('not a picture')
     import gi
     gi.require_version('GdkPixbuf', '2.0')
     from gi.repository import GdkPixbuf

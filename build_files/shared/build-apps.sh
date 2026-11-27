@@ -182,8 +182,9 @@ env LD_LIBRARY_PATH=/stage/usr/lib64 NODE_ICU_DATA="$(echo /stage/usr/share/node
 # The crates compiled, for the cargo layer: the workspace's own crates are left out, which cargo compiles anyway
 if [[ -n "${CARGO_SAVE:-}" ]]; then
     for crate in $(jq -r '.packages[] | select(.source == null) | .name' /tmp/metadata.json | tr - _ | sort -u); do
+        # build/CRATE-HASH before cargo 1.100, build/CRATE/HASH in its build-dir layout
         rm -rf "${CARGO_TARGET_DIR}"/release/deps/{,lib}"${crate}"-* "${CARGO_TARGET_DIR}"/release/.fingerprint/"${crate//_/-}"-* \
-            "${CARGO_TARGET_DIR}"/release/build/"${crate//_/-}"-*
+            "${CARGO_TARGET_DIR}"/release/build/"${crate//_/-}"-* "${CARGO_TARGET_DIR}/release/build/${crate//_/-}"
     done
     rm -rf "${CARGO_TARGET_DIR}/release/incremental"
     mkdir -p "${CARGO_SAVE}"

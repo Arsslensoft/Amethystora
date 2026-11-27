@@ -377,9 +377,11 @@ fn main() -> ExitCode {
         libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
         libc::alarm(PATIENCE_SECONDS);
     }
-    // Before anything is read: no state folder, no socket and no other program from here on (`confine.rs`). What a kernel or an
-    // architecture cannot give is left, and the unit's own limits still hold.
-    amethystora_vault_service::confine::confine();
+    // Before anything is read: no state folder, no socket and no other program from here on (`confine.rs`). A job that could not be
+    // confined parses nothing: it ends with a failure, which the service answers as a failed job.
+    if !amethystora_vault_service::confine::confine().held() {
+        return ExitCode::FAILURE;
+    }
     let mut line = Zeroizing::new(Vec::new());
     if std::io::stdin().lock().take(MOST_IN).read_to_end(&mut line).is_err() {
         return ExitCode::FAILURE;

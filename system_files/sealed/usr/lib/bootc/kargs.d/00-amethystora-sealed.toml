@@ -3,7 +3,9 @@
 # compression and the `root` subvolume the sealed installer makes (amethystora-install-sealed), and the
 # boot splash. There is no root= argument: systemd finds the root partition by its GPT type, and unlocks
 # it with the TPM when one holds its key. All of it is inside the signed UKI, so a machine cannot change
-# any of it, at the boot menu or anywhere else.
+# any of it, at the boot menu or anywhere else. systemd-stub can only add to it at boot, from the firmware's
+# SMBIOS strings or a signed add-on, which it measures into PCR 12: the sealed disk unlock binds PCR 12, and
+# amethystora-sealed-verity refuses an image named there.
 #
 # systemd.import_credentials=no: systemd takes no credentials from the firmware's SMBIOS strings, a
 # hypervisor or the ESP. They could add a drop-in to any unit, the initramfs's own included, and so stop

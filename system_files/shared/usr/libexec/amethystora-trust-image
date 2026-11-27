@@ -5,9 +5,12 @@
 # build runs it too (the image template's Containerfile does), so that the image checks its own updates
 # the same way once the machine runs it:
 #
-#   /etc/pki/containers/<REPOSITORY, / as ->.pub            KEY
-#   /etc/containers/registries.d/<REPOSITORY, / as ->.yaml   where cosign puts the signatures
+#   /etc/pki/containers/<NAME>.pub                          KEY
+#   /etc/containers/registries.d/<NAME>.yaml                 where cosign puts the signatures
 #   /etc/containers/policy.json                              REPOSITORY needs a signature KEY checks
+#
+# NAME is REPOSITORY with each - doubled and then each / as -, so that no two repositories share a file. An entry
+# of the policy that this command did not write (the image's own for openSUSE and toolbx) is never replaced.
 #
 # Without it, the policy takes an image from a repository it does not name with no signature at all.
 # The key and registries.d files come out the same on the machine and in the image.
@@ -43,11 +46,21 @@ openssl pkey -pubin -noout -in "${KEY}" 2>/dev/null ||
     die "${KEY} is not a public key, such as the cosign.pub that cosign generate-key-pair writes."
 [[ -n "${ROOT}" || "${EUID}" -eq 0 ]] || die "It changes /etc: ame system trust-image runs it with sudo."
 
-NAME="${REPOSITORY//\//-}"
+NAME="${REPOSITORY//-/--}"
+NAME="${NAME//\//-}"
 KEY_PATH="/etc/pki/containers/${NAME}.pub"
 POLICY="${ROOT}/etc/containers/policy.json"
 REGISTRIES="${ROOT}/etc/containers/registries.d/${NAME}.yaml"
 [[ -f "${POLICY}" ]] || die "There is no ${POLICY}."
+# An entry this command did not write stays as it is: the image's own (openSUSE's, toolbx's) are not an owner's to replace.
+# Its own is one signature requirement with a key under /etc/pki/containers, which another key may replace.
+jq -e --arg repository "${REPOSITORY}" '(.transports.docker[$repository] // null) as $entry
+    | $entry == null or ($entry | length == 1 and .[0].type == "sigstoreSigned"
+        and ((.[0].keyPath // "") | startswith("/etc/pki/containers/")))' "${POLICY}" >/dev/null ||
+    die "${POLICY} already has an entry for ${REPOSITORY} that this command did not write, and it is left as it is."
+if [[ -e "${REGISTRIES}" ]] && ! grep -qxF "  ${REPOSITORY}:" "${REGISTRIES}"; then
+    die "${REGISTRIES} is not for ${REPOSITORY}, and it is left as it is."
+fi
 
 install -D -m 0644 "${KEY}" "${ROOT}${KEY_PATH}"
 mkdir -p "${REGISTRIES%/*}"

@@ -7,7 +7,8 @@ machines, VSCodium, and the profiling tools to find out why something is slow.
 
 Toolchains, language runtimes and databases live in containers described in the project's own repository,
 so the project builds the same on your machine, a colleague's Mac and in CI, and the system underneath
-stays clean enough to update without a second thought.
+stays clean enough to update without a second thought. A database, a cache or a mail catcher for a project is one
+line, `ame dev service add postgres` ([Services for a project](dev-services.md)), on every image, not only this one.
 
 ## Turning it on
 
@@ -65,7 +66,7 @@ names the accounts in them. Podman, which is rootless, and virtual machines on y
 | Podman | With `podman-compose`, `podman machine` and `podman-tui`. Always there, rootless, and the Podman socket is on. |
 | qemu-user-static | Containers and programs built for other processors, such as `podman run --platform linux/arm64` |
 | Incus | System containers and virtual machines, managed like cloud instances |
-| libvirt and virt-manager | Virtual machines with QEMU and KVM; virt-v2v converts machines from other hypervisors |
+| libvirt and virt-manager | Virtual machines with QEMU and KVM; virt-v2v converts machines from other hypervisors. Passing a USB device through to a virtual machine from virt-manager or virt-viewer asks for an administrator's password each time, and a machine of your own connection gets no bridged network device unless an administrator allows the bridge in `/etc/qemu/bridge.conf` (user-mode networking works as it is). |
 | Cockpit's bridge | Manage this machine from Cockpit on another one, over SSH |
 | VFIO | Loaded at the start, so that a graphics card or another PCI device can be handed to a virtual machine once kernel arguments bind it |
 | Sysprof, perf, bcc, bpftrace, bpftop, bpftool, trace-cmd | Profiling and tracing, from the whole system down to one function |

@@ -1,0 +1,54 @@
+#!/usr/bin/bash
+# Two units of every start that failed on a machine where nothing was wrong, and so left every machine "degraded": run as
+# their ExecStart (their drop-ins, 50-amethystora-known-failures.conf), each runs systemd's own program and fails only on
+# what is not that one known case. What it said goes to the unit's journal as before, where the driver check reads it.
+#
+#   amethystora-early-units modules-load [ARGS]   systemd-modules-load. A module the kernel refused for its key or for
+#                                                 lockdown (Universal Blue's v4l2loopback before its key is enrolled, on a
+#                                                 new machine with Secure Boot on) is amethystora-driver-status's to say,
+#                                                 with the way to enroll it; any other module that fails still fails it
+#   amethystora-early-units remount-fs [ARGS]     systemd-remount-fs. On a composefs root, / cannot be remounted at all
+#                                                 ("No changes allowed in reconfigure"), and Anaconda's fstab names it; any
+#                                                 other mount that fails still fails it
+#
+# AMETHYSTORA_EARLY_SYSTEMD names another folder of systemd's programs, for test-early-units.sh.
+set -uo pipefail
+
+SYSTEMD="${AMETHYSTORA_EARLY_SYSTEMD:-/usr/lib/systemd}"
+mode="${1:-}"
+shift || true
+
+# The program's own words, on the console target so that they can be read here, then passed on to the unit's journal
+run() {
+    out="$(SYSTEMD_LOG_TARGET=console "$@" 2>&1)"
+    status=$?
+    [[ -z "${out}" ]] || printf '%s\n' "${out}" >&2
+}
+
+case "${mode}" in
+    modules-load)
+        run "${SYSTEMD}/systemd-modules-load" "$@"
+        [[ "${status}" == 0 ]] && exit 0
+        failed="$(grep -E "^Failed to insert module '" <<<"${out}")"
+        [[ -n "${failed}" ]] || exit "${status}"
+        # Refused for its key (EKEYREJECTED, ENOKEY) or by lockdown (EPERM): known, and the driver check says it
+        grep -vqE ': (Key was rejected by service|Required key not available|Operation not permitted)$' <<<"${failed}" &&
+            exit "${status}"
+        echo "amethystora-early-units: only modules the kernel refused for their key failed; amethystora-driver-status says how to let them load" >&2
+        exit 0
+        ;;
+    remount-fs)
+        run "${SYSTEMD}/systemd-remount-fs" "$@"
+        [[ "${status}" == 0 ]] && exit 0
+        [[ "$(findmnt -no FSTYPE / 2>/dev/null)" == overlay ]] || exit "${status}"
+        failed="$(grep -E ' for .+ exited with exit status [0-9]+\.?$' <<<"${out}")"
+        [[ -n "${failed}" ]] || exit "${status}"
+        grep -vqE ' for / exited with exit status [0-9]+\.?$' <<<"${failed}" && exit "${status}"
+        echo "amethystora-early-units: only the composefs root, which cannot be remounted, failed to remount" >&2
+        exit 0
+        ;;
+    *)
+        sed -n '2,13p' "$0" | sed 's/^# \?//' >&2
+        exit 64
+        ;;
+esac

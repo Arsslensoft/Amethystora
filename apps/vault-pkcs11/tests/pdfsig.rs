@@ -20,17 +20,23 @@ fn attempt(command: &mut Command) -> (bool, String) {
     (out.status.success(), format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
 }
 
+/// The module built with the test backend, which these tests need, known by the backend's variable in it (the real module, which
+/// `build-apps.sh` builds first, is in target/release too): beside this program in deps/ in cargo's old layout; in the build-dir
+/// layout of cargo 1.100 in build/amethystora-vault-pkcs11/HASH/out/, beside this program's own build/amethystora-vault-pkcs11/HASH/out/.
+/// The newest when there are several
 fn module() -> PathBuf {
-    // deps/pdfsig-HASH -> the target folder that has the cdylib
+    const NAME: &str = "libamethystora_vault_pkcs11.so";
+    const TEST_BACKEND: &[u8] = b"AMETHYSTORA_VAULT_PKCS11_TEST";
     let exe = std::env::current_exe().unwrap();
-    let deps = exe.parent().unwrap();
-    for folder in [deps.to_path_buf(), deps.parent().unwrap().to_path_buf()] {
-        let path = folder.join("libamethystora_vault_pkcs11.so");
-        if path.exists() {
-            return path;
-        }
+    let mut candidates: Vec<PathBuf> = exe.ancestors().skip(1).take(2).map(|folder| folder.join(NAME)).collect();
+    if let Some(Ok(units)) = exe.parent().and_then(Path::parent).and_then(Path::parent).map(std::fs::read_dir) {
+        candidates.extend(units.flatten().map(|unit| unit.path().join("out").join(NAME)));
     }
-    panic!("the module is not built");
+    candidates
+        .into_iter()
+        .filter(|path| std::fs::read(path).is_ok_and(|bytes| bytes.windows(TEST_BACKEND.len()).any(|window| window == TEST_BACKEND)))
+        .max_by_key(|path| std::fs::metadata(path).and_then(|meta| meta.modified()).unwrap_or(UNIX_EPOCH))
+        .expect("the module is not built with its test backend")
 }
 
 fn unsigned_pdf() -> Vec<u8> {

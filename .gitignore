@@ -7,6 +7,8 @@ previous.manifest.json
 changelog.md
 output.env
 version.txt
+settings.local.json
+
 sbom_out/
 plans
 

@@ -1,0 +1,64 @@
+name: CodeQL
+
+# CodeQL's analysis of the code and the workflows, in place of GitHub's default setup, so that test code is left
+# out: the tests hold fixed keys and secrets on purpose, which the queries report as real. paths-ignore
+# (.github/codeql/codeql-config.yml) keeps test folders out where CodeQL honours it, and filter-tests.mjs takes
+# what is left of test code out of each result file, Rust's in-file unit tests included, before it is uploaded.
+# Each language uploads under the category the default setup used, so its alerts carry on.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: '27 4 * * 3'
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, c-cpp, javascript-typescript, python, rust]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          category: /language:${{ matrix.language }}
+          upload: never
+          output: sarif-results
+
+      - name: Leave out test code
+        run: |
+          for f in sarif-results/*.sarif; do
+            node .github/codeql/filter-tests.mjs "$f"
+          done
+
+      - name: Upload
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          sarif_file: sarif-results
+          category: /language:${{ matrix.language }}

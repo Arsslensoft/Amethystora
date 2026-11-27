@@ -1,0 +1,13 @@
+[Unit]
+Description=Forensic start: "Disks read-only" in the top bar
+ConditionKernelCommandLine=amethystora.forensic=1
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/amethystora-forensic pill
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

@@ -46,6 +46,9 @@ Windows driver too: Linux brings its own, and `ame system drivers` says which on
 package from the Microsoft Store (`.msix`, `.appx`) is only matched against the list, since Wine cannot
 install it.
 
+For a game that a community list of anti-cheats knows (Valorant, League of Legends, Roblox), the handler says what the
+list says of it, and the day, before it offers anything ([Will it run?](games.md#will-it-run)).
+
 For the rest, a Windows virtual machine runs nearly everything: the [developer image](developer.md) comes
 with virtual machines, and WinBoat, which you install yourself, shows Windows apps from one as windows of
 their own (the Windows licence is yours to bring).

@@ -93,8 +93,10 @@ systemctl enable amethystora-flatpak-remotes.service
 # `ame security input-remapper` turns it on for them.
 systemctl disable input-remapper.service
 # The same for Android apps, whose container runs as root (ame apps android), and for the sched-ext CPU
-# schedulers, which replace the kernel's own (ame system scheduler)
-systemctl disable waydroid-container.service
+# schedulers, which replace the kernel's own (ame system scheduler). Waydroid's unit is masked, not disabled:
+# its D-Bus service (id.waydro.Container) would start it as root for any account that calls it, and its Stop,
+# Freeze and GetSession check nobody. Only `ame apps android` unmasks it.
+systemctl mask waydroid-container.service
 systemctl disable scx_loader.service
 # L2TP/IPsec VPNs (NetworkManager-l2tp, 04-packages.sh): Fedora's kernel blacklists every module of
 # kernel-modules-extra that a net- alias would let any account load, and the plugin's L2TP daemon gets
@@ -106,6 +108,12 @@ rm -f /etc/modprobe.d/l2tp_netlink-blacklist.conf /etc/modprobe.d/l2tp_ppp-black
 # device while the screen is unlocked, which undoes `ame security usb on`. Only `ame security usb locked`
 # unmasks it.
 systemctl mask usbguard-dbus.service
+# fwupd's passim, which offers the firmware metadata fwupd downloaded to every machine on the network: fwupd starts it
+# over D-Bus when firmware is looked for, and it listens on 0.0.0.0:27500 with a service of its own (a mount namespace
+# of its own), which the security watcher by design never takes for the program it names. So it is off, masked
+# (D-Bus activation would start it): each machine downloads its own firmware updates. `ame security network-daemons
+# off` unmasks it, as it unmasks Avahi and ModemManager
+systemctl mask passim.service
 # The base image's appstream cache refresh runs `appstreamcli refresh --force`
 # ordered Before=multi-user.target on every boot, which gated graphical.target by
 # ~6-11 s (measured on the critical chain). GNOME Software is not in the image, so

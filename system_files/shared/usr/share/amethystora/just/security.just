@@ -241,14 +241,19 @@ duress ACTION="":
                 ;;
             *) exit 0 ;;
         esac
+        # Read once: the file is the account's, so what is shown is what root is handed on standard input,
+        # never what the file holds by then
+        local content
+        content="$(cat "${file}"; printf x)"
+        content="${content%x}"
+        rm -f "${file}"
         echo "$(gettext "The action, which runs as root:")"
         echo
-        cat "${file}"
+        printf '%s' "${content}"
         echo
         gum confirm "${question}" || exit 0
         sudo /usr/libexec/amethystora-security-config note duress action
-        sudo "${duress}" action "${src}" "${file}"
-        rm -f "${file}"
+        printf '%s' "${content}" | sudo "${duress}" action "${src}" -
     }
     case "${action}" in
         "${setup_finger}" | setup)
@@ -827,6 +832,10 @@ settings SETTING="" VALUE="":
                 exit 64
             fi
             title="$(jq -r .title <<<"${entry}")"
+            # Pulling the key has a device to choose and a rule to write, which its own command does
+            if [[ "${key}" == PULL_KEY ]]; then
+                exec ame security pull-key "${value}"
+            fi
             # Site checking is a choice in browser protection, which allows Osprey in the browsers
             if [[ "${key}" == OSPREY ]]; then
                 exec ame security browser osprey "${value}"
@@ -1249,6 +1258,92 @@ vscodium-extensions ACTION="":
 walk-away ACTION="":
     @ame security settings walk-away "${1:-}"
 
+# The screen locked, or the computer powered off, when the USB device you chose is pulled out (PULL_KEY in security.conf,
+# off as the image ships). ACTION is off, lock or poweroff, or device, which says which device to watch (and takes its ID,
+# which `ame security pull-key device` lists, as a second word). It stands alone: no other feature starts it or is started by it
+[positional-arguments]
+pull-key ACTION="" DEVICE="":
+    #!/usr/bin/bash
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source gettext.sh
+    config=/usr/libexec/amethystora-security-config
+    helper=/usr/libexec/amethystora-pull-key
+    action="${1:-}"
+    given="${2:-}"
+    cancel="$(gettext "Cancel")"
+    # The device that is chosen, empty for none
+    chosen() { "${helper}" status | jq -r '.device // empty'; }
+    # Which device to watch: one plugged in now, with a serial number of its own
+    pick() {
+        local id="" name line i lines=() ids=()
+        if [[ -n "${given}" ]]; then
+            id="${given}"
+        else
+            while IFS=$'\t' read -r found name; do
+                [[ -n "${found}" ]] || continue
+                lines+=("${name}  (${found})")
+                ids+=("${found}")
+            done < <("${helper}" list)
+            if [[ ${#ids[@]} -eq 0 ]]; then
+                echo "$(gettext "No USB device with a serial number of its own is plugged in. Plug in the one to tie to this computer, then run this again. A hub, and a device without a serial number, cannot be told from others of its make.")"
+                return 1
+            fi
+            echo "$(gettext "Choose a device that no program can make leave the bus: a plain USB stick or a security key, not a phone or a development board. A program of your account that can reset the device you choose can lock every session, or power the computer off, without anyone pulling it.")"
+            line="$(gum choose --header "$(gettext "Which USB device is pulled out to lock or power off?")" "${lines[@]}" "${cancel}")" || return 1
+            [[ "${line}" != "${cancel}" ]] || return 1
+            for i in "${!lines[@]}"; do
+                [[ "${lines[i]}" == "${line}" ]] && id="${ids[i]}"
+            done
+        fi
+        sudo "${helper}" choose "${id}" || return 1
+        echo "$(eval_gettext "Watching \${id}.")"
+        # USB protection blocks a device it was not told about: blocked, it is never plugged in to be pulled out
+        if systemctl is-enabled --quiet usbguard.service 2>/dev/null; then
+            echo "$(gettext "USB protection is on: this device has to be allowed, or it is blocked when it is plugged in and there is nothing to pull. ame security usb allow does that.")"
+        fi
+    }
+    if [[ -z "${action}" ]]; then
+        "${helper}" status | jq -r '"\(.key)  \(.device // "-")"'
+        action="$(gum choose --header "$(gettext "Pull the key")" off lock poweroff device "${cancel}")" || exit 0
+    fi
+    case "${action}" in
+        device)
+            pick || exit 0
+            if ! "${config}" --is PULL_KEY lock poweroff; then
+                echo "$(gettext "It does nothing until it is on: ame security pull-key lock, or poweroff.")"
+            fi
+            ;;
+        off)
+            sudo "${config}" set PULL_KEY off
+            sudo "${helper}" apply
+            echo "$(gettext "Pulling the device out does nothing now.")"
+            ;;
+        lock | poweroff)
+            if [[ -z "$(chosen)" ]]; then
+                pick || exit 0
+            fi
+            entry="$("${config}" --list --json | jq -c '.settings[] | select(.key == "PULL_KEY")')"
+            jq -r .text <<<"${entry}" | fold -s -w 96
+            echo
+            jq -r .explain <<<"${entry}" | fold -s -w 96
+            if [[ "${action}" == poweroff ]]; then
+                echo
+                echo "$(gettext "Power off ends everything at once, in order but without waiting for an app that holds the shutdown back, so what is not saved is lost.")"
+            fi
+            gum confirm "$(gettext "Turn it on, knowing that?")" || exit 0
+            sudo "${config}" set PULL_KEY "${action}"
+            sudo "${helper}" apply
+            device="$(chosen)"
+            echo "$(eval_gettext "On: \${action}. Pulling out \${device} does it.")"
+            ;;
+        "" | "${cancel}" | Cancel) exit 0 ;;
+        *)
+            echo "usage: ame security pull-key off|lock|poweroff|device [ID]"
+            exit 64
+            ;;
+    esac
+
 # What the security watcher noticed: accounts, what starts by itself, settings, keyboard readers
 [positional-arguments]
 events ACTION="":
@@ -1414,7 +1509,8 @@ usb ACTION="":
             # One rule, which allows every device: GNOME blocks what is new only while the screen is locked
             echo 'allow id *:* label "amethystora-usb-locked"' | sudo tee /etc/usbguard/rules.conf >/dev/null
             sudo chmod 0600 /etc/usbguard/rules.conf
-            sudo sed -i -E 's|^#?IPCAllowedGroups=.*|IPCAllowedGroups=wheel|' /etc/usbguard/usbguard-daemon.conf
+            # Root alone talks to USBGuard: every listing and allowing here goes through sudo, and a group in this line could add rules without a password
+            sudo sed -i -E 's|^#?IPCAllowedGroups=.*|IPCAllowedGroups=|' /etc/usbguard/usbguard-daemon.conf
             sudo /usr/libexec/amethystora-security-config note usb-protection locked
             sudo systemctl unmask usbguard-dbus.service
             sudo systemctl enable usbguard.service usbguard-dbus.service
@@ -1434,8 +1530,8 @@ usb ACTION="":
             # Built from what is connected right now, so the keyboard running this command is allowed
             usbguard generate-policy | sudo tee /etc/usbguard/rules.conf >/dev/null
             sudo chmod 0600 /etc/usbguard/rules.conf
-            # Without this only root could list or allow a device, and the prompt below would not work
-            sudo sed -i -E 's|^#?IPCAllowedGroups=.*|IPCAllowedGroups=wheel|' /etc/usbguard/usbguard-daemon.conf
+            # Root alone talks to USBGuard: the prompt below lists and allows through sudo, and a group in this line could add rules without a password
+            sudo sed -i -E 's|^#?IPCAllowedGroups=.*|IPCAllowedGroups=|' /etc/usbguard/usbguard-daemon.conf
             sudo /usr/libexec/amethystora-security-config note usb-protection on
             sudo systemctl enable usbguard.service
             # Restarted rather than started: a rule a session added while the screen-lock mode was on goes
@@ -1852,7 +1948,7 @@ disk-unlock ACTION="":
     echo
     echo "$(gettext "What this does: the TPM hands over the key only while Secure Boot is on and the enrolled signing keys are the ones enrolled now (PCR 7 and 14). Turning Secure Boot off, or adding a key to sign something of your own with, stops the disk opening.")"
     if [[ -e /usr/share/amethystora/sealed ]]; then
-        echo "$(gettext "This machine is sealed: its initramfs is inside the UKI that the enrolled key signs, so it cannot be rewritten without the machine refusing to start it. But neither PCR measures the disk the system starts from, nor /etc on it: someone with a disk of their own made to look like this one starts this same signed system on it, with their own settings, and without a PIN the TPM would hand that system the key. So it is set up only with a PIN here too.")"
+        echo "$(gettext "This machine is sealed: its initramfs is inside the UKI that the enrolled key signs, so it cannot be rewritten without the machine refusing to start it. The key is also bound to PCR 12, which changes when anything is added to the UKI's own kernel command line: the firmware's strings and add-ons signed by a key the boot loader trusts can add to it, and the system would start with what they add. But no PCR measures the disk the system starts from, nor /etc on it: someone with a disk of their own made to look like this one starts this same signed system on it, with their own settings, and without a PIN the TPM would hand that system the key. So it is set up only with a PIN here too. That stops someone who takes the machine, not someone who gives it back with such a disk: their settings can ask for the PIN and keep it once you type it.")"
     else
         echo "$(gettext "What it does not do: it does not measure the boot menu or the initramfs, which are plain files on this image and change with every kernel update. Someone who takes the machine could start it into a shell from the boot menu, or with a disk of their own made to look like this one, and neither changes PCR 7 or 14: without a PIN, the TPM would hand them the key. So here it is set up only with a PIN. That does not stop someone who rewrites the initramfs and gives the machine back: theirs can ask for the PIN itself and keep it once you type it.")"
     fi
@@ -1883,10 +1979,26 @@ disk-unlock ACTION="":
         gum confirm "$(gettext "Enrol anyway?")" || exit 0
     fi
     echo "$(gettext "Type the disk passphrase when asked, once for each encrypted disk of the system. It keeps working afterwards: this adds a second way in, not a replacement, so a cleared TPM or a replaced board does not lock you out of your disk.")"
+    # systemd hardens the PIN with Argon2id and by itself takes up to half of the machine's memory for one disk. A
+    # system on several disks opens them all at once in the initramfs, where two such keys need all of it: the
+    # unlock is killed for want of memory and the start ends in emergency mode (the lab, systemd 262). So the
+    # system's disks share that half.
+    if [[ ${#DEVICES[@]} -gt 1 ]]; then
+        FLAGS+=("--tpm2-argon2id-memory=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) * 1024 / 2 / ${#DEVICES[@]}))")
+    fi
+    # A sealed machine's key is bound to PCR 12 as well. systemd-stub measures there what it adds to the
+    # UKI's own command line (from the firmware's SMBIOS strings, whatever Secure Boot says, and from add-ons
+    # signed by any key shim trusts), and nothing else: bootc's boot entries pass the UKI no options. So it
+    # is the same at every start of an unchanged command line, through updates, and different otherwise,
+    # while PCR 7 is not. An ostree image starts through GRUB, which measures nothing there.
+    PCRS=7+14
+    if [[ -e /usr/share/amethystora/sealed ]]; then
+        PCRS=7+12+14
+    fi
     # Any key the TPM held before goes once this one is in (never the new one): one enrolled with other
     # PCRs, or none, as an older unlocker did, would otherwise open the disk without these checks
     for DEVICE in "${DEVICES[@]}"; do
-        sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7+14 "${FLAGS[@]}" "${DEVICE}"
+        sudo systemd-cryptenroll --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs="${PCRS}" "${FLAGS[@]}" "${DEVICE}"
     done
     # The initramfs is built without this machine's own settings in it, so the instruction to ask the
     # TPM has to come from the kernel command line. Without it the enrolled key is never used. A sealed
@@ -1901,13 +2013,43 @@ disk-unlock ACTION="":
 
 # Hourly read-only snapshots of the home folders, which ransomware running as you cannot change or delete
 [positional-arguments]
-ransomware ACTION="":
+ransomware ACTION="" *MORE:
     #!/usr/bin/bash
     set -euo pipefail
     # shellcheck source=/dev/null
     source gettext.sh
     SNAPSHOTS=/var/home/.snapshots
+    EXCLUDE=/usr/libexec/amethystora-snapshot-exclude
     action="${1:-}"
+    # The folders left out of the snapshots: listed by anyone, changed by root after saying what it costs
+    if [[ "${action}" == exclude ]]; then
+        verb="${2:-list}"
+        folder="${3:-}"
+        case "${verb}" in
+            list)
+                exec "${EXCLUDE}" list "${@:3}"
+                ;;
+            add)
+                [[ -n "${folder}" ]] || { echo "usage: ame security ransomware exclude add FOLDER" >&2; exit 64; }
+                echo "$(gettext "Leaving a folder out of the hourly snapshots saves the disk space they keep for what changes in it, such as games, containers and virtual machines. From now on, what changes in it is not kept: ransomware that encrypts it can be undone only from a backup.")"
+                echo
+                echo "$(gettext "The snapshots already taken keep the folder as it was, for up to two weeks. The folder becomes a subvolume of its own, which takes no space but a moment, and nothing may use it meanwhile: close the apps that do first.")"
+                gum confirm "$(eval_gettext "Leave \${folder} out of the hourly snapshots?")" || exit 0
+                sudo "${EXCLUDE}" add "${folder}"
+                ;;
+            remove)
+                [[ -n "${folder}" ]] || { echo "usage: ame security ransomware exclude remove FOLDER" >&2; exit 64; }
+                echo "$(gettext "The folder becomes a plain folder again, and the next snapshot keeps it. Nothing may use it meanwhile: close the apps that do first.")"
+                gum confirm "$(eval_gettext "Snapshot \${folder} again?")" || exit 0
+                sudo "${EXCLUDE}" remove "${folder}"
+                ;;
+            *)
+                echo "usage: ame security ransomware exclude [list [--json] | add FOLDER | remove FOLDER]" >&2
+                exit 64
+                ;;
+        esac
+        exit 0
+    fi
     turn_on="$(gettext "Turn on")"
     put_back="$(gettext "Put files back")"
     turn_off="$(gettext "Turn off")"

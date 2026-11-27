@@ -1,7 +1,7 @@
 [
   {
     "section": "Start here",
-    "pages": ["welcome.md", "getting-started.md", "installing.md", "choosing.md", "moving.md"]
+    "pages": ["welcome.md", "getting-started.md", "installing.md", "choosing.md", "moving.md", "move-in.md"]
   },
   {
     "section": "The desktop",
@@ -33,7 +33,7 @@
   },
   {
     "section": "Software",
-    "pages": ["software.md", "containers.md", "windows-programs.md", "terminal.md", "setup.md", "games.md", "developer.md", "own-image.md"]
+    "pages": ["software.md", "containers.md", "windows-programs.md", "terminal.md", "setup.md", "games.md", "kits.md", "developer.md", "dev-services.md", "own-image.md"]
   },
   {
     "section": "Updates",
@@ -41,7 +41,7 @@
   },
   {
     "section": "Security",
-    "pages": ["security.md", "security-switches.md", "security-settings.md", "what-leaves.md", "security-watcher.md", "new-threats.md", "app-integrity.md", "app-permissions.md", "viruses.md", "logins.md", "backups.md", "backup-other.md", "disk-encryption.md", "devices-security.md", "network-security.md", "screen-privacy.md"]
+    "pages": ["security.md", "security-switches.md", "security-settings.md", "what-leaves.md", "security-watcher.md", "new-threats.md", "app-integrity.md", "app-permissions.md", "viruses.md", "logins.md", "pull-the-key.md", "backups.md", "backup-other.md", "disk-encryption.md", "forensic-start.md", "devices-security.md", "network-security.md", "screen-privacy.md"]
   },
   {
     "section": "Vault",

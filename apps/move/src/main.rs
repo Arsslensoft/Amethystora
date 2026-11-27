@@ -133,36 +133,19 @@ fn report(summary: &Summary) {
 fn receive() -> Result<(), String> {
     let home = home_dir().ok_or_else(|| tr("There is no home folder to move into."))?;
     let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, PORT)).map_err(|e| trf("Cannot listen on port {port}: {error}", &[("port", &PORT.to_string()), ("error", &e.to_string())]))?;
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let udp = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, PORT)).map_err(|e| e.to_string())?;
     let checker: Arc<dyn Home + Send + Sync> = Arc::new(Firewalld);
     let mut answering = Some(discover::Answering::start(udp, PORT, host_name(), checker.clone()).map_err(|e| e.to_string())?);
     eprintln!("{}", tr("Waiting for the old computer. On it, run: ame system move send"));
     eprintln!("{}", tr("Only a computer on a network you named home can reach this one."));
-    let until = Instant::now() + WAIT;
-    let mut stream = loop {
-        match listener.accept() {
-            Ok((stream, from)) => {
-                if checker.is_home(from.ip()) {
-                    break stream;
-                }
-                // Not a network named home: dropped before a word is read
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() >= until {
-                    return Err(tr("Nobody called, so the wait is over."));
-                }
-                std::thread::sleep(Duration::from_millis(200));
-            }
-            Err(e) => return Err(e.to_string()),
-        }
-    };
+    // The first computer to finish the key exchange is the old one: a connection that does not finish it keeps no one out
+    let found = session::wait_for_sender(&listener, Instant::now() + WAIT, &|ip| checker.is_home(ip)).map_err(|e| e.0)?;
+    let (mut stream, mut keys) = found.ok_or_else(|| tr("Nobody called, so the wait is over."))?;
     // Nobody is asked or answered after the first one: the move listens for the wait, and for no longer
     drop(answering.take());
     drop(listener);
-    stream.set_nonblocking(false).map_err(|e| e.to_string())?;
     stream.set_read_timeout(Some(SILENCE)).map_err(|e| e.to_string())?;
-    let mut keys = session::handshake_receiver(&mut stream).map_err(|e| e.0)?;
+    stream.set_write_timeout(None).map_err(|e| e.to_string())?;
     let mut ui = Terminal::new();
     let summary = session::receive(&mut stream, &mut keys, &mut ui, &home).map_err(|e| e.0)?;
     report(&summary);

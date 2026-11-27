@@ -11,7 +11,11 @@ HOME_DIR="/var/home/${TEST_USER}"
 HISTORY=/var/log/amethystora-security-events.jsonl
 config=/usr/libexec/amethystora-security-config
 
+# Run without the suites before it, nobody has signed the account in: 10-account.sh does, as 32-focus.sh has it do.
 # After the restart, the session comes back by itself (GDM signs the account in)
+if [[ "${SUITE_PHASE}" == 1 ]] && ! has_session; then
+    bash "$(dirname "$0")/10-account.sh" >/dev/null
+fi
 if ! wait_for 300 has_session; then
     skip "no session for ${TEST_USER} (10-account.sh)"
     finish
@@ -91,6 +95,22 @@ if jq -e -s 'any(.[]; (.key == "credentials" or .key == "decoy") and (.text | te
         "$(jq -r -s '.[] | select(.key == "credentials" or .key == "decoy") | "\(.key): \(.text)"' <<<"${noise}" | grep -E '/proc/|/etc/shadow' | head)"
 else
     ok "a refused read of an unwatched path is not reported as a secret"
+fi
+
+# A secret renamed or linked before it is read is still seen: the sensor records a rename or a link of a file it
+# watches for reads under that file's key (the audit rules' path watches are detached from the file by a rename
+# and record no rename of a read watch, so this is the sensor's alone)
+if grep -q '^decoy sensor$' "${plan}" 2>/dev/null; then
+    before="$(wc -l <"${HISTORY}" 2>/dev/null || echo 0)"
+    in_session "mv ~/.ssh/id_backup ~/.ssh/id_backup.t && cat ~/.ssh/id_backup.t >/dev/null && mv ~/.ssh/id_backup.t ~/.ssh/id_backup
+        ln ~/.ssh/id_ed25519 ~/amethystora-test-link && rm -f ~/amethystora-test-link"
+    sleep 4
+    in_session "cat ~/.ssh/id_ed25519 >/dev/null"
+    sleep 3
+    check "the security watcher runs after the renames" systemctl start amethystora-security-watch.service
+    found="$(tail -n +"$((before + 1))" "${HISTORY}" 2>/dev/null)"
+    expect "the decoy key renamed before it was read" '.key == "decoy" and (.text | contains("/usr/bin/mv"))'
+    expect "the SSH key linked before it was read" '.key == "credentials" and (.text | contains("/usr/bin/ln")) and (.text | contains("id_ed25519"))'
 fi
 
 # Falco: running, and its memory against the unit's MemoryHigh

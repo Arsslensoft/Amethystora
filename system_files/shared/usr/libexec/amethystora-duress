@@ -37,7 +37,9 @@
 #   amethystora-duress password-accounts     the accounts with a duress password, a name a line (root)
 #   amethystora-duress has-password USER     whether USER has a duress password (exit 0 or 1, root)
 #   amethystora-duress finger USER           USER's duress finger, or nothing (root)
-#   amethystora-duress action SOURCE FILE    FILE becomes the fingerprint or password action (root)
+#   amethystora-duress action SOURCE FILE    FILE (or - for standard input, which `ame security duress` uses so
+#                                            that what the person was shown is what is kept) becomes the
+#                                            fingerprint or password action (root)
 #   amethystora-duress check [SOURCE]        what no longer holds for a source (or both), a line each:
 #                                            action-missing, action-changed, print-changed USER,
 #                                            service-stopped, folder-open; exit 1 when anything (root)
@@ -301,12 +303,12 @@ case "${1:-}" in
         ;;
     action)
         need_root "$@"
-        [[ $# -eq 3 && -f "$3" ]] || die "usage: ${0##*/} action fingerprint|password FILE"
+        [[ $# -eq 3 && ( "$3" == - || -f "$3" ) ]] || die "usage: ${0##*/} action fingerprint|password FILE"
         source="$2"
         [[ "${source}" == fingerprint || "${source}" == password ]] || die "no source is called ${source}"
         prepare
         new="$(mktemp "${DIR}/.new.XXXXXX")"
-        cat -- "$3" >"${new}"
+        if [[ "$3" == - ]]; then cat >"${new}"; else cat -- "$3" >"${new}"; fi
         chmod 0700 "${new}"
         mv -f "${new}" "${DIR}/action-${source}"
         { sums_without "${DIR}/action-${source}"; sha256sum "${DIR}/action-${source}"; } | write "${DIR}/sums"

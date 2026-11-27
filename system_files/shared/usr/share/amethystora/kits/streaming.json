@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "flatpaks": {
+    "system": [
+      {
+        "app": "com.github.wwmm.easyeffects",
+        "origin": "flathub"
+      },
+      {
+        "app": "com.obsproject.Studio",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.audacityteam.Audacity",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.inkscape.Inkscape",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.kde.kdenlive",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.kde.krita",
+        "origin": "flathub"
+      },
+      {
+        "app": "org.videolan.VLC",
+        "origin": "flathub"
+      }
+    ]
+  }
+}

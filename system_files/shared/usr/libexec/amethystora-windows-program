@@ -163,7 +163,20 @@ if [[ -n "${entry}" ]]; then
     if [[ "$(field wine)" == false ]]; then
         say "$(eval_gettext 'This is ${name}, which is known not to run with Wine on Linux, usually because of its anti-cheat, its licence checks or a driver of its own. A Windows virtual machine is what runs it: the developer image comes with virtual machines (amethystora-manual developer).')"
     else
-        say "$(eval_gettext 'This is ${name}. There are better ways to have it on Linux than the Windows program:')"
+        # A game the map knows only for the list's answer has no better way to offer
+        if [[ -n "$(field game)" && "$(jq -r '[.flatpak, .launcher, .ame, .web, .alternatives] | map(select(. != null)) | length' <<<"${entry}")" == 0 ]]; then
+            say "$(eval_gettext 'This is ${name}.')"
+        else
+            say "$(eval_gettext 'This is ${name}. There are better ways to have it on Linux than the Windows program:')"
+        fi
+    fi
+    # What the community list of games and their anti-cheat says of this one (amethystora-will-it-run), before anything is
+    # offered. It says what the list says, with the day its entry changed, and never that the game will run
+    game="$(field game)"
+    if [[ -n "${game}" ]] && answer="$(/usr/libexec/amethystora-will-it-run --id "${game}" 2>/dev/null)"; then
+        say ""
+        say "${answer}"
+        say ""
     fi
     launcher="$(field launcher)"
     if [[ -n "${launcher}" ]]; then

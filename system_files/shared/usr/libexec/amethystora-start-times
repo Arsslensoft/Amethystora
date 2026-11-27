@@ -53,8 +53,9 @@ record() {
     # Each disk's unlock, from when its unit began to when it finished, the first time in this start, and where two
     # overlap only once. What the initramfs did is in this boot's journal too. Asked for by the two messages' ids, which the
     # journal looks up in its index, and not by a unit name with a * in it, which it matches by listing every unit it has
-    # ever held: on a journal of gigabytes, at the moment somebody logs in.
-    unlock="$(journalctl -b -q --no-pager -o json --output-fields=UNIT,MESSAGE_ID MESSAGE_ID=7d4958e842da4a758f6c1cdc7b36dcc5 MESSAGE_ID=39f53479d3a045ac8e11786248231fbf 2>/dev/null |
+    # ever held: on a journal of gigabytes, at the moment somebody logs in. Only lines PID 1 wrote count: any account can
+    # send a journal line with these fields.
+    unlock="$(journalctl -b -q --no-pager -o json --output-fields=UNIT,MESSAGE_ID _PID=1 MESSAGE_ID=7d4958e842da4a758f6c1cdc7b36dcc5 MESSAGE_ID=39f53479d3a045ac8e11786248231fbf 2>/dev/null |
         jq -s '
         [.[] | select((.UNIT // "") | startswith("systemd-cryptsetup@"))] |
         [group_by(.UNIT)[] |

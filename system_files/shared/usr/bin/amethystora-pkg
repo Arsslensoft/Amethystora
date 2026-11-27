@@ -1757,8 +1757,10 @@ cmd_upgrade_all() {
         die "Another upgrade of the containers is already running."
     fi
     # Started by its timer, it holds back the way uupd's automatic updates do, and while there is no network.
-    # Started by hand, or by System Updates after "Update now", it does not, as uupd-manual.service does not.
-    if [[ -n "${TRIGGER_UNIT:-}" ]] && { ! online || ! hardware_ok; }; then
+    # Started by hand, or by System Updates after "Update now", it does not, as uupd-manual.service does not. The run that
+    # the end of a game starts for it (amethystora-metered playing off ended) holds back like its timer's.
+    if { [[ -n "${TRIGGER_UNIT:-}" ]] || [[ -e "${XDG_RUNTIME_DIR:-/nonexistent}/amethystora/playing-waited/started-containers" ]]; } &&
+        { ! online || ! hardware_ok; }; then
         say "Not upgrading the containers now: ${SKIP_REASON}. The timer tries again tomorrow."
         journal "$(jq -nc --arg r "${SKIP_REASON}" '{done: true, skipped: $r}')"
         return 0

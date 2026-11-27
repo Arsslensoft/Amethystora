@@ -64,7 +64,7 @@ export class Letters {
         if (!window || window.window_type !== Meta.WindowType.NORMAL || Main.modalCount > 0 || Main.overview.visible)
             return;
         try {
-            this._proc = Gio.Subprocess.new([HELPER, String(window.get_pid()), window.get_title() ?? ''],
+            this._proc = Gio.Subprocess.new([HELPER, String(window.get_pid())],
                 Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE);
         } catch (e) {
             console.warn(`Amethystora UI: the letters could not start: ${e.message}`);
@@ -74,6 +74,8 @@ export class Letters {
         this._window = window;
         this._cancellable = new Gio.Cancellable();
         this._stdin = this._proc.get_stdin_pipe();
+        // The window's title goes on its standard input, as one line, never on the command line (where any account can read it)
+        this._write(`title ${[...(window.get_title() ?? '')].slice(0, 500).join('').replace(/[\u0000-\u001f\u007f]/g, ' ')}`);
         this._stdout = new Gio.DataInputStream({base_stream: this._proc.get_stdout_pipe(), close_base_stream: true});
         // The window moving, changing size or going while the letters are worked out or shown: they would be wrong
         window.connectObject(

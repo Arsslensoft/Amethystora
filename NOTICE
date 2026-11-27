@@ -37,10 +37,11 @@ own each time an image is built (build_files/base/12-tour.sh).
 
 fprintd (GPL-2.0-or-later, https://gitlab.freedesktop.org/libfprint/fprintd),
 which reads fingerprints, is not the package as Fedora builds it either. Each
-image build makes it again from Fedora's spec with seven patches, kept in
+image build makes it again from Fedora's spec with eight patches, kept in
 packaging/fprintd of the repository under fprintd's licence: six of fprintd's
-own, from its development after its release 1.94.5, and one of Amethystora's,
-the duress finger in pam_fprintd. Its source package travels in the image, in
+own, from its development after its release 1.94.5, and two of Amethystora's,
+the duress finger in pam_fprintd and its taking fprintd's signals from fprintd's
+own connection only. Its source package travels in the image, in
 usr/src/amethystora.
 
 Solaar's udev rules (GPL-2.0-or-later, https://github.com/pwr-Solaar/Solaar),
@@ -48,6 +49,30 @@ Solaar's udev rules (GPL-2.0-or-later, https://github.com/pwr-Solaar/Solaar),
 solaar-udev package, are changed when an image is built: the line that gives
 /dev/uinput to whoever sits at the machine is taken out, and the file says so
 (build_files/base/08-hardening.sh). Its source is Fedora's package.
+
+QEMU's /etc/qemu/bridge.conf (GPL-2.0-or-later, https://www.qemu.org) from Fedora's qemu-common package is replaced
+on the developer images: the line that lets qemu-bridge-helper attach to virbr0 is taken out, and the file says so
+(system_files/dx/etc/qemu/bridge.conf). Its source is Fedora's package.
+
+OpenRGB's udev rules (GPL-2.0-only AND GPL-3.0-or-later, https://openrgb.org),
+/usr/lib/udev/rules.d/60-openrgb.rules from Fedora's openrgb-udev-rules package,
+are changed when an image is built: the two lines that give every i2c bus and
+/dev/port to whoever sits at the machine are taken out, and the file says so
+(build_files/base/08-hardening.sh). Its source is Fedora's package.
+
+Input Remapper's D-Bus policy (GPL-3.0-or-later, https://github.com/sezanzeb/input-remapper),
+/usr/share/dbus-1/system.d/inputremapper.Control.conf from Fedora's input-remapper package,
+is changed when an image is built: the service's name may be owned by root alone and
+its calls sent by root and the members of wheel only, where the package lets every
+account do both, and the file says so (build_files/base/08-hardening.sh). Its source is
+Fedora's package.
+
+libratbag's D-Bus policy (MIT, https://github.com/libratbag/libratbag),
+/usr/share/dbus-1/system.d/org.freedesktop.ratbag1.conf from Fedora's libratbag-ratbagd
+package, is changed when an image is built: the service's calls may be sent, and its
+signals heard, by root and the members of wheel only, where the package lets every
+account do both, and the file says so (build_files/base/08-hardening.sh). Its source is
+Fedora's package.
 
 The desktop theme switcher takes its design and its colour palettes from Omakub
 and its fork Omabuntu. Each says in its README that it is released under the
@@ -382,6 +407,19 @@ The Vault also carries a trimmed copy of 2fa.directory's list of services that o
 License, which the file holds and which ships in usr/share/licenses/2fa-directory with the commit and the checksums.
 
   - 2fa.directory  https://github.com/2factorauth/twofactorauth
+
+The Vault's client of Kemlock Server (apps/vault-core/src/kemlock) is written from that server's documented byte formats,
+by the server's own author, and is held to its known-answer test vectors, which are public domain (CC0-1.0) and are copied
+unchanged, with their licence, into apps/vault-core/tests/kemlock-vectors (commit 05a71bbf of github.com/Arsslensoft/Kemlock-Server).
+
+  - Kemlock Server test vectors  https://github.com/Arsslensoft/Kemlock-Server/tree/main/test-vectors
+
+The answer to "will it run?" (usr/libexec/amethystora-will-it-run) comes from a trimmed copy of the community list of games and
+the state of their anti-cheat on Linux, Are We Anti-Cheat Yet? (usr/share/amethystora/anticheat-list.json), made from its
+repository's games.json at one commit and under the MIT License of that repository, which the file holds and which ships in
+usr/share/licenses/areweanticheatyet with the commit and the checksums.
+
+  - Are We Anti-Cheat Yet?  https://github.com/AreWeAntiCheatYet/AreWeAntiCheatYet
 
 Written offer: for at least three years after an Amethystora image or
 installer ISO was last published, Arsslen Idadi will give anyone who asks the

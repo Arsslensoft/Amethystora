@@ -1,0 +1,50 @@
+# What the Rust crates built into the apps may be (cargo-deny, the Checks workflow's Licences job, as bootc checks its
+# crates): permissive licences only, from crates.io only, and never the rsa crate. A crate under any other licence
+# (the LGPL, the MPL, the GPL...) is a decision, not a dependency bump: it is added here with why, and to NOTICE.
+# build-apps.sh then ships each crate's own licence files in the image. Run it as the job does:
+#   cargo deny --manifest-path apps/Cargo.toml --locked check licenses bans sources
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+all-features = true
+
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.93
+
+# The workspace's own crates are Apache-2.0 and published nowhere
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # RUSTSEC-2023-0071, a timing side channel with no fix: the Vault's keys go through Fedora's libcrypto
+    { crate = "rsa", reason = "RUSTSEC-2023-0071 (AGENTS.md, The Vault)" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+yanked = "deny"
+ignore = [
+    # crypto-bigint 0.5 comes in through opaque-ke 4 and voprf 0.5 (elliptic-curve 0.13) for the Vault's Kemlock sign-in, which runs on
+    # ristretto255 through curve25519-dalek and never reaches crypto-bigint's arithmetic. Drop this when opaque-ke 5 is released.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint via opaque-ke 4, unused arithmetic (ristretto255 is dalek's)" },
+]

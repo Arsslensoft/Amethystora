@@ -15,6 +15,9 @@ mod apps
 # The theme, the wallpaper and how it changes, widgets, the keybindings, the boot menu and the terminal greeting
 mod desktop
 
+# For developers: a database or a mail catcher for a project in one line, which program holds which port, and whether a container can use the graphics card
+mod dev
+
 # Put what a script is doing in the live pill: start, update and end
 mod pill
 

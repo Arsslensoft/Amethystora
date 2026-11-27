@@ -700,7 +700,7 @@ fi
 # --- Phase 7: games ----------------------------------------------------------------------------------------
 if [[ "${SUITE_PHASE}" == 7 ]] && preinstall_ready; then
     allow_root
-    in_card 1500 'Set up gaming\?' y 'Also install\?' $'\x03' -- gaming on
+    in_card 1500 'Set up gaming\?' y 'Also install\?' $'\x03' 'Turn on While you play\?' n -- gaming on
     card_ok "games set up: ${CARD}" "[[ \"\$(state gaming)\" == on ]]" "flatpak info com.vysp3r.ProtonPlus" \
         "as_user 'flatpak override --user --show com.valvesoftware.Steam' | grep -q 'sockets=.*x11'" \
         "item gaming-launchers | jq -e '.available'"

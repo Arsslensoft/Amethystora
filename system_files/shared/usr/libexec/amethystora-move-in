@@ -1,0 +1,1014 @@
+#!/usr/bin/python3 -I
+"""amethystora-move-in: your files from a Windows disk, brought home (`ame system move-in`).
+
+    amethystora-move-in                          the whole thing, in a terminal: pick the disk, type its recovery key if BitLocker
+                                                 locks it, pick the account and the folders, and it copies
+    amethystora-move-in find [--offer] [--json]  the disks that hold a Windows system and the accounts on them (`--offer`: a quick look
+                                                 at the partition table alone, which mounts nothing and asks for no password; exit
+                                                 status 0 only when something that may be Windows was seen)
+    amethystora-move-in look PART [--json]       one disk's accounts, and each one's folders with what is in them
+    amethystora-move-in copy PART ACCOUNT [--folders ID,ID] [--yes] [--json]
+                                                 copies the account's Documents, Pictures, Music, Videos and Desktop (the ids
+                                                 documents, pictures, music, videos, desktop)
+
+What it promises, and how the code keeps each:
+- **It never writes to the Windows disk.** The disk is mounted through udisks as `ro,noexec,nosuid,nodev`, whatever drives it (the
+  kernel's ntfs3 or ntfs-3g: udisks picks, and neither is named here). A volume Windows left hibernated or with Fast Startup on is
+  marked dirty, which forbids writing and still allows reading. A BitLocker volume is unlocked through udisks with its read-only
+  option, the same flag as `cryptsetup open --type bitlk --readonly`, and refused unless the unlocked device reports read-only. A disk
+  the desktop mounted read-write is never touched by `find` and `look` (they say so); `copy` and the walk say it first, ask, unmount it,
+  mount it read-only, and mount it again as it was at the end (if it is busy it is left as it is). One the desktop unlocked already is
+  used only if it is read-only. Nothing is run from the disk, its boot is not touched, and
+  everything that is read is read through `os.open` with no link followed.
+- **The recovery key is typed in the terminal** (48 digits, nothing shows), is handed to udisks and is kept nowhere: not in a file, an
+  argument or the environment. A person types it; no option takes it.
+- **It adds and never replaces.** A file is written beside its final name and linked into place (`link` refuses a name that exists), so
+  a file that is already in the home stays as it is, and the copy lands as `NAME (from Windows).EXT` (`(from Windows 2)`, and so on)
+  unless it is the same file already (same size and time). What was copied is written to `~/.local/state/amethystora/move-in` as the
+  name of the source, its size and its time, so that a stopped run carries on where it stopped and a copy that was moved or edited since
+  is not made again. The temporary file has a name nobody can guess and is made with O_EXCL; a folder here that is a link leading
+  out of the home is never written through, and a file with the name of a folder makes one counted clash, not an error for each file.
+- **It reads the five folders and nothing else**: no `AppData` (so no browser data), registry, password store or e-mail. Downloads is
+  left out. Links, junctions and anything that is not a plain file or folder are passed over.
+- **OneDrive's files that were never downloaded** (a placeholder has no content on the disk) are passed over and counted. They are told
+  by the file's own Windows attributes where the driver gives them (`system.ntfs_attrib_be`), else, in a OneDrive folder only, by a size
+  with no blocks behind it.
+- **An account other than your own is an administrator's to copy**, and is said first: NTFS permissions are not enforced here, so every
+  account's folder can be read once the disk is mounted. That others see only their own account is a courtesy, not protection: a person
+  can rename themselves in Settings, and a disk plugged in can be read in Files anyway.
+- With --json only JSON reaches standard output; what is said and the progress go to standard error.
+- It leaves a gigabyte free, runs at idle disk priority and low processor priority, and shows its progress in the pill
+  (`/usr/libexec/amethystora-pill`, the account's own script live there)."""
+
+import errno
+import getpass
+import gettext
+import grp
+import hashlib
+import json
+import os
+import pwd
+import re
+import secrets
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import time
+
+_ = gettext.translation("amethystora", fallback=True).gettext
+
+HOME = os.path.expanduser("~")
+BITLOCKER = "BitLocker"
+PILL = "/usr/libexec/amethystora-pill"
+PILL_NAME = "move-in"
+UDISKS = "org.freedesktop.UDisks2"
+# A partition table's own word for a recovery partition, and the names the makers of computers give such ones and their boot partitions
+RECOVERY_TYPES = {"de94bba4-06d1-4d40-a16a-bfd50179d6ac", "27be1a0f-4b5a-4d7e-8b5b-3d6b5ec6c0c9"}
+RECOVERY_LABELS = {"recovery", "system reserved", "winre", "windows re tools", "windows re", "restore", "sysreserved"}
+OFFER_MIN = 4 << 30
+KEEP_FREE = 1 << 30
+# Mount points that make a disk this running system's own
+OWN_MOUNTS = ("/", "/boot", "/boot/efi", "/var", "/var/home", "/home", "/sysroot", "/usr", "/etc")
+FOLDERS = (
+    # id, the name of the folder on the disk, the name of its XDG user dir on this computer, its name here
+    ("documents", "Documents", "DOCUMENTS", "Documents"),
+    ("pictures", "Pictures", "PICTURES", "Pictures"),
+    ("music", "Music", "MUSIC", "Music"),
+    ("videos", "Videos", "VIDEOS", "Videos"),
+    ("desktop", "Desktop", "DESKTOP", "Desktop"),
+)
+NOT_ACCOUNTS = {"public", "default", "default user", "all users", "defaultuser0", "wdagutilityaccount", "desktop.ini"}
+LEAVE_OUT = {"desktop.ini", "thumbs.db", "$recycle.bin", "system volume information", ".ds_store"}
+# Windows' file attributes: a reparse point, and the three that say a file's content is not on the disk (OneDrive's placeholders)
+ATTR_REPARSE = 0x400
+ATTR_RECALL = 0x00400000 | 0x00040000 | 0x00001000
+PARTIAL = ".amethystora-partial"
+
+
+class Problem(Exception):
+    """Something to say in a sentence, and stop"""
+
+
+# With --json (and the offer) only JSON reaches standard output: what is said and the progress go to standard error
+JSON_MODE = False
+
+
+def stream():
+    return sys.stderr if JSON_MODE else sys.stdout
+
+
+def say(text=""):
+    print(text, file=stream(), flush=True)
+
+
+def run(command, stdin=None, timeout=300):
+    try:
+        return subprocess.run(command, input=stdin, capture_output=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return subprocess.CompletedProcess(command, 127, b"", str(error).encode())
+
+
+def plain(text, most=200):
+    """Text from a disk or a person, made safe to show in a terminal"""
+    return "".join(c for c in str(text) if c.isprintable() and c not in "‪‫‬‭‮⁦⁧⁨⁩‎‏")[:most]
+
+
+def size_text(count):
+    value = float(count)
+    for unit in ("B", "kB", "MB", "GB", "TB"):
+        if value < 1000 or unit == "TB":
+            return f"{value:.0f} {unit}" if unit == "B" or value >= 10 else f"{value:.1f} {unit}"
+        value /= 1000
+
+
+# --- Disks ---------------------------------------------------------------------------------------------------------------------
+
+def flatten(devices, parent=None):
+    for device in devices or []:
+        yield device, parent
+        yield from flatten(device.get("children"), device)
+
+
+def mount_points(device):
+    return [m for m in (device.get("mountpoints") or []) if m]
+
+
+def candidates(offer=False):
+    """The partitions that may hold a Windows system: NTFS or BitLocker, not a recovery or boot partition, not this system's own, not a
+    pool of disks. `offer` leaves out what is too small to be a system, so that the first look does not offer a recovery stub."""
+    out = run(["lsblk", "-J", "-b", "-o", "NAME,PATH,FSTYPE,SIZE,LABEL,MOUNTPOINTS,TYPE,RM,RO,MODEL,PKNAME,UUID,PARTTYPE,PARTLABEL,TRAN,HOTPLUG"])
+    if out.returncode != 0:
+        raise Problem(_("The list of disks could not be read."))
+    tree = json.loads(out.stdout or b"{}").get("blockdevices", [])
+    found = []
+    for device, parent in flatten(tree):
+        fstype = device.get("fstype")
+        if device.get("type") not in ("part", "disk", "loop") or fstype not in ("ntfs", BITLOCKER):
+            continue
+        if device.get("type") == "disk" and device.get("children"):
+            continue
+        # Windows beside this system on the same disk is the usual case: only a volume mounted as this system's own is left out
+        if any(m in OWN_MOUNTS or m.startswith(("/boot/", "/var/home/", "/sysroot")) for m in mount_points(device)):
+            continue
+        whole = parent or device
+        if any(str(d.get(k) or "").startswith("raid-") for d in (device, whole) for k in ("name", "label", "partlabel")):
+            continue
+        if str(device.get("parttype") or "").lower() in RECOVERY_TYPES:
+            continue
+        if str(device.get("label") or "").strip().lower() in RECOVERY_LABELS or str(device.get("partlabel") or "").strip().lower() in RECOVERY_LABELS:
+            continue
+        size = int(device.get("size") or 0)
+        if offer and size < OFFER_MIN:
+            continue
+        found.append({
+            "part": device.get("path") or "/dev/" + device.get("name", ""), "fstype": fstype, "size": size, "uuid": device.get("uuid") or "",
+            "label": plain(device.get("label") or "", 40), "model": plain(whole.get("model") or "", 40),
+            "removable": bool(whole.get("rm")) or whole.get("tran") == "usb", "encrypted": fstype == BITLOCKER, "mounted": mount_points(device),
+        })
+    return found
+
+
+def udisks(args):
+    out = run(["udisksctl", *args])
+    if out.returncode != 0:
+        why = out.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise Problem(_("The disk would not open: {why}").format(why=plain(why[-1] if why else "?")))
+    return out.stdout.decode("utf-8", "replace")
+
+
+def unlock(device, key):
+    """Unlocks a BitLocker volume with its recovery key, read-only (udisks's own `read-only` option, which asks libcryptsetup for the same
+    read-only mapping as `cryptsetup open --type bitlk --readonly`). The key is the argument of one D-Bus call and is kept nowhere.
+    Returns the unlocked device's path and the object the lock is asked of."""
+    try:
+        import gi
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio, GLib
+    except (ImportError, ValueError):
+        raise Problem(_("This computer cannot ask the disk service to unlock the disk."))
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        path = "/org/freedesktop/UDisks2/block_devices/" + os.path.basename(os.path.realpath(device))
+        proxy = Gio.DBusProxy.new_sync(bus, Gio.DBusProxyFlags.NONE, None, UDISKS, path, UDISKS + ".Encrypted", None)
+        result = proxy.call_sync("Unlock", GLib.Variant("(sa{sv})", (key, {"read-only": GLib.Variant("b", True)})),
+                                 Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, 120000, None)
+        block = Gio.DBusProxy.new_sync(bus, Gio.DBusProxyFlags.NONE, None, UDISKS, result.unpack()[0], UDISKS + ".Block", None)
+        opened = bytes(block.get_cached_property("Device").unpack()).rstrip(b"\0").decode()
+    except GLib.Error as error:
+        text = str(error.message)
+        if "not authorized" in text.lower() or "authentication" in text.lower():
+            raise Problem(_("An administrator's password is needed to open this disk, and it was not given."))
+        raise Problem(_("That key did not open the disk."))
+    return opened, path
+
+
+def lock(path):
+    try:
+        import gi
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio, GLib
+        bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        proxy = Gio.DBusProxy.new_sync(bus, Gio.DBusProxyFlags.NONE, None, UDISKS, path, UDISKS + ".Encrypted", None)
+        proxy.call_sync("Lock", GLib.Variant("(a{sv})", ({},)), Gio.DBusCallFlags.ALLOW_INTERACTIVE_AUTHORIZATION, 60000, None)
+    except Exception:  # a disk that stays unlocked is only unlocked; it is read-only either way
+        pass
+
+
+def unlocked_child(part):
+    """The unlocked device of a BitLocker volume that is open already, or None"""
+    out = run(["lsblk", "-J", "-o", "PATH,TYPE", part])
+    try:
+        for entry, _parent in flatten(json.loads(out.stdout or b"{}").get("blockdevices", [])):
+            if entry.get("type") == "crypt" and entry.get("path"):
+                return entry["path"]
+    except ValueError:
+        pass
+    return None
+
+
+def device_is_read_only(device):
+    out = run(["lsblk", "-n", "-d", "-o", "RO", device])
+    return out.returncode == 0 and out.stdout.decode().strip() == "1"
+
+
+def mount_state(device):
+    """Where a device is mounted, and with what options: [(mountpoint, options)]"""
+    out = run(["lsblk", "-J", "-o", "PATH,MOUNTPOINTS", device])
+    found = []
+    try:
+        for entry, _parent in flatten(json.loads(out.stdout or b"{}").get("blockdevices", [])):
+            for point in mount_points(entry):
+                options = run(["findmnt", "-n", "-o", "OPTIONS", "--mountpoint", point]).stdout.decode().strip().split(",")
+                found.append((point, options))
+    except ValueError:
+        pass
+    return found
+
+
+class Volume:
+    """A Windows volume, opened for reading: unlocked if BitLocker holds it, then mounted read-only, and put away again however the
+    reading ends. `.root` is where its files are."""
+
+    def __init__(self, part, ask_key=None, agree=None):
+        # `agree(mountpoint)` is asked before a mount the desktop made read-write is replaced by a read-only one: it says so and answers
+        # whether to go on. With none, such a disk is only reported, never touched.
+        self.part, self.ask_key, self.agree = part, ask_key, agree
+        self.root = None
+        self.device = part
+        self.lock_object = None
+        self.mounted_by_us = False
+        self.replaced = False
+
+    def __enter__(self):
+        known = {c["part"]: c for c in candidates()}
+        if self.part not in known:
+            raise Problem(_("That is not a disk a Windows system could be on."))
+        info = known[self.part]
+        try:
+            if info["encrypted"]:
+                already = unlocked_child(self.part)
+                if already:
+                    # Unlocked by the desktop before: used only if it is read-only, and left unlocked
+                    if not device_is_read_only(already):
+                        raise Problem(_("This disk is already unlocked, and not read-only. Lock it first (in Files, or with udisksctl lock), and run this again."))
+                    self.device = already
+                elif self.ask_key is None:
+                    raise Problem(_("This disk is encrypted with BitLocker. Run ame system move-in in a terminal to type its recovery key."))
+                else:
+                    say(_("This disk is encrypted with BitLocker. Type its 48-digit recovery key; nothing shows as you type, and it is kept nowhere."))
+                    key = self.ask_key()
+                    try:
+                        self.device, self.lock_object = unlock(self.part, key)
+                    finally:
+                        del key
+                    if not device_is_read_only(self.device):
+                        raise Problem(_("The unlocked disk is not read-only, so it was left alone."))
+            for point, options in mount_state(self.device):
+                if "ro" in options:
+                    self.root = point
+                    return self
+                if not point.startswith("/run/media/"):
+                    raise Problem(_("This disk is mounted so that it can be written to, not by the desktop. Unmount it first, and run this again."))
+                if self.agree is None or not self.agree(point):
+                    raise Problem(_("This disk is mounted by the desktop so that it can be written to, so it was left as it is. Run ame system move-in, which says so and mounts it read-only for the copy, or unmount it first."))
+                try:
+                    udisks(["unmount", "-b", self.device])
+                except Problem:
+                    raise Problem(_("The desktop's mount of this disk is busy, so it was left as it was. Close what is using it, and run this again."))
+                self.replaced = True
+            text = udisks(["mount", "-b", self.device, "-o", "ro,noexec,nosuid,nodev"]).strip()
+            found = re.search(r" at (/\S.*?)\.?\s*$", text)
+            if not found or not os.path.isdir(found.group(1)):
+                raise Problem(_("The disk mounted, but not where it was said to."))
+            self.root, self.mounted_by_us = found.group(1), True
+            return self
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+
+    def __exit__(self, *_exc):
+        if self.mounted_by_us:
+            run(["udisksctl", "unmount", "-b", self.device])
+            self.mounted_by_us = False
+        if self.replaced:
+            # The mount the desktop had is put back as it was found (the desktop's own options)
+            if run(["udisksctl", "mount", "-b", self.device]).returncode != 0:
+                print(_("The desktop's mount of this disk could not be put back. Mount it again in Files if you want it open."), file=sys.stderr)
+            self.replaced = False
+        if self.lock_object:
+            lock(self.lock_object)
+            self.lock_object = None
+        return False
+
+
+# --- What a Windows disk holds -------------------------------------------------------------------------------------------------
+
+def ci_child(folder, name):
+    """The entry of `folder` called `name`, whatever the case (Windows does not care, and a driver may), or None"""
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name.lower() == name.lower():
+                    return entry
+    except OSError:
+        pass
+    return None
+
+
+def plain_dir(root, *parts):
+    """The folder at root/parts, if every step is a real folder (no link) that stays inside the mount; else None"""
+    path = os.path.realpath(root)
+    for part in parts:
+        entry = ci_child(path, part)
+        try:
+            if entry is None or entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                return None
+        except OSError:
+            return None
+        path = entry.path
+        if os.path.realpath(path) != path:
+            return None
+    return path
+
+
+def is_windows(root):
+    return bool(plain_dir(root, "Windows", "System32") and plain_dir(root, "Users"))
+
+
+def accounts(root):
+    """The Windows accounts on a volume: a folder of Users that is a profile (NTUSER.DAT, or the folders themselves), as {the name shown:
+    the folder's real name}. A name is cleaned and cut only to be shown; the disk is always looked up by the real one."""
+    users = plain_dir(root, "Users")
+    found = {}
+    if not users:
+        return found
+    for name in sorted(os.listdir(users)):
+        if name.lower() in NOT_ACCOUNTS or name.startswith("."):
+            continue
+        folder = plain_dir(root, "Users", name)
+        if folder and (ci_child(folder, "NTUSER.DAT") or any(ci_child(folder, f[1]) for f in FOLDERS)):
+            shown, number = plain(name, 60) or "?", 1
+            while shown in found:
+                number += 1
+                shown = f"{plain(name, 50)} ({number})"
+            found[shown] = name
+    return found
+
+
+def is_admin():
+    if os.getuid() == 0:
+        return True
+    try:
+        return "wheel" in {grp.getgrgid(g).gr_name for g in os.getgroups()}
+    except KeyError:
+        return False
+
+
+def own_names():
+    """The names this account could have on Windows: its login, its full name, and the full name without spaces, in lower case"""
+    names = set()
+    try:
+        entry = pwd.getpwuid(os.getuid())
+        full = entry.pw_gecos.split(",")[0].strip().lower()
+        names |= {entry.pw_name.lower(), full, full.replace(" ", "")}
+    except KeyError:
+        pass
+    names.add(getpass.getuser().lower())
+    names.discard("")
+    return names
+
+
+def mine(name):
+    return name.lower() in own_names()
+
+
+def listed(found):
+    """The accounts this person may see: an administrator all of them (NTFS permissions are not enforced here, so any account's folder
+    can be read), anyone else only the one that is named like them. That is a courtesy, not protection: a person can rename themselves
+    in Settings, and a disk plugged in can be read in Files anyway."""
+    return list(found) if is_admin() else [name for name in found if mine(name)]
+
+
+def attributes(path):
+    """A file's Windows attributes, or None when the driver does not say"""
+    try:
+        raw = os.getxattr(path, "system.ntfs_attrib_be", follow_symlinks=False)
+    except OSError:
+        return None
+    return int.from_bytes(raw, "big") if len(raw) == 4 else None
+
+
+def placeholder(path, st, cloud):
+    attrs = attributes(path)
+    if attrs is not None:
+        return bool(attrs & ATTR_RECALL)
+    # A driver that tells no attributes: in a OneDrive folder, a size with no blocks behind it is a file only OneDrive holds
+    return cloud and st.st_size > 0 and st.st_blocks == 0
+
+
+def sources(root, account, name):
+    """Where an account's folder of that name is on the volume: its own, and each OneDrive's (Windows' backup to OneDrive keeps them
+    there), as [(path, in OneDrive)]"""
+    home = plain_dir(root, "Users", account)
+    found = []
+    if not home:
+        return found
+    own = plain_dir(root, "Users", account, name)
+    if own:
+        found.append((own, False))
+    try:
+        listing = sorted(os.scandir(home), key=lambda e: e.name)
+    except OSError:
+        return found
+    for entry in listing:
+        if entry.name.lower().startswith("onedrive") and entry.is_dir(follow_symlinks=False) and not entry.is_symlink():
+            inside = plain_dir(root, "Users", account, entry.name, name)
+            if inside:
+                found.append((inside, True))
+    return found
+
+
+def walk(folder, cloud):
+    """The plain files under a folder, by name: (path relative to the folder, path, stat, in OneDrive). Links, junctions and what is
+    neither a file nor a folder are passed over, and so is what is not worth moving. It keeps its own stack, so that no depth of folders
+    can run out Python's."""
+    def listing(relative):
+        try:
+            return iter(sorted(os.scandir(os.path.join(folder, relative) if relative else folder), key=lambda e: e.name))
+        except OSError:
+            return iter(())
+
+    stack = [("", listing(""))]
+    while stack:
+        relative, entries = stack[-1]
+        entry = next(entries, None)
+        if entry is None:
+            stack.pop()
+            continue
+        if entry.name.lower() in LEAVE_OUT or entry.name.startswith("~$") or "\x00" in entry.name:
+            continue
+        try:
+            if entry.is_symlink():
+                continue
+            rel = os.path.join(relative, entry.name) if relative else entry.name
+            if entry.is_dir(follow_symlinks=False):
+                attrs = attributes(entry.path)
+                if attrs is not None and attrs & ATTR_REPARSE:
+                    continue
+                stack.append((rel, listing(rel)))
+            elif entry.is_file(follow_symlinks=False):
+                yield rel, entry.path, entry.stat(follow_symlinks=False), cloud
+        except OSError:
+            continue
+
+
+def survey(root, account):
+    """What each of the five folders holds: files that can be copied and their bytes, and the placeholders only OneDrive has"""
+    result = []
+    for ident, name, _xdg, label in FOLDERS:
+        files = size = holders = 0
+        found = False
+        for source, cloud in sources(root, account, name):
+            found = True
+            for _rel, path, st, in_cloud in walk(source, cloud):
+                if placeholder(path, st, in_cloud):
+                    holders += 1
+                else:
+                    files += 1
+                    size += st.st_size
+        if found:
+            result.append({"id": ident, "label": label, "files": files, "bytes": size, "placeholders": holders})
+    return result
+
+
+def inspect_volume(part, ask_key=None):
+    with Volume(part, ask_key) as volume:
+        if not is_windows(volume.root):
+            return {"windows": False, "accounts": []}
+        return {"windows": True, "accounts": list(accounts(volume.root))}
+
+
+# --- Copying ----------------------------------------------------------------------------------------------------------------------
+
+def user_dir(xdg, fallback):
+    """This computer's folder for the kind (Documents in the person's language), made if there is none"""
+    out = run(["xdg-user-dir", xdg]) if shutil.which("xdg-user-dir") else None
+    path = out.stdout.decode().strip() if out is not None and out.returncode == 0 else ""
+    if not path or not os.path.isabs(path) or path == HOME:
+        path = os.path.join(HOME, fallback)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def state_dir():
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state")
+    path = os.path.join(base, "amethystora", "move-in")
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
+
+
+class Ledger:
+    """What was copied from one account of one volume: the source's name, size and time, a line each. A run that stopped carries on from
+    it, and a copy that was moved, edited or deleted since is not made again."""
+
+    def __init__(self, volume_id, account):
+        name = hashlib.sha1(f"{volume_id}\0{account}".encode()).hexdigest()[:20] + ".jsonl"
+        self.path = os.path.join(state_dir(), name)
+        self.done = {}
+        try:
+            with open(self.path, encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        entry = json.loads(line)
+                        self.done[entry["k"]] = (entry["z"], entry["m"])
+                    except (ValueError, KeyError, TypeError):
+                        continue
+        except OSError:
+            pass
+        self.handle = None
+
+    def has(self, key, st):
+        entry = self.done.get(key)
+        return entry is not None and entry[0] == st.st_size and abs(entry[1] - st.st_mtime_ns) < 2_000_000_000
+
+    def add(self, key, st):
+        if self.handle is None:
+            self.handle = os.fdopen(os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600), "a", encoding="utf-8")
+        self.handle.write(json.dumps({"k": key, "z": st.st_size, "m": st.st_mtime_ns}) + "\n")
+        self.handle.flush()
+        self.done[key] = (st.st_size, st.st_mtime_ns)
+
+    def close(self):
+        if self.handle:
+            self.handle.close()
+            self.handle = None
+
+
+def same_file(path, st):
+    """Whether what is at `path` is the file `st` describes, as a copy keeps it: a plain file of the same size and time"""
+    try:
+        mine_ = os.lstat(path)
+    except OSError:
+        return False
+    return os.path.isfile(path) and not os.path.islink(path) and mine_.st_size == st.st_size and abs(mine_.st_mtime_ns - st.st_mtime_ns) < 2_000_000_000
+
+
+def beside(target, number):
+    """NAME (from Windows).EXT, then NAME (from Windows 2).EXT"""
+    folder, name = os.path.split(target)
+    stem, ext = os.path.splitext(name)
+    if name.startswith(".") and not ext:
+        stem, ext = name, ""
+    word = _("from Windows") if number == 1 else _("from Windows {number}").format(number=number)
+    return os.path.join(folder, f"{stem} ({word}){ext}")
+
+
+def place_for(target, st):
+    """Where the copy goes: (path, state). The file's own name when it is free; else beside it (the file that is there is never touched),
+    unless the file that is there, or an earlier copy beside it, already is this file."""
+    if not os.path.lexists(target):
+        return target, "free"
+    if same_file(target, st):
+        return target, "same"
+    for number in range(1, 1000):
+        candidate = beside(target, number)
+        if not os.path.lexists(candidate):
+            return candidate, "beside"
+        if same_file(candidate, st):
+            return candidate, "same"
+    raise Problem(_("There are too many files here with that name already."))
+
+
+def plan(root, account, chosen, ledger):
+    """Everything the chosen folders hold, as (id, key, source path, stat, path within the folder, state, label, in OneDrive) where state
+    is `holder` (only in OneDrive), `done` (already across) or `todo`. Nothing is written."""
+    home = plain_dir(root, "Users", account)
+    for ident, name, _xdg, label in FOLDERS:
+        if ident not in chosen:
+            continue
+        for source, cloud in sources(root, account, name):
+            for rel, path, st, in_cloud in walk(source, cloud):
+                key = os.path.relpath(path, home)
+                if placeholder(path, st, in_cloud):
+                    yield ident, key, path, st, rel, "holder", label, in_cloud
+                elif ledger.has(key, st):
+                    yield ident, key, path, st, rel, "done", label, in_cloud
+                else:
+                    yield ident, key, path, st, rel, "todo", label, in_cloud
+
+
+class Progress:
+    """The terminal's line and the pill: what is done of what there is, said at most twice a second and every two seconds"""
+
+    def __init__(self, total):
+        self.total, self.done, self.label = max(total, 1), 0, ""
+        self.at = self.pill_at = 0.0
+        self.pill = os.path.exists(PILL) and bool(os.environ.get("XDG_RUNTIME_DIR"))
+        self.started = False
+
+    def pill_run(self, *args):
+        try:
+            subprocess.run([PILL, *args], capture_output=True, timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    def text(self):
+        return _("Moving in from Windows: {folder}").format(folder=self.label) if self.label else _("Moving in from Windows")
+
+    def start(self):
+        if self.pill:
+            self.pill_run("start", PILL_NAME, "--text", self.text(), "--progress", "0", "--icon", "folder-documents", "--pid", str(os.getpid()))
+            self.started = True
+
+    def folder(self, label):
+        self.label = label
+        self.tick(0, always=True)
+
+    def tick(self, count, always=False):
+        self.done += count
+        now = time.monotonic()
+        share = min(self.done / self.total, 1.0)
+        if stream().isatty() and (always or now - self.at >= 0.5):
+            self.at = now
+            print("\r" + _("{percent}% of {size}").format(percent=int(share * 100), size=size_text(self.total)).ljust(40), end="", file=stream(), flush=True)
+        if self.started and (always or now - self.pill_at >= 2.0):
+            self.pill_at = now
+            self.pill_run("update", PILL_NAME, "--text", self.text(), "--progress", f"{share:.3f}")
+
+    def end(self):
+        if stream().isatty():
+            print("\r" + " " * 40 + "\r", end="", file=stream(), flush=True)
+        if self.started:
+            self.pill_run("end", PILL_NAME)
+            self.started = False
+
+
+def copy_one(path, st, final, progress):
+    """One file, whole: written beside its name, under a name nobody can guess and that must not exist (O_EXCL: a link planted there is
+    never followed), and linked into place, which fails if the name came to exist meanwhile. The folder is already there."""
+    temporary = os.path.join(os.path.dirname(final), f".{secrets.token_hex(8)}{PARTIAL}")
+    reading = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        writing = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except BaseException:
+        os.close(reading)
+        raise
+    try:
+        with os.fdopen(reading, "rb") as source, os.fdopen(writing, "wb") as out:
+            while True:
+                block = source.read(1 << 20)
+                if not block:
+                    break
+                out.write(block)
+                progress.tick(len(block))
+            out.flush()
+            os.fchmod(out.fileno(), 0o644)
+            os.utime(out.fileno(), ns=(st.st_mtime_ns, st.st_mtime_ns))
+            if st.st_size:
+                os.fsync(out.fileno())
+        os.link(temporary, final, follow_symlinks=False)
+    finally:
+        # Only what this call made is taken away: a name that was there already is not ours (and never followed)
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
+def sweep_partials(folder):
+    """A copy that was cut short leaves its half file, which is never under a final name: take away what an earlier run left (a link
+    at such a name is taken away as a link, never followed)"""
+    try:
+        for entry in os.scandir(folder):
+            if entry.name.startswith(".") and entry.name.endswith(PARTIAL) and (entry.is_symlink() or entry.is_file(follow_symlinks=False)):
+                os.unlink(entry.path)
+    except OSError:
+        pass
+
+
+def make_folder(base, relative):
+    """The folder `relative` under `base`, made one step at a time. None when it is there, else why not: ("clash", path) where a file
+    has the name of a folder, ("outside", path) where a link leads out of the home (or of `base`)."""
+    roots = {os.path.realpath(HOME), os.path.realpath(base)}
+    path = base
+    for part in [p for p in relative.split(os.sep) if p]:
+        path = os.path.join(path, part)
+        try:
+            kind = os.lstat(path)
+        except FileNotFoundError:
+            os.mkdir(path, 0o755)
+            continue
+        if stat.S_ISLNK(kind.st_mode):
+            real = os.path.realpath(path)
+            if not any(real == root or real.startswith(root + os.sep) for root in roots):
+                return "outside", path
+            if not os.path.isdir(real):
+                return "clash", path
+        elif not stat.S_ISDIR(kind.st_mode):
+            return "clash", path
+    return None
+
+
+def copy_account(root, account, chosen, volume_id):
+    # Out of the way of the desktop: idle disk priority, low processor priority
+    run(["ionice", "-c", "3", "-p", str(os.getpid())])
+    os.nice(10)
+    ledger = Ledger(volume_id, account)
+    targets = {ident: user_dir(xdg, label) for ident, _n, xdg, label in FOLDERS if ident in chosen}
+    need = sum(item[3].st_size for item in plan(root, account, chosen, ledger) if item[5] == "todo")
+    free = shutil.disk_usage(next(iter(targets.values()), HOME)).free
+    if need > free - KEEP_FREE:
+        raise Problem(_("What is chosen ({size}) does not fit here with a gigabyte to spare. Choose fewer folders, or free some space.").format(size=size_text(need)))
+    counts = {"copied": 0, "bytes": 0, "beside": 0, "already": 0, "placeholders": 0, "failed": 0, "clash": 0, "outside": 0}
+    progress = Progress(need)
+    folders, reported = {}, set()
+    progress.start()
+    try:
+        current = None
+        for ident, key, path, st, rel, state, label, cloud in plan(root, account, chosen, ledger):
+            if ident != current:
+                current = ident
+                progress.folder(label)
+            if state == "holder":
+                counts["placeholders"] += 1
+                continue
+            if state == "done":
+                counts["already"] += 1
+                continue
+            target = os.path.join(targets[ident], rel)
+            folder = os.path.dirname(target)
+            if folder not in folders:
+                try:
+                    folders[folder] = make_folder(targets[ident], os.path.dirname(rel))
+                except OSError as error:
+                    if error.errno == errno.ENOSPC:
+                        raise Problem(_("There is no room left. Free some space and run this again: it carries on where it stopped."))
+                    folders[folder] = ("failed", folder)
+                if folders[folder] is None:
+                    sweep_partials(folder)
+            if folders[folder] is not None:
+                # A folder that cannot be made here is counted once, not for each file in it
+                kind, where = folders[folder]
+                if where not in reported:
+                    reported.add(where)
+                    counts[kind] += 1
+                continue
+            try:
+                final, how = place_for(target, st)
+                if how == "same":
+                    ledger.add(key, st)
+                    counts["already"] += 1
+                    progress.tick(st.st_size)
+                    continue
+                try:
+                    copy_one(path, st, final, progress)
+                except FileExistsError:
+                    final, how = place_for(target, st)
+                    copy_one(path, st, final, progress)
+            except OSError as error:
+                if error.errno == errno.ENOSPC:
+                    raise Problem(_("There is no room left. Free some space and run this again: it carries on where it stopped."))
+                if cloud and error.errno in (errno.EOPNOTSUPP, errno.ENODATA):
+                    counts["placeholders"] += 1
+                else:
+                    counts["failed"] += 1
+                continue
+            ledger.add(key, st)
+            counts["copied"] += 1
+            counts["bytes"] += st.st_size
+            if how == "beside":
+                counts["beside"] += 1
+    finally:
+        progress.end()
+        ledger.close()
+    return counts
+
+
+def say_counts(counts):
+    say(_("Copied {files} files ({size}).").format(files=counts["copied"], size=size_text(counts["bytes"])))
+    if counts["beside"]:
+        say(_("{count} of them have the name of a file you already had here, so each is beside it, as NAME (from Windows). Nothing was replaced.").format(count=counts["beside"]))
+    if counts["already"]:
+        say(_("{count} were here already, from an earlier run or by hand, and were left as they are.").format(count=counts["already"]))
+    if counts["placeholders"]:
+        say(_("{count} files are only in OneDrive: Windows never downloaded them, so they are not on this disk. They are still in your OneDrive.").format(count=counts["placeholders"]))
+    if counts["clash"]:
+        say(_("{count} folders of Windows have the name of a file you have here, so what is in them was not copied. Rename that file, and run this again.").format(count=counts["clash"]))
+    if counts["outside"]:
+        say(_("{count} folders here are links that lead out of your home, so what Windows has in the folders of that name was not copied there.").format(count=counts["outside"]))
+    if counts["failed"]:
+        say(_("{count} files could not be read, and were passed over. Run this again to try them once more.").format(count=counts["failed"]))
+
+
+# --- The person at the terminal ----------------------------------------------------------------------------------------------------
+
+def ask(question, default=True):
+    hint = _("[Y/n]") if default else _("[y/N]")
+    while True:
+        answer = input(f"{question} {hint} ").strip().lower()
+        if not answer:
+            return default
+        if answer in ("y", "yes", "j", "o", "s", "ja", "oui", "si", "sí", "да", "نعم"):
+            return True
+        if answer in ("n", "no", "non", "nein", "нет", "لا"):
+            return False
+
+
+def pick(question, options):
+    for number, text in enumerate(options, 1):
+        print(f"  {number}  {text}")
+    while True:
+        answer = input(f"{question} ").strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return int(answer) - 1
+
+
+def type_key():
+    return getpass.getpass("> ").strip()
+
+
+def confirm_other(account):
+    say(_("{name} is not you. Windows does not keep anyone out of an account's folder on this computer, so it can be read, and it will be copied into your home. Go on only if {name} agreed.").format(name=account))
+
+
+def folders_text(survey_result):
+    return "  ".join(f"{f['label']} {size_text(f['bytes'])}" for f in survey_result)
+
+
+def agree_to_remount(yes, tty):
+    """What is asked before a mount the desktop made read-write is replaced: said first, then a yes (`--yes`, or the person's, typed)"""
+    def agree(_point):
+        say(_("The desktop mounted this disk so that it can be written to. To be sure nothing is written, it is unmounted and mounted again read-only for the copy, and mounted as it was when this is done. If something is using it, it is left as it is."))
+        return yes or (tty and ask(_("Go on?")))
+    return agree
+
+
+def interactive():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise Problem(_("This needs a terminal, with a person at it."))
+    found = candidates()
+    if not found:
+        raise Problem(_("No disk that could hold Windows was found. If it is in another computer, take it out and plug it into this one, then run this again."))
+    say(_("Disks that could hold Windows. They are only read, never written."))
+    names = [f"{d['label'] or d['model'] or d['part']}  {size_text(d['size'])}" + ("  " + _("(BitLocker)") if d["encrypted"] else "") for d in found]
+    if len(found) == 1:
+        disk = found[0]
+        say(names[0])
+    else:
+        disk = found[pick(_("Which one? Its number:"), names)]
+    with Volume(disk["part"], type_key, agree_to_remount(False, True)) as volume:
+        if not is_windows(volume.root):
+            raise Problem(_("There is no Windows system on this disk."))
+        every = accounts(volume.root)
+        seen = listed(list(every))
+        if not seen:
+            raise Problem(_("No Windows account here is named like yours. Ask an administrator of this computer to move you in."))
+        shown = seen[0] if len(seen) == 1 else seen[pick(_("Whose files? Its number:"), seen)]
+        account = every[shown]
+        if not mine(account):
+            confirm_other(shown)
+            if not ask(_("Copy {name}'s files?").format(name=shown), default=False):
+                return
+        found_folders = survey(volume.root, account)
+        if not found_folders:
+            raise Problem(_("There are no Documents, Pictures, Music, Videos or Desktop folders in that account."))
+        chosen = []
+        for folder in found_folders:
+            line = _("Copy {folder} ({size}, {files} files)?").format(folder=folder["label"], size=size_text(folder["bytes"]), files=folder["files"])
+            if folder["placeholders"]:
+                line += " " + _("{count} more are only in OneDrive and are left.").format(count=folder["placeholders"])
+            if ask(line):
+                chosen.append(folder["id"])
+        if not chosen:
+            return
+        say(_("A file you already have here is never replaced: the copy goes beside it. You can stop with Ctrl+C and run this again to carry on."))
+        counts = copy_account(volume.root, account, chosen, disk["uuid"] or disk["part"])
+    say_counts(counts)
+
+
+def stop(*_args):
+    raise KeyboardInterrupt
+
+
+def main(argv):
+    args = argv[1:]
+    as_json = "--json" in args
+    offer = "--offer" in args
+    yes = "--yes" in args
+    folders = None
+    if "--folders" in args:
+        at = args.index("--folders")
+        folders = args[at + 1] if at + 1 < len(args) else ""
+        del args[at:at + 2]
+    args = [a for a in args if a not in ("--json", "--offer", "--yes")]
+    global JSON_MODE
+    JSON_MODE = as_json or offer
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        if not args:
+            interactive()
+            return 0
+        if args[0] == "find" and len(args) == 1:
+            parts = []
+            for disk in candidates(offer=offer):
+                entry = {k: disk[k] for k in ("part", "fstype", "size", "label", "model", "removable", "encrypted")}
+                if offer:
+                    parts.append(entry)
+                    continue
+                if disk["encrypted"]:
+                    entry.update({"locked": True, "windows": None, "accounts": []})
+                    parts.append(entry)
+                    continue
+                try:
+                    info = inspect_volume(disk["part"])
+                except Problem as problem:
+                    entry.update({"windows": None, "accounts": [], "error": str(problem)})
+                    parts.append(entry)
+                    continue
+                if info["windows"]:
+                    entry.update({"locked": False, "windows": True, "accounts": listed(info["accounts"])})
+                    parts.append(entry)
+            if as_json or offer:
+                print(json.dumps({"version": 1, "parts": parts}))
+            else:
+                for entry in parts:
+                    note = _("locked by BitLocker") if entry.get("locked") else ", ".join(entry["accounts"])
+                    print(f"{entry['part']}\t{size_text(entry['size'])}\t{entry['label']}\t{note}")
+            return 0 if parts or not offer else 1
+        if args[0] == "look" and len(args) == 2:
+            result = []
+            with Volume(args[1], type_key if sys.stdin.isatty() and sys.stdout.isatty() else None) as volume:
+                if not is_windows(volume.root):
+                    raise Problem(_("There is no Windows system on this disk."))
+                every = accounts(volume.root)
+                for shown in listed(list(every)):
+                    result.append({"name": shown, "mine": mine(every[shown]), "folders": survey(volume.root, every[shown])})
+            if as_json:
+                print(json.dumps({"version": 1, "part": args[1], "accounts": result}))
+            else:
+                for entry in result:
+                    print(f"{entry['name']}: {folders_text(entry['folders'])}")
+            return 0
+        if args[0] == "copy" and len(args) == 3:
+            part, account = args[1], args[2]
+            known = {c["part"]: c for c in candidates()}
+            tty = sys.stdin.isatty() and sys.stdout.isatty()
+            if part not in known:
+                raise Problem(_("That is not a disk a Windows system could be on."))
+            with Volume(part, type_key if tty else None, agree_to_remount(yes, tty)) as volume:
+                if not is_windows(volume.root):
+                    raise Problem(_("There is no Windows system on this disk."))
+                every = accounts(volume.root)
+                allowed = listed(list(every))
+                # The account as it is shown, or by its real folder name
+                shown = account if account in allowed else next((n for n in allowed if every[n] == account), None)
+                if shown is None:
+                    raise Problem(_("That account is not there, or is not one this person may copy: only an administrator copies an account that is not their own."))
+                account = every[shown]
+                if not mine(account):
+                    confirm_other(shown)
+                    if not yes and not (tty and ask(_("Copy {name}'s files?").format(name=shown), default=False)):
+                        raise Problem(_("Nothing was copied."))
+                known_ids = {f[0] for f in FOLDERS}
+                chosen = [f for f in (folders.split(",") if folders is not None else sorted(known_ids)) if f in known_ids]
+                counts = copy_account(volume.root, account, chosen, known[part]["uuid"] or part)
+            if as_json:
+                print(json.dumps({"version": 1, **counts}))
+            else:
+                say_counts(counts)
+            return 0
+    except Problem as problem:
+        print(f"amethystora-move-in: {problem}", file=sys.stderr)
+        return 1
+    except (KeyboardInterrupt, EOFError):
+        print(file=sys.stderr)
+        print(_("Stopped. Run it again to carry on where it stopped."), file=sys.stderr)
+        return 1
+    print("usage: amethystora-move-in [find [--offer] | look PART | copy PART ACCOUNT [--folders ID,ID] [--yes]] [--json]", file=sys.stderr)
+    return 64
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

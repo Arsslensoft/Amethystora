@@ -36,6 +36,10 @@ ever has. With the daily run off, nothing is stale.
 7. **Hourly snapshots are off, or impossible.** They are a security switch, on from the first start of an
    ISO install, as the owner left them otherwise; impossible when `/var/home` is not a btrfs subvolume of
    its own. Tell: `state backups`.
+8. **A game was running** and the user turned on While you play (`ame desktop while-playing`, off until then): the timed
+   run waits, six hours at most, and runs when the game ends. Tell: "A game is playing: waiting until it ends" in the
+   journal of `amethystora-backup.service`, and no failure. The pill's Playing card has Let them run; `ame backup now`
+   always runs.
 
 ## Fix
 

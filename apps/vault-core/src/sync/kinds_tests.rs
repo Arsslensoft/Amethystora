@@ -1,4 +1,4 @@
-//! Each kind, plain and sealed, with files (plans/done/PLAN-vault.md, "Each kind is one switch"; plans/vault-sync/spec-attachments.md): the
+//! Each kind, as the plain item it goes as, with files (plans/done/PLAN-vault.md, "Each kind is one switch"; plans/vault-sync/spec-attachments.md): the
 //! choices and which wins, every mapping both ways, the edges of a field, a note and a file, and what a server that refuses, lies
 //! or loses a file leads to. The server is `fake.rs`, which keeps every request.
 
@@ -19,7 +19,6 @@ use super::plain;
 use super::tests::{assert_nothing_leaked, backup_codes, bump, connect, password, totp_account, Vault, NOW_MS};
 use crate::keys::{self, KeyType};
 use crate::protocol::Approval;
-use crate::seal::Key;
 
 const USER_ID: &str = super::fake::USER_ID;
 
@@ -104,14 +103,6 @@ fn name_of_file(fake: &Fake, id: &str) -> String {
     crypto::open_text(record["fileName"].as_str().unwrap(), &cipher::key_of(raw, &fake.user).unwrap()).unwrap().to_string()
 }
 
-fn sealed_vault() -> Vault {
-    Vault { sealing: Some((Key::random(), "vault-1".into())), ..Vault::default() }
-}
-
-fn copy_of(vault: &Vault) -> Vault {
-    Vault { sealing: vault.sealing.as_ref().map(|(k, v)| (k.copy(), v.clone())), ..Vault::default() }
-}
-
 #[test]
 fn a_kind_has_one_choice_and_an_items_own_wins() {
     let mut connection = connect(&mut Fake::default()).unwrap();
@@ -119,14 +110,14 @@ fn a_kind_has_one_choice_and_an_items_own_wins() {
         assert_eq!(connection.kind_choice(kind), default, "{kind}");
         assert_eq!(connection.choice(kind, "x"), default);
     }
-    on(&mut connection, "key", "sealed");
+    on(&mut connection, "key", "on");
     on(&mut connection, "password", "off");
-    assert_eq!((connection.choice("key", "k1"), connection.choice("password", "p1")), ("sealed", "off"));
+    assert_eq!((connection.choice("key", "k1"), connection.choice("password", "p1")), ("on", "off"));
     // The item's own wins either way, and a word that is not one is no choice
-    connection.choices.insert("password.p1".into(), "sealed".into());
+    connection.choices.insert("password.p1".into(), "on".into());
     connection.choices.insert("key.k1".into(), "off".into());
     connection.choices.insert("key.k2".into(), "banana".into());
-    assert_eq!((connection.choice("key", "k1"), connection.choice("password", "p1"), connection.choice("key", "k2")), ("off", "sealed", "sealed"));
+    assert_eq!((connection.choice("key", "k1"), connection.choice("password", "p1"), connection.choice("key", "k2")), ("off", "on", "on"));
     connection.kinds.insert("key".into(), "banana".into());
     assert_eq!(connection.kind_choice("key"), "off");
     // Of the words people type
@@ -385,8 +376,8 @@ fn a_protected_file_is_a_note_named_after_it_with_the_file_attached_and_a_change
 }
 
 #[test]
-fn a_folder_goes_as_a_tar_sealed_or_plain_and_comes_back_as_the_same_folder() {
-    // Plain: a tar archive of the folder, with a name longer than ustar's
+fn a_folder_goes_as_a_tar_and_comes_back_as_the_same_folder() {
+    // A tar archive of the folder, with a name longer than ustar's
     let tar = plain::tar_of(&folder_local("d1", "x").value).unwrap();
     let back = plain::tree_of_tar(&tar).unwrap();
     assert_eq!(back["folders"], json!([{"at": "a", "mode": 0o700}]));
@@ -401,53 +392,6 @@ fn a_folder_goes_as_a_tar_sealed_or_plain_and_comes_back_as_the_same_folder() {
     assert!(outcome.problem.is_none() && outcome.report.refused_total == 0, "{:?}", outcome.report.refused);
     assert_eq!(name_of_file(&fake, &live_ids(&fake)[0]), "tool.tar");
     assert_eq!(file_of(&fake, &live_ids(&fake)[0]), tar.to_vec());
-    // Sealed: the file is the vault's own blob, whatever it holds, and its name says nothing
-    let mut fake = Fake::default();
-    let mut connection = connect(&mut fake).unwrap();
-    on(&mut connection, "protected", "sealed");
-    let mut vault = sealed_vault();
-    add(&mut vault, folder_local("d1", ".config/tool"));
-    let outcome = vault.sync(&mut fake, &connection);
-    assert!(outcome.problem.is_none() && outcome.report.refused_total == 0, "{:?}", outcome.report.refused);
-    let id = live_ids(&fake)[0].clone();
-    let content = opened(&fake, &id).content;
-    assert_eq!((content.name.as_str(), content.marker.as_deref()), (map::SEALED_NAME, Some("sealed")));
-    assert_eq!(content.notes.as_deref(), Some(map::SEALED_ATTACHED));
-    let blob = file_of(&fake, &id);
-    assert!(!String::from_utf8_lossy(&blob).contains("one.txt"));
-    assert_eq!(name_of_file(&fake, &id), "amethystora-sealed.bin");
-    let mut elsewhere = copy_of(&vault);
-    elsewhere.sync(&mut fake, &connection);
-    assert_eq!(elsewhere.value("protected", "d1"), vault.value("protected", "d1"));
-}
-
-#[test]
-fn a_sealed_item_larger_than_a_note_is_a_file_and_the_counter_stays_inside_the_seal() {
-    let mut fake = Fake::default();
-    let mut connection = connect(&mut fake).unwrap();
-    on(&mut connection, "certificate", "sealed");
-    let mut vault = sealed_vault();
-    let mut big = cert_local("c1", "Big", 0);
-    big.value["fields"] = json!({"pad": "x".repeat(6000)});
-    add(&mut vault, big.clone());
-    let outcome = vault.sync(&mut fake, &connection);
-    assert!(outcome.problem.is_none() && outcome.report.refused_total == 0, "{:?}", outcome.report.refused);
-    let id = live_ids(&fake)[0].clone();
-    assert_eq!(opened(&fake, &id).content.notes.as_deref(), Some(map::SEALED_ATTACHED));
-    assert_eq!(vault.links.values().next().unwrap().seal, 1);
-    // Changed: a new cipher, the counter one higher, the old one in the trash
-    big.value["fields"] = json!({"pad": "y".repeat(6000)});
-    add(&mut vault, big);
-    vault.sync(&mut fake, &connection);
-    assert_eq!(vault.links.values().next().unwrap().seal, 2);
-    assert_eq!(live_ids(&fake).len(), 1);
-    let mut elsewhere = copy_of(&vault);
-    elsewhere.sync(&mut fake, &connection);
-    assert_eq!(elsewhere.value("certificate", "c1")["fields"]["pad"], json!("y".repeat(6000)));
-    // Another vault sees a sealed note it cannot open
-    let mut other = Vault { sealing: Some((Key::random(), "vault-2".into())), ..Vault::default() };
-    let outcome = other.sync(&mut fake, &connection);
-    assert_eq!(outcome.report.sealed_elsewhere, 1);
 }
 
 #[test]
@@ -472,7 +416,7 @@ fn what_fits_a_field_a_note_and_what_needs_a_file_at_the_edges() {
 fn a_kind_switched_off_moves_its_copies_to_the_trash_and_on_again_makes_them_anew() {
     let mut fake = Fake::default();
     let mut connection = connect(&mut fake).unwrap();
-    let mut vault = sealed_vault();
+    let mut vault = Vault::default();
     vault.put("password", "p1", password("Site", "u", "pw-secret", "https://a.test"));
     vault.sync(&mut fake, &connection);
     assert_eq!(live_ids(&fake).len(), 1);
@@ -484,21 +428,16 @@ fn a_kind_switched_off_moves_its_copies_to_the_trash_and_on_again_makes_them_ane
     // The vault's item is still there, and nothing was destroyed
     assert_eq!(vault.of_kind("password").len(), 1);
     assert_eq!(fake.ciphers.len(), 1);
-    on(&mut connection, "password", "sealed");
-    vault.sync(&mut fake, &connection);
-    assert_eq!(live_ids(&fake).len(), 1);
-    let id = live_ids(&fake)[0].clone();
-    assert_eq!(opened(&fake, &id).content.name, map::SEALED_NAME);
-    // Plain and sealed are two forms of one item: switching moves it, and a sealed password opens in this vault again
+    // On again: made anew, and the copy in the trash stays there
     on(&mut connection, "password", "on");
     vault.sync(&mut fake, &connection);
     assert_eq!(live_ids(&fake).len(), 1);
+    assert_eq!(fake.ciphers.len(), 2);
     assert_eq!(opened(&fake, &live_ids(&fake)[0]).content.password.as_deref(), Some("pw-secret"));
-    on(&mut connection, "password", "sealed");
-    vault.sync(&mut fake, &connection);
-    let mut elsewhere = copy_of(&vault);
+    // Another computer takes the Login in as the password it is
+    let mut elsewhere = Vault::default();
     elsewhere.sync(&mut fake, &connection);
-    assert_eq!(elsewhere.value("password", "p1")["password"], json!("pw-secret"));
+    assert_eq!(elsewhere.of_kind("password")[0].value["password"], json!("pw-secret"));
 }
 
 #[test]
@@ -577,13 +516,13 @@ fn files_are_refused_with_a_reason_before_a_request_where_they_cannot_go() {
     let mut fake = Fake { premium: false, ..Fake::default() };
     let mut connection = connect(&mut fake).unwrap();
     on(&mut connection, "protected", "on");
-    let mut vault = sealed_vault();
+    let mut vault = Vault::default();
     add(&mut vault, file_local("f1", ".npmrc", b"secret-file"));
     let outcome = vault.sync(&mut fake, &connection);
     assert!(outcome.report.refused.iter().any(|r| r["why"] == "attachments-premium"));
     assert!(fake.ciphers.is_empty());
-    // What fits a note still goes there: a sealed password, for one
-    on(&mut connection, "password", "sealed");
+    // What fits a note still goes there: a password, for one
+    on(&mut connection, "password", "on");
     vault.put("password", "p1", password("Site", "u", "pw", ""));
     vault.sync(&mut fake, &connection);
     assert_eq!(fake.ciphers.len(), 1);

@@ -17,6 +17,17 @@
 #                  machine is on battery, the account's timed backup and containers' upgrade wait as they do on a metered
 #                  connection: the same stamp, so never longer than a week, and a backup to a disk of this machine never.
 #                  The system update needs no mark: uupd's own hardware check keeps it waiting under 20%.
+#   playing on|off [ended]
+#                  the pill's While you play (modules/power/playing.js): on writes the caller's process number and the time into
+#                  a mark in $XDG_RUNTIME_DIR, kept while a game is registered with GameMode. While that process is still
+#                  gnome-shell and the mark is under six hours old, the account's timed backup and containers' upgrade wait
+#                  (a backup to a disk of this machine too: it reads and writes the disk the game is on). Never the system
+#                  update, which is root's and which no file of an account may delay, and never a run a person started. The
+#                  six hours are counted from the mark's own time, so a game that never unregisters cannot hold them for good.
+#                  off takes the mark away; off ended (the game ended, or Let them run) also starts what a timer found held,
+#                  once, since a timer that was skipped would not try again until its next day, and only if the waits a timer has
+#                  apart from a game (a connection that counts data, Get me through) would let it run now. A run those hold back
+#                  keeps their stamp and is not remembered. A lock takes the mark away without it: the game may still be running.
 #
 # WHAT is system (as root: the stamp in /var/lib/amethystora/metered, readable by everyone, so that the pill and System
 # Updates can say since when), containers or backup (as the account: in ~/.local/state/amethystora/metered).
@@ -28,11 +39,15 @@ SYSTEM_DIR=/var/lib/amethystora/metered
 USER_DIR="${XDG_STATE_HOME:-${HOME:-/nonexistent}/.local/state}/amethystora/metered"
 BACKUP_ENV="${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/amethystora/backup.env"
 THROUGH="${XDG_RUNTIME_DIR:-/nonexistent}/amethystora/get-through"
+PLAYING="${XDG_RUNTIME_DIR:-/nonexistent}/amethystora/playing"
+# What a timer found held by a game, to be started when the game ends (one empty file for each)
+WAITED="${XDG_RUNTIME_DIR:-/nonexistent}/amethystora/playing-waited"
+SIX_HOURS=$((6 * 3600))
 # Filesystems that are another machine's disk
 NETWORK_FS='^(nfs|nfs4|cifs|smb3|smbfs|9p|ceph|glusterfs|davfs|fuse\.(sshfs|rclone|s3fs|davfs2|gvfsd-fuse))$'
 
 usage() {
-    echo "usage: ${0##*/} metered | wait system|containers|backup|backup-other | done system|containers|backup|backup-other | status --json | through on|off" >&2
+    echo "usage: ${0##*/} metered | wait system|containers|backup|backup-other | done system|containers|backup|backup-other | status --json | through on|off | playing on|off [ended]" >&2
     exit 2
 }
 
@@ -51,6 +66,26 @@ getting_through() {
     [[ -n "${pid}" && "$(cat -- "/proc/${pid}/comm" 2>/dev/null)" == gnome-shell ]] || return 1
     [[ "$(busctl --system get-property org.freedesktop.UPower /org/freedesktop/UPower \
         org.freedesktop.UPower OnBattery 2>/dev/null)" == "b true" ]]
+}
+
+# The pill's While you play: only while the shell that wrote the mark is still there, and for six hours at most from the mark's
+# own time (a time in the future, from a clock that was set back, holds nothing)
+playing() {
+    local pid start now
+    [[ -r "${PLAYING}" ]] || return 1
+    read -r pid start < <(head -c 64 -- "${PLAYING}") || true
+    [[ "${pid:-}" =~ ^[0-9]{1,10}$ && "${start:-}" =~ ^[0-9]{1,12}$ ]] || return 1
+    [[ "$(cat -- "/proc/${pid}/comm" 2>/dev/null)" == gnome-shell ]] || return 1
+    now="$(date +%s)"
+    ((now >= start && now - start < SIX_HOURS))
+}
+
+unit_of() {
+    case "$1" in
+        backup) echo amethystora-backup.service ;;
+        containers) echo amethystora-pkg-upgrade.service ;;
+        backup-other) echo amethystora-backup-other.service ;;
+    esac
 }
 
 stamp_of() {
@@ -78,11 +113,11 @@ backup_is_local() {
     [[ -n "${fstype}" && ! "${fstype}" =~ ${NETWORK_FS} ]]
 }
 
-do_wait() {
+# The waits a timer's run has apart from a game (a connection that counts data, Get me through, each with its stamp and its
+# week): 0 to run, 1 to wait. Without a game this is all of do_wait, and a game's end asks it again before it starts anything.
+wait_other() {
     local what="$1" stamp first now why
     stamp="$(stamp_of "${what}")"
-    # Started by a person, not by its timer
-    [[ -n "${TRIGGER_UNIT:-}" ]] || return 0
     if [[ "${what}" == backup ]] && backup_is_local; then
         return 0
     fi
@@ -116,6 +151,24 @@ do_wait() {
     return 1
 }
 
+do_wait() {
+    local what="$1"
+    # Started by a person, not by its timer
+    [[ -n "${TRIGGER_UNIT:-}" ]] || return 0
+    # A game is playing: the account's own runs wait, a backup to this machine's disk too, and a run that is only held by
+    # the game is remembered so that the end of the game starts it. No stamp: the six hours are the mark's. A run that
+    # would wait for a connection that counts data or for Get me through anyway keeps those words and that stamp, and is
+    # not remembered: the game's end must not start what they hold back.
+    if [[ "${what}" != system ]] && playing; then
+        wait_other "${what}" || return 1
+        mkdir -p -m 0700 -- "${WAITED}"
+        : >"${WAITED}/${what}"
+        echo "A game is playing: waiting until it ends (at most six hours). It runs at once when started by hand."
+        return 1
+    fi
+    wait_other "${what}"
+}
+
 stamp_json() {
     local stamp first
     stamp="$(stamp_of "$1")"
@@ -135,7 +188,8 @@ case "$1" in
         ;;
     done)
         [[ $# -eq 2 ]] || usage
-        rm -f -- "$(stamp_of "$2")"
+        rm -f -- "$(stamp_of "$2")" "${WAITED}/$2" "${WAITED}/started-$2"
+        rmdir -- "${WAITED}" 2>/dev/null || true
         ;;
     status)
         [[ $# -eq 2 && "$2" == --json ]] || usage
@@ -151,6 +205,40 @@ case "$1" in
                 printf '%s\n' "${PPID}" >"${THROUGH}"
                 ;;
             off) rm -f -- "${THROUGH}" ;;
+            *) usage ;;
+        esac
+        ;;
+    playing)
+        [[ $# -ge 2 ]] || usage
+        case "$2" in
+            on)
+                [[ $# -eq 2 ]] || usage
+                mkdir -p -m 0700 -- "$(dirname -- "${PLAYING}")"
+                # The same shell asking again keeps the time it began
+                if ! { playing && [[ "$(head -c 16 -- "${PLAYING}" | cut -d' ' -f1)" == "${PPID}" ]]; }; then
+                    printf '%s %s\n' "${PPID}" "$(date +%s)" >"${PLAYING}.new"
+                    mv -f -- "${PLAYING}.new" "${PLAYING}"
+                fi
+                ;;
+            off)
+                [[ $# -le 3 && ( $# -eq 2 || "$3" == ended ) ]] || usage
+                rm -f -- "${PLAYING}"
+                if [[ $# -eq 3 && -d "${WAITED}" ]]; then
+                    for what in backup containers backup-other; do
+                        if [[ -e "${WAITED}/${what}" ]]; then
+                            rm -f -- "${WAITED}/${what}"
+                            # Only what the timer's own waits would let run now: a connection that counts data and Get me
+                            # through still hold it back, with their stamps and their week
+                            wait_other "${what}" >/dev/null 2>&1 || continue
+                            # A unit started by hand has no TRIGGER_UNIT, so the containers' own checks (a battery that is
+                            # low, a busy machine, no network) would be skipped: this tells amethystora-pkg to make them
+                            [[ "${what}" != containers ]] || : >"${WAITED}/started-containers"
+                            systemctl --user start --no-block "$(unit_of "${what}")" >/dev/null 2>&1 || true
+                        fi
+                    done
+                    rmdir -- "${WAITED}" 2>/dev/null || true
+                fi
+                ;;
             *) usage ;;
         esac
         ;;

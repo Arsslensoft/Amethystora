@@ -1,0 +1,393 @@
+name: Lab
+
+# The VM lab (tests/vm) on GitHub's runners, as bootc runs its integration tests: the image is built from the commit once,
+# installed onto the lab's disks and signed in (the ready state), and the suites are spread over lanes that each run on a
+# runner of their own, one VM at a time, from what the build job handed them (tests/vm/README.md, On GitHub). Every job
+# runs `bash tests/vm/run.sh` as a machine with the lab does, so a failure here is tried again there the same way. It
+# holds no secret, builds with throwaway keys and publishes nothing. Every pull request runs the smoke suites
+# (shards.json), and one with the label `lab` every suite, from its next push; a change to Markdown alone runs none, nor
+# does a merge group, whose pull requests ran it. The job named Lab says whether every suite passed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: The image to build and test
+        type: choice
+        default: amethystora
+        options:
+          - amethystora
+          - amethystora-dx
+          - amethystora-nvidia-open
+          - amethystora-dx-nvidia-open
+          - amethystora-nvidia-lts
+          - amethystora-dx-nvidia-lts
+      stream:
+        description: The stream to build
+        type: choice
+        default: latest
+        options: [latest, beta, stable]
+      suites:
+        description: "Only these suites, by number or name (11,50-raid.sh); empty for every suite"
+        type: string
+        default: ""
+      lanes:
+        description: How many runners the suites are spread over (1 to 12)
+        type: number
+        default: 10
+  # Lab (long suites), lab-long.yml, runs the suites shards.json calls long through this, a runner each
+  workflow_call:
+    inputs:
+      image:
+        type: string
+        default: amethystora
+      stream:
+        type: string
+        default: latest
+      suites:
+        type: string
+        default: ""
+      lanes:
+        type: number
+        default: 10
+      # all: as this workflow runs by itself; long: the long suites only, each on a lane of its own
+      set:
+        type: string
+        default: all
+  # Not `labeled`: a run for another label would end in a skipped Lab, which a required check takes for a pass
+  pull_request:
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  # A new push to a pull request stops its last run; a run started by hand stops none
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ${{ inputs.image || 'amethystora' }}
+  STREAM: ${{ inputs.stream || 'latest' }}
+  # A runner is not the machine suite 71's baseline was measured on: its numbers are recorded and not compared
+  VMLAB_RECORD_ONLY: "1"
+
+jobs:
+  # What runs, and the lanes, by the suites' minutes in tests/vm/shards.json, as `run.sh plan --parallel N` prints them
+  plan:
+    name: Plan
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      selection: ${{ steps.plan.outputs.selection }}
+      ready: ${{ steps.plan.outputs.ready }}
+      installer: ${{ steps.plan.outputs.installer }}
+      lanes: ${{ steps.plan.outputs.lanes }}
+      suites: ${{ steps.plan.outputs.suites }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Plan the lanes
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          EVERY_SUITE: ${{ contains(github.event.pull_request.labels.*.name, 'lab') }}
+          LANES: ${{ inputs.lanes || 10 }}
+          SUITES: ${{ inputs.suites }}
+          SET: ${{ inputs.set || 'all' }}
+          VMLAB_DIR: ${{ runner.temp }}/vm
+        run: |
+          lanes="${LANES}" suites="${SUITES}" skip=""
+          long="$(jq -r '.long | join(",")' tests/vm/shards.json)"
+          # The long suites alone, a lane each: on a pull request only with the label lab, as every suite is
+          if [[ "${SET}" == long ]]; then
+            [[ -n "${suites}" ]] || suites="${long}"
+            # run.mjs takes twelve at most: past that the shortest share a lane
+            lanes="$(tr ',' '\n' <<<"${suites}" | grep -c .)"
+            (( lanes <= 12 )) || lanes=12
+          fi
+          if [[ "${EVENT}" == pull_request ]]; then
+            changed="$(git diff --name-only "$(git merge-base "${BASE}" HEAD)" HEAD)"
+            if ! grep -qv '\.md$' <<<"${changed}"; then
+              echo "Only Markdown changed: no suite to run" >> "$GITHUB_STEP_SUMMARY"
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [[ "${SET}" == long && "${EVERY_SUITE}" != true ]]; then
+              echo "The long suites run for a pull request with the label lab" >> "$GITHUB_STEP_SUMMARY"
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            elif [[ "${EVERY_SUITE}" != true ]]; then
+              lanes=1 suites="$(jq -r '.smoke | join(",")' tests/vm/shards.json)"
+            elif [[ "${SET}" != long ]]; then
+              # Every suite but the long ones, which Lab (long suites) runs beside this, a runner each
+              skip="${long}"
+            fi
+          fi
+          # A file tests/vm/lab-suites (suites by number or name, one a line) narrows a run with the label lab to those that
+          # are in this set, long or not, for trying fixes to a few suites without every other one: not kept in the repository
+          if [[ "${EVENT}" == pull_request && "${EVERY_SUITE}" == true && -f tests/vm/lab-suites ]]; then
+            picked=()
+            while read -r want; do
+              [[ -z "${want}" || "${want}" == \#* ]] && continue
+              [[ "${want}" =~ ^[0-9]{2}(-[a-z0-9-]+)?(\.sh)?$ ]] || { echo "::error::tests/vm/lab-suites: ${want}"; exit 1; }
+              is_long=false
+              ! jq -e --arg n "${want:0:2}-" '.long | any(startswith($n))' tests/vm/shards.json >/dev/null || is_long=true
+              if [[ "${SET}" == long ]]; then
+                [[ "${is_long}" == false ]] || picked+=("${want}")
+              else
+                [[ "${is_long}" == true ]] || picked+=("${want}")
+              fi
+            done < <(sed 's/#.*//' tests/vm/lab-suites | tr ',' '\n' | tr -d '\r ')
+            if (( ${#picked[@]} == 0 )); then
+              echo "tests/vm/lab-suites names no suite of this set" >> "$GITHUB_STEP_SUMMARY"
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            suites="$(IFS=,; echo "${picked[*]}")" skip=""
+            lanes=${#picked[@]}
+            (( lanes <= 10 )) || lanes=10
+          fi
+          args=(plan --parallel "${lanes}" --json)
+          [[ -z "${suites}" ]] || args+=(--suites "${suites}")
+          [[ -z "${skip}" ]] || args+=(--skip "${skip}")
+          plan="$(node tests/vm/run.mjs "${args[@]}")"
+          # What is left out is written into the selection, so that the build makes only the disks the lanes need
+          [[ -z "${skip}" ]] || suites="$(jq -r .suites <<<"${plan}")"
+          { echo "run=true"; echo "selection=${suites}"; } >> "$GITHUB_OUTPUT"
+          for key in ready installer lanes suites; do
+            echo "${key}=$(jq -c -r ".${key}" <<<"${plan}")" >> "$GITHUB_OUTPUT"
+          done
+          jq -r '"Lanes for \(env.IMAGE):\(env.STREAM):", (.lanes[] | "- lane \(.lane), about \(.minutes) min: \(.suites)")' <<<"${plan}" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+  # The image from the commit, the disks the lanes start from, and the ready state, each kept as an artifact for a day
+  build:
+    name: Build, install, sign in
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    steps:
+      # The whole history: run.sh hands the lab a git bundle of HEAD, and what's new reads the commits since the last image
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Maximize build space
+        uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6 # master
+        with:
+          extra-squeeze: true
+
+      - name: Start the lab
+        run: |
+          [[ -c /dev/kvm ]] || { echo "::error::This runner has no /dev/kvm"; exit 1; }
+          echo "VMLAB_VOLUME=${RUNNER_TEMP}/vm" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/vm"
+          VMLAB_VOLUME="${RUNNER_TEMP}/vm" bash tests/vm/setup.sh
+
+      - name: Build the image
+        run: bash tests/vm/run.sh build --image "${IMAGE}" --tag "${STREAM}"
+
+      # Compressed, to send; the image is not needed afterwards, and the ready state needs the room
+      - name: Install it onto the lab's disks
+        env:
+          VMLAB_COMPRESS: 1
+          SUITES: ${{ needs.plan.outputs.selection }}
+        run: |
+          args=(disk)
+          [[ -z "${SUITES}" ]] || args+=(--suites "${SUITES}")
+          bash tests/vm/run.sh "${args[@]}"
+          docker exec amevm podman system reset --force
+
+      - name: Keep the disk
+        if: needs.plan.outputs.ready == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lab-disk
+          path: |
+            ${{ runner.temp }}/vm/disks/test.qcow2
+            ${{ runner.temp }}/vm/disks/test.vars.json
+            ${{ runner.temp }}/vm/disks/test.digest
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
+
+      - name: Keep the installer's disk
+        if: needs.plan.outputs.installer == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lab-disk-installer
+          path: |
+            ${{ runner.temp }}/vm/disks/test-installer.qcow2
+            ${{ runner.temp }}/vm/disks/test-installer.vars.json
+            ${{ runner.temp }}/vm/disks/test-installer.digest
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
+
+      - name: Sign in (the ready state)
+        if: needs.plan.outputs.ready == 'true'
+        run: bash tests/vm/run.sh ready
+
+      - name: Pack the ready state
+        if: needs.plan.outputs.ready == 'true'
+        run: |
+          sudo tar -C "${VMLAB_VOLUME}/vms" -cf - test.qcow2 test.vars.json test.tpm test.ready |
+            zstd -T0 -3 -q -o "${RUNNER_TEMP}/ready.tar.zst"
+
+      - name: Keep the ready state
+        if: needs.plan.outputs.ready == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lab-ready
+          path: ${{ runner.temp }}/ready.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
+
+      - name: Collect the run's files
+        if: always()
+        run: bash tests/vm/ci-collect.sh
+
+      - name: Keep the run's files
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lab-run-build
+          path: ${{ runner.temp }}/runs
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true
+
+  # One lane each: its installer suites on a fresh machine of the installer's disk, the rest from the ready state
+  lane:
+    name: Lane ${{ matrix.lane }}
+    needs: [plan, build]
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.lanes != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.lanes) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Maximize build space
+        uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6 # master
+
+      - name: Fetch the disk
+        if: matrix.ready
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lab-disk
+          path: ${{ runner.temp }}/vm/disks
+
+      - name: Fetch the installer's disk
+        if: matrix.installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lab-disk-installer
+          path: ${{ runner.temp }}/vm/disks
+
+      - name: Fetch the ready state
+        if: matrix.ready
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lab-ready
+          path: ${{ runner.temp }}
+
+      - name: Start the lab
+        run: |
+          [[ -c /dev/kvm ]] || { echo "::error::This runner has no /dev/kvm"; exit 1; }
+          echo "VMLAB_VOLUME=${RUNNER_TEMP}/vm" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/vm/vms"
+          if [[ -f "${RUNNER_TEMP}/ready.tar.zst" ]]; then
+            zstd -dc "${RUNNER_TEMP}/ready.tar.zst" | sudo tar -C "${RUNNER_TEMP}/vm/vms" -xf -
+            rm -f "${RUNNER_TEMP}/ready.tar.zst"
+          fi
+          VMLAB_VOLUME="${RUNNER_TEMP}/vm" bash tests/vm/setup.sh
+
+      - name: Run the lane's suites
+        env:
+          LANE_SUITES: ${{ matrix.suites }}
+        run: bash tests/vm/run.sh test --parallel 1 --reuse --suites "${LANE_SUITES}"
+
+      - name: Collect the run's files
+        if: always()
+        run: bash tests/vm/ci-collect.sh
+
+      - name: Keep the run's files
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lab-run-lane-${{ matrix.lane }}
+          path: ${{ runner.temp }}/runs
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true
+
+  # Every job's results in one table; the one check to require
+  report:
+    name: Lab
+    needs: [plan, build, lane]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # Each job's files in a folder of its own, named after it; none when a job ended before it had any
+      - name: Fetch the runs' files
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: lab-run-*
+          path: ${{ runner.temp }}/runs
+
+      - name: Report
+        env:
+          EXPECT: ${{ needs.plan.outputs.suites }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          LANE_RESULT: ${{ needs.lane.result }}
+          VMLAB_DIR: ${{ runner.temp }}/vm
+        run: |
+          status=0
+          node tests/vm/run.mjs report "${RUNNER_TEMP}/runs" --expect "${EXPECT}" >"${RUNNER_TEMP}/report.md" || status=1
+          tee -a "$GITHUB_STEP_SUMMARY" <"${RUNNER_TEMP}/report.md"
+          for job in "build:${BUILD_RESULT}" "lanes:${LANE_RESULT}"; do
+            if [[ "${job#*:}" == failure || "${job#*:}" == cancelled ]]; then
+              echo "::error::The ${job%%:*} job ended with ${job#*:}"
+              status=1
+            fi
+          done
+          exit "${status}"

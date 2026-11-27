@@ -251,8 +251,9 @@ if [[ -f "${DIR}/proxy" ]]; then
             ignore=*)
                 PROXY_IGNORE="${line#ignore=}"
                 re='^[A-Za-z0-9*.:/_-]{1,253}$'
-                for host in ${PROXY_IGNORE//,/ }; do
-                    [[ "${host}" =~ ${re} ]] || problems+=("proxy: ignore holds ${host}, which is not a host, a domain or an address range")
+                IFS=, read -ra hosts <<<"${PROXY_IGNORE}"
+                for host in "${hosts[@]}"; do
+                    [[ -z "${host}" || "${host}" =~ ${re} ]] || problems+=("proxy: ignore holds ${host}, which is not a host, a domain or an address range")
                 done
                 ;;
             lock=yes | lock=no) PROXY_LOCK="${line#lock=}" ;;
@@ -302,12 +303,13 @@ if [[ -d "${DIR}/flatpak-remotes" ]]; then
                 grep -q '^Url=https://' "${file}" || problems+=("flatpak-remotes: ${name} has no https Url")
                 key="$(sed -n 's/^GPGKey=//p' "${file}" | tr -d '\r')"
                 fingerprint="$(tr -d ' \r\n' <"${file%.flatpakrepo}.fingerprint" 2>/dev/null | tr '[:lower:]' '[:upper:]')"
+                # Flatpak trusts every key the blob holds: each primary key's fingerprint (a subkey's is not one), and only the pinned one
                 got="$(base64 -d <<<"${key}" 2>/dev/null | GNUPGHOME="${gpghome}" gpg --batch --with-colons --show-keys 2>/dev/null |
-                    awk -F: '$1 == "fpr" { print $10; exit }')"
+                    awk -F: '$1 == "pub" { primary = 1 } $1 == "sub" { primary = 0 } $1 == "fpr" && primary { print $10; primary = 0 }')"
                 if [[ -z "${got}" ]]; then
                     problems+=("flatpak-remotes: ${name} has no key Flatpak can check its apps with (GPGKey)")
                 elif [[ ! "${fingerprint}" =~ ^[0-9A-F]{40}$ || "${got}" != "${fingerprint}" ]]; then
-                    problems+=("flatpak-remotes: the key of ${name} is ${got}, not the one ${name}.fingerprint pins")
+                    problems+=("flatpak-remotes: the key of ${name} is ${got//$'\n'/ }, not only the one ${name}.fingerprint pins")
                 else
                     REMOTES+=("${name}")
                 fi
@@ -332,7 +334,9 @@ if [[ -d "${DIR}/vpn" ]]; then
             { [[ "${name}" == *.md ]] || problems+=("vpn: ${name} is not a plain file with a plain name"); continue; }
         case "${name}" in
             *.crt | *.pem)
-                if grep -q 'PRIVATE KEY' "${file}" || ! openssl x509 -noout -in "${file}" 2>/dev/null; then
+                # openssl reads the first PEM block and skips whatever surrounds it: the file is to hold nothing else
+                if grep -q 'PRIVATE KEY' "${file}" || ! openssl x509 -noout -in "${file}" 2>/dev/null ||
+                    tr -d '\015' <"${file}" | grep -qvE '^(-----(BEGIN|END) CERTIFICATE-----|[A-Za-z0-9+/=]*)$'; then
                     problems+=("vpn: ${name} is not a certificate alone: a private key is each person's, never the image's")
                 else
                     CERTS+=("${name}")
@@ -361,6 +365,13 @@ if [[ -d "${DIR}/vpn" ]]; then
                         [[ "${path}" == /etc/pki/amethystora-vpn/* && -f "${DIR}/vpn/${path##*/}" &&
                             "${path##*/}" =~ \.(crt|pem)$ ]] ||
                             problems+=("vpn: ${name} names ${path}, which is not one of this folder's certificates in /etc/pki/amethystora-vpn")
+                    fi
+                    # A plugin's keys that name a program, and a file named by a path the plugin would read from where it runs
+                    if [[ "${section}" == vpn ]]; then
+                        [[ "${key}" =~ ^(csd[_-]wrapper|enable[_-]csd[_-]trojan)$ ]] &&
+                            problems+=("vpn: ${name} sets [vpn] ${key}, which names a program to run")
+                        [[ "${value}" != /* && ("${value}" =~ ^(~|\.\.?/) || "${value}" =~ \.(crt|pem|key|p12|pfx|cer|der|sh)$) ]] &&
+                            problems+=("vpn: ${name} names ${value} by a relative path: a certificate is given as /etc/pki/amethystora-vpn/FILE")
                     fi
                     case "${section}:${key}" in
                         connection:type) type="${value}" ;;

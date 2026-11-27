@@ -26,6 +26,11 @@ base64.workspace = true
 libc.workspace = true
 zeroize.workspace = true
 
+# Against the real Kemlock Server image (tests/kemlock.rs, `-- --ignored`): plain http to its container, so only with the feature
+[[test]]
+name = "kemlock"
+required-features = ["plain-http-for-tests"]
+
 [features]
 # Plain http to a test network's server, for the tests against Vaultwarden in a container. Nothing shipped has it.
 plain-http-for-tests = ["amethystora-vault-core/plain-http-for-tests"]

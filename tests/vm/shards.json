@@ -1,6 +1,8 @@
 {
-  "about": "How run.mjs --parallel N spreads the suites over N VMs (README.md, Several VMs at once). prep: the suites the ready state is made with, on a machine with no account yet, in this order, the sign-in last. prep_minutes: the boot, those suites and the first boot's Flatpaks. boot_minutes: a VM's start. minutes: each suite's time in a run on one VM, round 1 of 2026-10-28 and, where it skipped or did not run there, its last full run; a suite not named here counts default_minutes.",
+  "about": "How run.mjs --parallel N spreads the suites over N VMs (README.md, Several VMs at once). prep: the suites the ready state is made with, on a machine with no account yet, in this order, the sign-in last. long: the suites of ten minutes and more, which the workflow Lab (long suites) runs a runner each and Lab's run of every suite leaves out (README.md, On GitHub). smoke: what the Lab workflow runs after them for every pull request (README.md, On GitHub): short, and across the desktop. prep_minutes: the boot, those suites and the first boot's Flatpaks. boot_minutes: a VM's start. minutes: each suite's time in a run on one VM, round 1 of 2026-10-28 and, where it skipped or did not run there, its last full run; a suite not named here counts default_minutes.",
   "prep": ["00-boot.sh", "05-first-run.sh", "06-nvidia-image.sh", "10-account.sh"],
+  "long": ["15-windows.sh", "25-every-app.sh", "38-off-is-off.sh", "44-what-leaves.sh", "50-raid.sh", "55-raid-system.sh", "60-vanilla.sh", "74-vault.sh", "80-control.sh", "85-raid-mirror.sh", "90-control-switch.sh", "92-hardening.sh", "93-privacy.sh"],
+  "smoke": ["20-apps.sh", "27-amethystora-ui.sh", "42-translations.sh", "97-terminal.sh"],
   "prep_minutes": 25,
   "boot_minutes": 2,
   "default_minutes": 5,
@@ -41,6 +43,8 @@
     "70-backups.sh": 5.8,
     "74-vault.sh": 22,
     "75-deja-dup.sh": 4.2,
+    "77-pull-key.sh": 6,
+    "78-lab-devices.sh": 4,
     "80-control.sh": 20.9,
     "83-logins.sh": 6.2,
     "84-duress.sh": 7.7,

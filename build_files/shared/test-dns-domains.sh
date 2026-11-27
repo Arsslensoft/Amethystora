@@ -5,12 +5,20 @@
 # purpose ("~") and the ones its connection lists itself (its DNS search domains); a VPN's or Tailscale's are never touched, and
 # nothing is set where there is nothing to take off.
 #
+# The watcher (amethystora-dns domains-watch) is run too, with stand-ins for the signals it listens to: systemd-resolved's change of a
+# link's domains is acted on at once, and a lease that changes without a line from `nmcli monitor` is taken off again.
+#
 #   test-dns-domains.sh   HELPER names another copy
 set -euo pipefail
 
 HELPER="${HELPER:-/usr/libexec/amethystora-dns}"
 T="$(mktemp -d)"
-trap 'rm -rf "${T}"' EXIT
+watcher=""
+cleanup() {
+    [[ -z "${watcher}" ]] || kill -- "-${watcher}" 2>/dev/null || true
+    rm -rf "${T}"
+}
+trap cleanup EXIT
 fail() { echo "test-dns-domains: $*" >&2; exit 1; }
 
 export PATH="${T}/bin:${PATH}" LOG="${T}/log" STATUS="${T}/status" DEVICES="${T}/devices" OWN="${T}/own"
@@ -22,6 +30,7 @@ cat >"${T}/bin/nmcli" <<'EOS'
 case "$*" in
     "-t -f DEVICE,TYPE,STATE,CON-UUID device") cat "${DEVICES}" ;;
     "-g ipv4.dns-search,ipv6.dns-search connection show "*) sed -n "s/^$5 //p" "${OWN}"; echo ;;
+    monitor) exec sleep 600 ;;
     *) exit 1 ;;
 esac
 EOS
@@ -72,4 +81,60 @@ EOF
 : >"${LOG}"
 "${HELPER}" domains
 [[ ! -s "${LOG}" ]] || fail "a second pass set something: $(cat "${LOG}")"
+# A network that is still connecting has its domains handed to resolved already
+cat >"${DEVICES}" <<'EOF'
+wlan2:wifi:connecting (getting IP configuration):dddd
+EOF
+printf 'Link 9 (wlan2): com lan\n' >"${STATUS}"
+: >"${LOG}"
+"${HELPER}" domains
+grep -qx 'domain wlan2 lan' "${LOG}" || fail "a network still connecting kept its domains: $(cat "${LOG}")"
+
+# The watcher, on a copy that looks for its switch in the temporary folder
+sed "s|^RESOLVED_DROP_IN=.*|RESOLVED_DROP_IN=${T}/dropin|" "${HELPER}" >"${T}/helper"
+chmod +x "${T}/helper"
+: >"${T}/dropin"
+export EV_RESOLVED="${T}/ev-resolved" EV_NM="${T}/ev-nm"
+: >"${EV_RESOLVED}"
+: >"${EV_NM}"
+# gdbus monitor: what resolved and NetworkManager say, a line each, from files the test writes to
+cat >"${T}/bin/gdbus" <<'EOS'
+#!/usr/bin/bash
+case "$*" in
+    "monitor --system --dest org.freedesktop.resolve1") exec tail -n0 -F -s 0.05 "${EV_RESOLVED}" ;;
+    "monitor --system --dest org.freedesktop.NetworkManager") exec tail -n0 -F -s 0.05 "${EV_NM}" ;;
+    *) exit 1 ;;
+esac
+EOS
+chmod +x "${T}/bin/gdbus"
+waits() {
+    local tries="$1"
+    shift
+    while ((tries-- > 0)); do
+        "$@" && return 0
+        sleep 0.05
+    done
+    return 1
+}
+: >"${LOG}"
+setsid "${T}/helper" domains-watch 2>"${T}/watch.err" &
+watcher=$!
+waits 100 grep -qx 'domain wlan2 lan' "${LOG}" || fail "the watcher did not look first: $(cat "${LOG}" "${T}/watch.err")"
+sleep 0.5
+
+# A lease changes: NetworkManager hands resolved the domains again and nmcli monitor prints nothing. resolved says it, and the
+# domains are taken off again straight away, well before the second that nmcli's events wait
+: >"${LOG}"
+echo "/org/freedesktop/resolve1/link/_39: org.freedesktop.DBus.Properties.PropertiesChanged ('org.freedesktop.resolve1.Link', {'Domains': <[(0, 'com', false), (0, 'lan', false)]>}, @as [])" >>"${EV_RESOLVED}"
+waits 10 grep -qx 'domain wlan2 lan' "${LOG}" || fail "a change of a link's domains in resolved was not acted on at once: $(cat "${LOG}" "${T}/watch.err")"
+
+# What NetworkManager says about something else wakes nothing; a new IP configuration is followed by a pass a second later
+sleep 0.5
+: >"${LOG}"
+echo "/org/freedesktop/NetworkManager/AccessPoint/3: org.freedesktop.DBus.Properties.PropertiesChanged ('org.freedesktop.NetworkManager.AccessPoint', {'Strength': <byte 0x42>}, @as [])" >>"${EV_NM}"
+sleep 1.6
+[[ ! -s "${LOG}" ]] || fail "an access point's signal strength set something: $(cat "${LOG}")"
+echo "/org/freedesktop/NetworkManager/IP4Config/7: org.freedesktop.DBus.Properties.PropertiesChanged ('org.freedesktop.NetworkManager.IP4Config', {'Searches': <['com']>}, @as [])" >>"${EV_NM}"
+waits 80 grep -qx 'domain wlan2 lan' "${LOG}" || fail "a new IP configuration was not followed by a pass: $(cat "${LOG}" "${T}/watch.err")"
+kill -0 "${watcher}" 2>/dev/null || fail "the watcher ended: $(cat "${T}/watch.err")"
 echo "test-dns-domains: ok"

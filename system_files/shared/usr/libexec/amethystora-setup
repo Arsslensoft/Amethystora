@@ -212,7 +212,7 @@ SEARCH=org.gnome.shell.extensions.amethystora-ui.search
 SEARCH_KEYS='{
     "answers": ["b"], "settings": ["b"], "manual": ["b"], "windows": ["b"], "clipboard": ["b"], "agent": ["b"],
     "glance": ["b"], "times": ["b"], "reminders": ["b"], "timers": ["b"], "bookmarks": ["b"], "notes": ["b"], "old-words": ["b"],
-    "remembered": ["b"], "plugins": ["b"], "put-away": ["b"]
+    "remembered": ["b"], "plugins": ["b"], "put-away": ["b"], "game": ["b"]
 }'
 # The emoji picker's skin tone. Never emoji-picker, its key, which the keybindings part keeps.
 EMOJI=org.gnome.shell.extensions.amethystora-ui.emoji
@@ -269,7 +269,7 @@ BACKUPDISK=org.gnome.shell.extensions.amethystora-ui.backupdisk
 BACKUPDISK_KEYS='{"ask": ["b"]}'
 # The battery explained and the busy app's chip (Power you can see)
 POWER=org.gnome.shell.extensions.amethystora-ui.power
-POWER_KEYS='{"battery-details": ["b"], "busy-app": ["b"], "device-batteries": ["b"], "flat-battery": ["b"], "sleep-report": ["b"], "charge-by-leaving": ["b"]}'
+POWER_KEYS='{"battery-details": ["b"], "busy-app": ["b"], "device-batteries": ["b"], "flat-battery": ["b"], "sleep-report": ["b"], "charge-by-leaving": ["b"], "while-playing": ["b"]}'
 # The shelf, by how it opens; never what it holds, which is never written anywhere
 SHELF=org.gnome.shell.extensions.amethystora-ui.shelf
 SHELF_KEYS='{"shelf": ["s", ["off", "edge", "shake"]]}'
@@ -358,33 +358,33 @@ def valid($spec): $spec as [$t, $a, $b] |
     elif $t == "i" then type == "number" and . == floor and . >= $a and . <= $b
     elif $t == "d" then type == "number" and . >= $a and . <= $b
     elif $t == "ad" then type == "array" and all(.[]; type == "number" and ($a != "steps" or . > 0))
-    elif $t == "as" and $a == "colours" then type == "array" and all(.[]; type == "string" and test("^(#[0-9A-Fa-f]{6})?$"))
+    elif $t == "as" and $a == "colours" then type == "array" and all(.[]; type == "string" and test("^(#[0-9A-Fa-f]{6})?\\z"))
     elif $t == "as" and $a == "stacks" then type == "array" and length <= 12 and all(.[]; type == "string" and
-        (test("^xdg:(DESKTOP|DOCUMENTS|DOWNLOAD|MUSIC|PICTURES|PUBLICSHARE|TEMPLATES|VIDEOS)$") or
-         (test("^~/[^'\\\\]+$") and (split("/") | index("..") | not))))
+        (test("^xdg:(DESKTOP|DOCUMENTS|DOWNLOAD|MUSIC|PICTURES|PUBLICSHARE|TEMPLATES|VIDEOS)\\z") or
+         (test("^~/[^'\\\\[:cntrl:]]+\\z") and (split("/") | index("..") | not))))
     elif $t == "as" and $a == "times" then type == "array" and length >= 1 and length <= 6 and (unique | length) == length
-        and all(.[]; type == "string" and test("^([01][0-9]|2[0-3]):[0-5][0-9]$"))
+        and all(.[]; type == "string" and test("^([01][0-9]|2[0-3]):[0-5][0-9]\\z"))
     elif $t == "as" and $a == "ids" then type == "array" and length <= 64 and (unique | length) == length
-        and all(.[]; type == "string" and test("^[a-z0-9-]{1,40}$"))
+        and all(.[]; type == "string" and test("^[a-z0-9-]{1,40}\\z"))
     elif $t == "as" and $a == "breaks" then type == "array" and (unique | length) == length
         and all(.[]; type == "string" and IN("eyesight", "movement"))
     elif $t == "as" and $a == "accents" then type == "array" and length >= 1 and length <= 36
-        and all(.[]; type == "string" and test("^(amethyst|iris|sky|lagoon|jade|moss|amber|ember|coral|rose|orchid|slate|theme)$"))
+        and all(.[]; type == "string" and test("^(amethyst|iris|sky|lagoon|jade|moss|amber|ember|coral|rose|orchid|slate|theme)\\z"))
     elif $t == "folders" then type == "object" and all(to_entries[];
         (.key | length >= 1 and length <= 40 and (test("[[:cntrl:]]") | not))
-        and (.value | type == "array" and length >= 2 and all(.[]; type == "string" and test("^[A-Za-z0-9._+-]+[.]desktop$"))))
+        and (.value | type == "array" and length >= 2 and all(.[]; type == "string" and test("^[A-Za-z0-9._+-]+[.]desktop\\z"))))
     elif $t == "as" and $a == "launchers" then type == "array" and length <= 32 and (unique | length) == length
-        and all(.[]; type == "string" and test("^[A-Za-z0-9._+-]+[.]desktop$"))
+        and all(.[]; type == "string" and test("^[A-Za-z0-9._+-]+[.]desktop\\z"))
     elif $t == "as" and $a == "pen-tools" then type == "array" and length >= 1 and length <= 6 and (unique | length) == length
         and all(.[]; type == "string" and IN("scribble", "area", "note", "text", "right-click", "back"))
     elif $t == "as" and $a == "xkb" then type == "array" and length <= 32 and (unique | length) == length
-        and all(.[]; type == "string" and test("^[a-z0-9_]{1,32}:[a-z0-9_]{1,32}$"))
+        and all(.[]; type == "string" and test("^[a-z0-9_]{1,32}:[a-z0-9_]{1,32}\\z"))
     elif $t == "s" then type == "string" and IN($a[])
     elif $t == "opacity" then type == "object" and length <= 32 and all(to_entries[];
-        (.key | test("^[A-Za-z0-9._+-]+[.]desktop$")) and (.value | type == "number" and . == floor and . >= 40 and . <= 100))
-    elif $t == "s-zone" then type == "string" and test("^([A-Za-z]+(/[A-Za-z0-9_+-]{1,40}){1,2})?$")
+        (.key | test("^[A-Za-z0-9._+-]+[.]desktop\\z")) and (.value | type == "number" and . == floor and . >= 40 and . <= 100))
+    elif $t == "s-zone" then type == "string" and test("^([A-Za-z]+(/[A-Za-z0-9_+-]{1,40}){1,2})?\\z")
     elif $t == "bar-layout" then type == "object" and (keys - ["left", "center", "right", "hidden"] | length) == 0
-        and all(.[]; type == "array" and length <= 64 and all(.[]; type == "string" and test("^[a-z0-9][a-z0-9-]{0,47}$")))
+        and all(.[]; type == "array" and length <= 64 and all(.[]; type == "string" and test("^[a-z0-9][a-z0-9-]{0,47}\\z")))
         and ([.[][]] | (unique | length) == length) and ((.hidden // []) | index("clock") == null and index("system") == null)
     else false end;
 def wanted($spec): $spec as [$t, $a, $b] |
@@ -446,8 +446,8 @@ confirm() {
 # that starts with "-" would be read as an option by the command it is handed to.
 CHECK="$(
     cat <<'EOF'
-def name: type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+@-]*$");
-def accels: type == "array" and all(.[]; type == "string" and test("^(<[A-Za-z0-9_]+>)*[A-Za-z0-9_]*$"));
+def name: type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+@-]*\\z");
+def accels: type == "array" and all(.[]; type == "string" and test("^(<[A-Za-z0-9_]+>)*[A-Za-z0-9_]*\\z"));
 def at($key; f): if has($key) then .[$key] | f else empty end;
 # A $name parameter is also a filter called name, so this one must not be called keys
 def only($allowed; $where):
@@ -460,17 +460,17 @@ if type != "object" then "it is not a JSON object" else
     only(["version", "image", "flatpaks", "brew", "containers", "extensions", "theme", "settings"]; ""),
     (if .version == 1 then empty else "its version is \(.version | tojson), and this reads version 1" end),
     at("image"; only(["name", "stream"]; "image."),
-        (if type == "object" and (.name | type == "string" and test("^[a-z0-9][a-z0-9-]*$"))
-            and (.stream | type == "string" and test("^[a-z0-9][a-z0-9._-]*$")) then empty
+        (if type == "object" and (.name | type == "string" and test("^[a-z0-9][a-z0-9-]*\\z"))
+            and (.stream | type == "string" and test("^[a-z0-9][a-z0-9._-]*\\z")) then empty
          else "image has a name and a stream, such as amethystora and stable" end)),
     at("flatpaks"; only(["system", "user"]; "flatpaks."),
         (if type == "object" then ("system", "user") as $i | at($i; each("flatpaks.\($i)";
             type == "object" and keys == ["app", "origin"] and (.origin | name)
-                and (.app | type == "string" and test("^[A-Za-z][A-Za-z0-9_-]*([.][A-Za-z0-9_-]+)+$"));
+                and (.app | type == "string" and test("^[A-Za-z][A-Za-z0-9_-]*([.][A-Za-z0-9_-]+)+\\z"));
             "{\"app\": ID, \"origin\": REMOTE}")) else empty end)),
     at("brew"; only(["taps", "formulae", "casks"]; "brew."),
         (if type == "object" then ("taps", "formulae", "casks") as $k | at($k; each("brew.\($k)";
-            type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+@-]*(/[A-Za-z0-9][A-Za-z0-9._+@-]*){0,2}$");
+            type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._+@-]*(/[A-Za-z0-9][A-Za-z0-9._+@-]*){0,2}\\z");
             "one of Homebrew's names")) else empty end),
         # A formula or cask named with its tap is installed from that repository, Ruby and all, so the tap is
         # listed, and shown with its warning, as every other is
@@ -482,14 +482,14 @@ if type != "object" then "it is not a JSON object" else
     at("containers"; if type != "array" then "containers is not a list" else .[] |
         if type != "object" then "containers: \(tojson) is not a container" else
             only(["name", "template", "init", "packages"]; "containers[]."),
-            (if (.name | type == "string" and test("^[a-z0-9][a-z0-9_-]{0,31}$")) and (.template | name) then empty
+            (if (.name | type == "string" and test("^[a-z0-9][a-z0-9_-]{0,31}\\z")) and (.template | name) then empty
              else "containers: \(tojson) has no name and template" end),
             at("init"; if type == "boolean" then empty else "a container's init is true or false" end),
             at("packages"; each("the packages of a container";
-                type == "string" and test("^[A-Za-z0-9@_+][A-Za-z0-9@._+:=~-]*$"); "a package's name"))
+                type == "string" and test("^[A-Za-z0-9@_+][A-Za-z0-9@._+:=~-]*\\z"); "a package's name"))
         end end),
     at("extensions"; each("extensions"; name; "an extension's id")),
-    at("theme"; if type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*$") then empty else "theme is not a theme's name" end),
+    at("theme"; if type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._-]*\\z") then empty else "theme is not a theme's name" end),
     at("settings"; only(["layout", "favorites", "keybindings", "tiling", "paperwm", "pointer", "glass", "motion", "workspaces",
             "windows", "dock", "pill", "quick", "bars", "today", "breaks", "search", "emoji", "bezel", "audio", "sound",
             "wm", "mutter", "look", "transitions",
@@ -498,17 +498,17 @@ if type != "object" then "it is not a JSON object" else
         (if type == "object" then
             at("layout"; if IN("tiling", "classic") then empty else "settings.layout is tiling or classic" end),
             at("favorites"; each("settings.favorites";
-                type == "string" and test("^[A-Za-z0-9_][A-Za-z0-9._+@-]*[.]desktop$"); "an app's .desktop file")),
+                type == "string" and test("^[A-Za-z0-9_][A-Za-z0-9._+@-]*[.]desktop\\z"); "an app's .desktop file")),
             # PaperWM's keybindings, which a file from before the tiling replaced it may hold, are tolerated: the diff
             # lists them as keys this machine does not have, and the rest of the file applies
             at("keybindings"; only($schemas + ["custom", "org.gnome.shell.extensions.paperwm.keybindings"]; "settings.keybindings."),
                 (if type == "object" then to_entries[] | .key as $s | select($s | IN($schemas[], "custom")) | .value |
                     if type != "object" then "settings.keybindings.\($s) is not an object"
                     elif $s == "custom" then to_entries[] |
-                        if (.key | test("^custom[0-9]+$")) and (.value | accels and length <= 1) then empty
+                        if (.key | test("^custom[0-9]+\\z")) and (.value | accels and length <= 1) then empty
                         else "settings.keybindings.custom.\(.key) is one of the image's custom keybindings, set to a list of one key or none" end
                     else to_entries[] |
-                        if (.key | test("^[a-z0-9][a-z0-9-]*$")) and .key != "custom-keybindings" and (.value | accels)
+                        if (.key | test("^[a-z0-9][a-z0-9-]*\\z")) and .key != "custom-keybindings" and (.value | accels)
                             # The windows module's, the search's, the emoji picker's, the agent's and force quit's
                             # schemas hold one keybinding each among their settings
                             and ($s != "org.gnome.shell.extensions.amethystora-ui.windows"
@@ -998,8 +998,13 @@ def brew($x; $k): $x.brew[$k] // [];
     (("system", "user") as $i | $here.flatpaks[$i][]? | select(.app | IN(apps($file)[]) | not)
         | {area: "flatpak", action: "remove", installation: $i, app}),
     ((["tap", "taps"], ["formula", "formulae"], ["cask", "casks"]) as [$area, $k]
+        # Homebrew runs the Ruby of a tap and of a formula file: a file somebody shared installs only plain names from
+        # Homebrew's own taps, and adds no tap (brew tap, by hand, is the person's)
         | ((brew($file; $k) - brew($here; $k))[] | {area: $area, action: "add", name: .}
-            + if $can.brew then {} else {ok: false, why: "Homebrew is not set up here"} end),
+            + if $area == "tap" then {ok: false, why: "a Homebrew tap is not added from a file: run brew tap \(.) yourself if you trust it"}
+              elif (test("^[A-Za-z0-9][A-Za-z0-9._+@-]*\\z") and (test("[.](rb|json)\\z") | not)) | not then
+                {ok: false, why: "\(.) is not a plain name from Homebrew's own taps (no tap, no path), which is all a file installs"}
+              elif $can.brew then {} else {ok: false, why: "Homebrew is not set up here"} end),
           ((brew($here; $k) - brew($file; $k))[] | {area: $area, action: "remove", name: .})),
     ($file.containers[]? | select(.name | IN($have[]) | not)
         | {area: "container", action: "add", name, template, init: (.init // false), packages: (.packages // [])}
@@ -1277,7 +1282,8 @@ apply() {
             remove_all "${gone}"
             did=true
         fi
-    elif [[ "${gone}" != "[]" ]]; then
+    elif [[ "${gone}" != "[]" && -z "${AMETHYSTORA_SETUP_KIT:-}" ]]; then
+        # A kit (ame apps kit add) names only what it adds, so the rest of the machine is not news
         echo "Left as they are: $(jq length <<<"${gone}") here that the file does not name (ame setup diff lists them)."
     fi
 

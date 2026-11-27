@@ -1,0 +1,93 @@
+# Amethystora: seat access to the devices an engineer's tools open (ame system lab-devices on copies this file to
+# /etc/udev/rules.d, ame system lab-devices off takes it away). Each device is given by its vendor and product to the
+# person at the seat (uaccess): their own session and the apps that may reach /dev, never every account, and never by a
+# group or a mode. The comment above each rule says what the device is and where its ID comes from.
+#
+# Written here, from the IDs alone. Not here: software-defined radios, Hantek oscilloscopes, Greaseweazle and the other
+# analysers the system's own hardware database (systemd's 70-software-radio.hwdb and 70-analyzers.hwdb) already gives to
+# the person at the seat; keyboards and keypads, whose nodes 71-amethystora-keyboard-interfaces.rules and
+# 72-amethystora-keyboards-not-shared.rules take back from every rule that gives them, this file's included.
+
+# ST-LINK debug probes (STMicroelectronics): V1, V2, V2.1 and V3 with its loader
+# source: usb.ids (linux-usb.org) names each of these IDs as an ST-LINK
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0483", ATTR{idProduct}=="3744|3748|374b|3752|374d|374e|374f|3753", TAG+="uaccess"
+
+# SEGGER J-Link debug probes
+# source: usb.ids names 1366:0101 and 1366:1015 as J-Link; the others are the models and modes of the J-Link family in SEGGER's own udev file for it, as quoted in vendor forums
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1366", ATTR{idProduct}=="0101|0102|0103|0104|0105|0107|0108|1015|1051|1055|1061", TAG+="uaccess"
+
+# DAPLink probes (CMSIS-DAP over USB)
+# source: usb.ids names 0d28:0204 as the ARM mbed CMSIS-DAP interface
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0d28", ATTR{idProduct}=="0204", TAG+="uaccess"
+
+# DAPLink probes (CMSIS-DAP over USB), the HID interface
+# source: usb.ids names 0d28:0204 as the ARM mbed CMSIS-DAP interface; its report descriptor is vendor-defined, so the keyboard rules leave it this grant
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0d28", ATTRS{idProduct}=="0204", TAG+="uaccess"
+
+# Atmel and Microchip debuggers: the EDBG on Xplained Pro boards and the Atmel-ICE (CMSIS-DAP over HID)
+# source: usb.ids names 03eb:2111 as the Xplained Pro board debugger and 03eb:2141 as the ICE debugger
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="03eb", ATTRS{idProduct}=="2111|2141", TAG+="uaccess"
+
+# Raspberry Pi Debug Probe (CMSIS-DAP v2 and a serial port)
+# source: Raspberry Pi's Debug Probe documentation, which shows it as 2e8a:000c (usb.ids has no Raspberry Pi entries)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="000c", TAG+="uaccess"
+
+# Raspberry Pi Debug Probe, its serial port
+# source: Raspberry Pi's Debug Probe documentation (2e8a:000c)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", TAG+="uaccess"
+
+# Black Magic Probe (its application and its firmware loader)
+# source: usb.ids names 1d50:6018 as the Black Magic Debug Probe application and 1d50:6017 as its DFU loader
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1d50", ATTR{idProduct}=="6017|6018", TAG+="uaccess"
+
+# Black Magic Probe, the serial port its GDB server is on
+# source: usb.ids names 1d50:6018 as the Black Magic Debug Probe application
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6018", TAG+="uaccess"
+
+# Espressif's USB JTAG and serial unit (the ESP32 chips' own USB port)
+# source: Espressif's documentation of the USB Serial/JTAG controller, 303a:1001 (usb.ids has no Espressif entries)
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="303a", ATTR{idProduct}=="1001", TAG+="uaccess"
+
+# Espressif's USB JTAG and serial unit, its serial port
+# source: Espressif's documentation of the USB Serial/JTAG controller (303a:1001)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", TAG+="uaccess"
+
+# FTDI FT2232, FT4232H and FT232H chips, which JTAG, SPI and I2C adapters are built on (OpenOCD, libftdi)
+# source: usb.ids names 0403:6010 as FT2232C/D/H, 0403:6011 as FT4232H and 0403:6014 as FT232H
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0403", ATTR{idProduct}=="6010|6011|6014", TAG+="uaccess"
+
+# USB serial adapters: FTDI FT232, FT2232, FT4232H, FT232H and FT-X
+# source: usb.ids names 0403:6001, 6010, 6011, 6014 and 6015 as these FTDI chips
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001|6010|6011|6014|6015", TAG+="uaccess"
+
+# USB serial adapters: Silicon Labs CP2102 and CP2104, CP2105 and CP2108
+# source: usb.ids names 10c4:ea60 as CP210x, 10c4:ea70 as CP2105 and 10c4:ea71 as CP2108
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60|ea70|ea71", TAG+="uaccess"
+
+# USB serial adapters: WCH CH340 and CH341
+# source: usb.ids names 1a86:7523 and 1a86:7522 as CH340 and 1a86:5523 as CH341
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523|7522|5523", TAG+="uaccess"
+
+# USB serial adapters: Prolific PL2303
+# source: usb.ids names 067b:2303 as PL2303
+SUBSYSTEM=="tty", ATTRS{idVendor}=="067b", ATTRS{idProduct}=="2303", TAG+="uaccess"
+
+# Arduino Uno and Leonardo boards (their serial ports, CDC ACM)
+# source: usb.ids names 2341:0043 and 2341:0001 as the Uno and 2341:8036 as the Leonardo
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0043|0001|8036", TAG+="uaccess"
+
+# Saleae Logic, the original logic analyser
+# source: usb.ids names 0925:3881 as Saleae Logic
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0925", ATTR{idProduct}=="3881", TAG+="uaccess"
+
+# Saleae logic analysers: Logic16, Logic 4, Logic8, Logic Pro 8 and Logic Pro 16
+# source: usb.ids names 21a9:1001, 1003, 1004, 1005 and 1006 as these Saleae models
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="21a9", ATTR{idProduct}=="1001|1003|1004|1005|1006", TAG+="uaccess"
+
+# Logic analysers running sigrok's open firmware (fx2lafw), by the firmware's own IDs: never the unprogrammed chip's
+# source: usb.ids names 1d50:608c, 608d and 608f as Fx2lafw
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1d50", ATTR{idProduct}=="608c|608d|608f", TAG+="uaccess"
+
+# LimeSDR (USB), a software-defined radio the system's hardware database lacks
+# source: usb.ids names 1d50:6108 as the Myriad-RF LimeSDR
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1d50", ATTR{idProduct}=="6108", TAG+="uaccess"

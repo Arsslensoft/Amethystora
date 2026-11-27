@@ -38,6 +38,8 @@ pub struct Request {
 pub struct Response {
     pub status: u16,
     pub body: Zeroizing<Vec<u8>>,
+    /// The few headers the network service passes on (Kemlock needs `DPoP-Nonce`, `Date`, `ETag` and `Retry-After`), names in lower case
+    pub headers: Vec<(String, String)>,
 }
 
 /// Why nothing came back. The network service's words, as a fixed set.
@@ -103,6 +105,8 @@ pub enum Problem {
     KdfConfirm(u32),
     /// Argon2 asking for more memory than a machine is asked for lightly (MiB): the person confirms before it is spent
     KdfMemoryConfirm(u32),
+    /// An Argon2id key under Kemlock's own defaults (64 MiB, 3 passes): the memory in MiB and the passes, for the person to confirm
+    KdfWeakConfirm { memory: u32, iterations: u32 },
     SaltChanged,
     /// SSO, Key Connector, trusted devices, no master password, an organization's rules
     Unsupported,
@@ -131,6 +135,8 @@ pub enum Problem {
     LocalUnreadable(usize),
     /// The links of a shard did not read: starting over would put every item of the shard on the server again
     LinksUnreadable,
+    /// Kemlock's API stopped a login or a run, in a fixed word of `kemlock::sync::word` (also its `name`)
+    Kemlock(&'static str),
 }
 
 impl Problem {
@@ -147,6 +153,7 @@ impl Problem {
             Problem::Kdf(problem) => problem.name(),
             Problem::KdfConfirm(_) => "kdf-confirm",
             Problem::KdfMemoryConfirm(_) => "kdf-memory-confirm",
+            Problem::KdfWeakConfirm { .. } => "kdf-weak-confirm",
             Problem::SaltChanged => "salt-changed",
             Problem::Unsupported => "unsupported",
             Problem::PasswordReset => "password-reset",
@@ -162,6 +169,7 @@ impl Problem {
             Problem::ManyNew(_) => "many-new",
             Problem::LocalUnreadable(_) => "local-unreadable",
             Problem::LinksUnreadable => "links-unreadable",
+            Problem::Kemlock(word) => word,
         }
     }
 
@@ -177,6 +185,7 @@ impl Problem {
             Problem::TwoFactor(providers) => json!({"providers": providers}),
             Problem::KdfConfirm(iterations) => json!({"iterations": iterations}),
             Problem::KdfMemoryConfirm(memory) => json!({"memory": memory}),
+            Problem::KdfWeakConfirm { memory, iterations } => json!({"memory": memory, "iterations": iterations}),
             Problem::ManyGone(count) | Problem::ManyNew(count) | Problem::LocalUnreadable(count) => json!({"count": count, "days": super::merge::WINDOW_DAYS}),
             _ => json!({}),
         }
@@ -788,7 +797,7 @@ mod tests {
     }
 
     fn answer(status: u16, body: Value) -> Response {
-        Response { status, body: Zeroizing::new(serde_json::to_vec(&body).unwrap()) }
+        Response { status, body: Zeroizing::new(serde_json::to_vec(&body).unwrap()), headers: Vec::new() }
     }
 
     #[test]
@@ -800,7 +809,7 @@ mod tests {
         assert_eq!(failure(&answer(400, json!({"error": "", "message": "Username or password is incorrect. Try again"}))), Problem::ServerSaid("Username or password is incorrect. Try again".into()));
         assert_eq!(failure(&answer(429, json!({}))), Problem::RateLimited);
         assert_eq!(failure(&answer(503, json!({}))), Problem::ServerDown);
-        assert_eq!(failure(&Response { status: 403, body: Zeroizing::new(b"<html>".to_vec()) }), Problem::ServerRefused);
+        assert_eq!(failure(&Response { status: 403, body: Zeroizing::new(b"<html>".to_vec()), headers: Vec::new() }), Problem::ServerRefused);
         assert_eq!(failure(&answer(302, json!({}))), Problem::Net(NetFailure::NotAllowed));
     }
 

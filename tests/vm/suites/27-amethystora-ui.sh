@@ -115,7 +115,7 @@ fi
 # GTK itself finds what every launcher of the image names, in each pack
 mkdir -p "${OWN}"
 cat >"${OWN}/icons.py" <<'EOF'
-import glob, re, sys
+import glob, os, re, sys
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk
@@ -138,12 +138,14 @@ for pack in ('glass', 'glass-light', 'neon', 'neon-light', 'duotone', 'line', 'c
     theme.set_theme_name('amethystora-' + pack)
     own = '/usr/share/icons/amethystora-' + pack + '/'
     # The pack itself has the file, not Adwaita or hicolor through inheritance: has_icon says yes to a pack with its
-    # icons deleted
+    # icons deleted. GTK 4 answers a name no theme has with image-missing, which the packs draw since 2026-11-02, so
+    # only a file of the name asked for counts
 
     def from_pack(n):
         icon = theme.lookup_icon(n, None, 48, 1, Gtk.TextDirection.NONE, 0)
         f = icon.get_file() if icon else None
-        return bool(f and (f.get_path() or '').startswith(own))
+        path = (f.get_path() or '') if f else ''
+        return path.startswith(own) and os.path.splitext(os.path.basename(path))[0] == n
     missing = sorted(n for n in names if not from_pack(n))
     print(pack, 'missing:', missing)
     bad += len(missing)

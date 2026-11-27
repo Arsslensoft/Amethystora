@@ -211,15 +211,26 @@ fi
 # asked only by an account with that marker: root (the watcher, every 15 minutes) and an account that never connected would start it.
 VAULT_SYNC="${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/amethystora/vault-sync"
 SYNC_ADDRESS=""
+SYNC_BACKEND=""
 if [[ ${EUID} -ne 0 && -s "${VAULT_SYNC}" && -x /usr/libexec/amethystora-vault-cli ]]; then
-    SYNC_ADDRESS="$(timeout 5 /usr/libexec/amethystora-vault-cli sync status 2>/dev/null | awk -F'	' '$1=="connected"{c=$2} $1=="address"{a=$2} END{if(c=="yes")print a}' | tr -d '[:cntrl:]' | cut -c1-200)"
+    # "kemlock" or "bitwarden", a space, and the address
+    SYNC_FOUND="$(timeout 5 /usr/libexec/amethystora-vault-cli sync status 2>/dev/null | awk -F'	' '$1=="connected"{c=$2} $1=="address"{a=$2} $1=="backend"{b=($2=="kemlock")?"kemlock":"bitwarden"} END{if(c=="yes")print b " " a}' | tr -d '[:cntrl:]' | cut -c1-210)"
+    if [[ "${SYNC_FOUND}" == *" "* ]]; then
+        SYNC_BACKEND="${SYNC_FOUND%% *}"
+        SYNC_ADDRESS="${SYNC_FOUND#* }"
+    fi
 fi
 if [[ -z "${SYNC_ADDRESS}" && -s "${VAULT_SYNC}" ]]; then
     SYNC_ADDRESS="$(head -n1 -- "${VAULT_SYNC}" | tr -d '[:cntrl:]' | cut -c1-200)"
 fi
 if [[ -n "${SYNC_ADDRESS}" ]]; then
+    if [[ "${SYNC_BACKEND}" == kemlock ]]; then
+        SYNC_WORDS="$(eval_gettext "While the vault is open, what it holds that syncs (every kind unless you turned one off: passwords, authenticator codes, backup codes, keys, certificates and protected files, which go as the item's own file up to 16 MiB) is sent to the Kemlock Server at \${SYNC_ADDRESS}, encrypted with the account's key, and the account's changes are fetched, on opening, after a change and every 15 minutes. The server sees how many items there are, of which kind, how long each is and when it changed.")"
+    else
+        SYNC_WORDS="$(eval_gettext "While the vault is open, what it holds that syncs (passwords, authenticator codes and backup codes, and keys, certificates and protected files where you chose it, with files for what is larger than a note) is sent to \${SYNC_ADDRESS}, encrypted with the account's key, and the account's changes are fetched, on opening, after a change and every 15 minutes. The server sees how many items there are, of which kind, how long each is and when it changed.")"
+    fi
     row vault-sync on "$(gettext "Amethystora Vault's sync")" \
-        "$(eval_gettext "While the vault is open, what it holds that syncs (passwords, authenticator codes and backup codes, and keys, certificates and protected files where you chose it, plain or sealed, with files for what is larger than a note) is sent to \${SYNC_ADDRESS}, encrypted with the account's key, and the account's changes are fetched, on opening, after a change and every 15 minutes. The server sees how many items there are, of which kind, how long each is and when it changed.")" \
+        "${SYNC_WORDS}" \
         "ame vault sync off" \
         "$(gettext "Without it, the server's copy stops being updated and nothing else changes: the vault is the source.")"
 fi

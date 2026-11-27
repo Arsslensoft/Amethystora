@@ -46,6 +46,85 @@ fi
 # /etc/udev/rules.d and loads i2c-dev, for the external screens' brightness in quick settings, and off takes it back.
 rm -f /usr/lib/udev/rules.d/60-ddcutil-i2c.rules /usr/lib/modules-load.d/ddcutil.conf
 
+# OpenRGB's rules (openrgb-udev-rules) give the user at the seat every i2c bus, which is what taking ddcutil's rule out
+# is for (the motherboard's SMBus and the RAM modules' chips are on them), and /dev/port. Their two lines go, marked as
+# changed, and the build fails when either is not there exactly once: the file changed upstream and has to be read
+# again. The lighting rules for the devices themselves stay.
+OPENRGB_RULES=/usr/lib/udev/rules.d/60-openrgb.rules
+for line in 'KERNEL=="i2c-[0-99]*", TAG+="uaccess"' 'KERNEL=="port", TAG+="uaccess"'; do
+    [[ "$(grep -cxF -- "${line}" "${OPENRGB_RULES}")" == 1 ]]
+    sed -i "$(grep -nxF -- "${line}" "${OPENRGB_RULES}" | cut -d: -f1)d" "${OPENRGB_RULES}"
+    [[ "$(grep -cxF -- "${line}" "${OPENRGB_RULES}")" == 0 ]]
+done
+sed -i '1i # Changed by Amethystora (build_files/base/08-hardening.sh): the two lines giving every i2c bus and /dev/port to\n# whoever sits at the machine are taken out. `ame desktop screen-brightness on` gives the display controllers back.' "${OPENRGB_RULES}"
+
+# Input Remapper's bus policy lets every account own the name of its root daemon and send it calls. Only
+# root may own the name, and root and the administrators (wheel), who are the ones who turn the service on
+# (`ame security input-remapper`), may send to it. The build fails when the package's file is not the three lines this
+# replaces, so that a changed package is read again.
+INPUT_REMAPPER_BUS=/usr/share/dbus-1/system.d/inputremapper.Control.conf
+[[ "$(grep -cE '<(policy|allow|deny)' "${INPUT_REMAPPER_BUS}")" == 3 ]]
+grep -qx '  <policy context="default">' "${INPUT_REMAPPER_BUS}"
+grep -qx '    <allow own="inputremapper.Control"/>' "${INPUT_REMAPPER_BUS}"
+grep -qx '    <allow send_destination="inputremapper.Control"/>' "${INPUT_REMAPPER_BUS}"
+cat >"${INPUT_REMAPPER_BUS}" <<'POLICY'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<!-- Changed by Amethystora (build_files/base/08-hardening.sh): only root may own the name, and only root and the
+     members of wheel may send to it. -->
+<busconfig>
+  <policy context="default">
+    <deny own="inputremapper.Control"/>
+    <deny send_destination="inputremapper.Control"/>
+  </policy>
+  <policy user="root">
+    <allow own="inputremapper.Control"/>
+    <allow send_destination="inputremapper.Control"/>
+  </policy>
+  <policy group="wheel">
+    <allow send_destination="inputremapper.Control"/>
+  </policy>
+</busconfig>
+POLICY
+
+# The bus policy of the mouse daemon (ratbagd, started as root by the first call) lets every account send it calls, which
+# reprogram a mouse's stored buttons and macros. Only root, who owns the name, and the administrators (wheel) may send to it
+# or hear from it, which is who uses Piper. The build fails when the package's file is not the one this replaces.
+RATBAG_BUS=/usr/share/dbus-1/system.d/org.freedesktop.ratbag1.conf
+[[ "$(grep -cE '<(policy|allow|deny)' "${RATBAG_BUS}")" == 7 ]]
+[[ "$(grep -cxE '[[:space:]]*<allow (send_destination|receive_sender)="org.freedesktop.ratbag1"/>' "${RATBAG_BUS}")" == 4 ]]
+grep -qxE '[[:space:]]*<allow own="org.freedesktop.ratbag1"/>' "${RATBAG_BUS}"
+grep -qxE '[[:space:]]*<policy context="default">' "${RATBAG_BUS}"
+cat >"${RATBAG_BUS}" <<'POLICY'
+<?xml version="1.0"?> <!--*-nxml-*-->
+<!DOCTYPE busconfig PUBLIC
+        "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+        "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+
+<!-- Changed by Amethystora (build_files/base/08-hardening.sh): only root and the members of wheel may send to the
+     service or receive from it. -->
+<busconfig>
+
+        <policy user="root">
+                <allow own="org.freedesktop.ratbag1"/>
+                <allow send_destination="org.freedesktop.ratbag1"/>
+                <allow receive_sender="org.freedesktop.ratbag1"/>
+        </policy>
+
+        <policy context="default">
+                <deny send_destination="org.freedesktop.ratbag1"/>
+                <deny receive_sender="org.freedesktop.ratbag1"/>
+        </policy>
+
+        <policy group="wheel">
+                <allow send_destination="org.freedesktop.ratbag1"/>
+                <allow receive_sender="org.freedesktop.ratbag1"/>
+        </policy>
+
+</busconfig>
+POLICY
+
 # Firewall: Fedora Workstation's default zone accepts incoming connections on every port from 1025 up.
 # The Amethystora zone (/usr/lib/firewalld/zones/amethystora.xml) only lets in what a desktop needs.
 # Tailscale traffic is trusted: who may reach this machine over the tailnet is set by the tailnet's ACLs,
@@ -130,25 +209,32 @@ done
 # feature with-guest-login, which the owner turns on per machine, keeps the guest's empty password to the login
 # screen. In system-auth (sudo, su, polkit, the text consoles) the account is refused outright; in password-auth
 # (GDM, SSH and every other network login) it is refused for every service but gdm-password. The lines go first in
-# the auth stack, before pam_unix could take the empty password, each marked {include if} as the duress password's is,
-# so that with the feature off authselect writes the same bytes as before.
-GUEST_SYSTEM='auth        requisite                                            pam_succeed_if.so quiet user != amethystora-guest'
-GUEST_SKIP='auth        [success=1 default=ignore]                           pam_succeed_if.so quiet user != amethystora-guest'
-GUEST_GDM='auth        requisite                                            pam_succeed_if.so quiet service = gdm-password'
+# the auth stack, before pam_unix could take the empty password, and again first in the account stack, for a service
+# that starts a guest's process with no auth step (systemd's user manager is not one: its own pam_unix account line
+# ends its stack first). In system-auth the same refusal stands first in the password stack too, so that the guest
+# cannot give itself a password with passwd. Each is marked {include if} as the duress password's is, so that with the feature off
+# authselect writes the same bytes as before.
+GUEST_SYSTEM='requisite                                            pam_succeed_if.so quiet user != amethystora-guest'
+GUEST_SKIP='[success=1 default=ignore]                           pam_succeed_if.so quiet user != amethystora-guest'
+GUEST_GDM='requisite                                            pam_succeed_if.so quiet service = gdm-password'
 for profile in local sssd winbind; do
     for file in system-auth password-auth; do
         vendor="/usr/share/authselect/vendor/${profile}/${file}"
         [[ -f "${vendor}" && ! -L "${vendor}" ]]
-        [[ "$(grep -cE '^auth[[:space:]]' "${vendor}")" -ge 1 ]]
-        if [[ "${file}" == system-auth ]]; then
-            lines="${GUEST_SYSTEM} {include if \"with-guest-login\"}"
-        else
-            # Two lines, apart by awk's own \n: -v reads the escapes in what it is given
-            lines="${GUEST_SKIP} {include if \"with-guest-login\"}\\n${GUEST_GDM} {include if \"with-guest-login\"}"
-        fi
-        awk -v lines="${lines}" '!done && /^auth[[:space:]]/ { print lines; done = 1 } { print }' "${vendor}" >"${vendor}.new"
-        mv "${vendor}.new" "${vendor}"
-        [[ "$(grep -c 'with-guest-login' "${vendor}")" -eq "$([[ "${file}" == system-auth ]] && echo 1 || echo 2)" ]]
+        # system-auth also refuses the account in its password stack, which passwd, chpasswd and newusers use and
+        # which asks for neither of the other two: otherwise the guest could give itself a password
+        for stack in auth account $([[ "${file}" == system-auth ]] && echo password); do
+            [[ "$(grep -cE "^${stack}[[:space:]]" "${vendor}")" -ge 1 ]]
+            if [[ "${file}" == system-auth ]]; then
+                lines="${stack}        ${GUEST_SYSTEM} {include if \"with-guest-login\"}"
+            else
+                # Two lines, apart by awk's own \n: -v reads the escapes in what it is given
+                lines="${stack}        ${GUEST_SKIP} {include if \"with-guest-login\"}\n${stack}        ${GUEST_GDM} {include if \"with-guest-login\"}"
+            fi
+            awk -v stack="${stack}" -v lines="${lines}" '!done && $1 == stack { print lines; done = 1 } { print }' "${vendor}" >"${vendor}.new"
+            mv "${vendor}.new" "${vendor}"
+        done
+        [[ "$(grep -c 'with-guest-login' "${vendor}")" -eq "$([[ "${file}" == system-auth ]] && echo 3 || echo 4)" ]]
     done
 done
 
@@ -187,6 +273,10 @@ for domain in local_login_t sshd_session_t; do
 done
 sesearch -T -s sshd_session_t -t user_home_dir_t -c file "${POLICY}" >/tmp/transitions
 grep -qx "type_transition sshd_session_t user_home_dir_t:file auth_home_t;" /tmp/transitions
+# libsystemd's check of the socket clamd@scan.socket hands clamd asks pidfs's attributes (amethystora-clamd.cil)
+semodule -i /usr/share/selinux/packages/amethystora-clamd.cil
+POLICY="$(echo /etc/selinux/targeted/policy/policy.*)"
+[[ -n "$(sesearch -A -s antivirus_t -t pidfs_t -c filesystem -p getattr "${POLICY}")" ]]
 rm /tmp/transitions
 # ...which are the domains the two programs run in
 [[ "$(matchpathcon -n /usr/bin/login)" == *:login_exec_t:* ]]
@@ -287,6 +377,19 @@ for program in chfn chage gpasswd newgrp ksu mount.davfs; do
         chmod u-s "/usr/bin/${program}"
     fi
 done
+# The same for two more that nothing here runs: pam_timestamp_check (only config-util, for the consolehelper of usermode,
+# which is not installed, loads pam_timestamp) and lxc-user-nic (nothing but unprivileged LXC containers, which the `lxc`
+# package of a developer image can start, runs it: kept there). grub2-set-bootflag keeps its bit: GNOME's session and
+# grub-boot-success.timer run it at every login.
+for program in /usr/bin/pam_timestamp_check /usr/libexec/lxc/lxc-user-nic; do
+    if [[ -u "${program}" ]] && { [[ "${program}" != */lxc-user-nic ]] || ! rpm -q --quiet lxc; }; then
+        chmod u-s "${program}"
+    fi
+done
+# Apache's suexec has file capabilities and runs only for the apache group, which no service of the image uses
+if [[ -n "$(getcap /usr/bin/suexec)" ]]; then
+    setcap -r /usr/bin/suexec
+fi
 
 # SSH over vsock: systemd's generator offers sshd to the host of a virtual machine through AF_VSOCK, which
 # the firewall does not see. The generator masked in /etc; `ame security ssh-settings off` unmasks it.

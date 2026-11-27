@@ -97,6 +97,7 @@ pub const CATEGORIES: [&str; 11] =
 /// (the app grid's What can it reach? opens the Apps page on that app)
 pub fn openable(page: &str) -> bool {
     PAGES.contains(&page)
+        || page == "settings/snapshots"
         || page.strip_prefix("settings/").is_some_and(|category| CATEGORIES.contains(&category))
         || page.strip_prefix("apps/").is_some_and(flatpak_id)
 }
@@ -602,6 +603,61 @@ pub fn duress(step: &str) {
         let args: Vec<&str> = command.iter().map(String::as_str).collect();
         process::in_terminal(&args);
     }
+}
+
+// --- What the hourly snapshots leave out --------------------------------------------------------------------
+
+pub const SNAPSHOT_EXCLUDE: &str = "/usr/libexec/amethystora-snapshot-exclude";
+
+/// A folder of this home the hourly snapshots leave out, as amethystora-snapshot-exclude lists it
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct LeftOut {
+    pub path: String,
+    pub rel: String,
+    /// Still a subvolume of its own: false when it was made a plain folder again by hand, and is snapshotted
+    pub left_out: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SnapshotExcludes {
+    pub possible: bool,
+    pub excluded: Vec<LeftOut>,
+}
+
+pub fn parse_snapshot_excludes(stdout: &str) -> SnapshotExcludes {
+    serde_json::from_str(stdout).unwrap_or_default()
+}
+
+pub async fn snapshot_excludes() -> SnapshotExcludes {
+    if !std::path::Path::new(SNAPSHOT_EXCLUDE).exists() {
+        return SnapshotExcludes::default();
+    }
+    parse_snapshot_excludes(&run_for(SNAPSHOT_EXCLUDE, &["list", "--json"], 15).await.stdout)
+}
+
+/// The command that leaves a folder out (`add`), for one the folder dialog gave inside the home, or snapshots one
+/// again (`remove`), for one the list just read: in a terminal, which says what it costs and asks for a password
+pub fn snapshot_exclude_command(list: Option<&SnapshotExcludes>, verb: &str, path: &str, home: &str) -> Option<Vec<String>> {
+    let fits = match verb {
+        "add" => !path.contains('\n') && path.starts_with(&format!("{home}/")) && !path.split('/').any(|part| part == ".." || part == "."),
+        "remove" => list.is_some_and(|list| list.excluded.iter().any(|e| e.path == path)),
+        _ => false,
+    };
+    fits.then(|| [AME, "security", "ransomware", "exclude", verb, path].iter().map(|arg| arg.to_string()).collect())
+}
+
+pub fn snapshot_exclude(list: Option<&SnapshotExcludes>, verb: &str, path: &str, home: &str) {
+    if let Some(command) = snapshot_exclude_command(list, verb, path, home) {
+        let args: Vec<&str> = command.iter().map(String::as_str).collect();
+        process::in_terminal(&args);
+    }
+}
+
+/// Ransomware protection turned on or off, in a terminal, as the overview's tile does it
+pub fn ransomware(on: bool) {
+    process::in_terminal(&[AME, "security", "ransomware", if on { "on" } else { "off" }]);
 }
 
 // --- The scanner ----------------------------------------------------------------------------------------------
@@ -1561,6 +1617,26 @@ mod tests {
         assert_eq!(duress_command("setup-password"), Some(vec![AME.into(), "security".into(), "duress".into(), "setup-password".into()]));
         assert_eq!(duress_command("forget"), None);
         assert_eq!(duress_command(""), None);
+    }
+
+    #[test]
+    fn leaves_out_only_a_folder_of_the_home_and_puts_back_only_what_is_listed() {
+        let list = parse_snapshot_excludes(r#"{"version": 1, "possible": true, "excluded": [{"path": "/var/home/a/Games", "rel": "Games", "left_out": true}]}"#);
+        assert!(list.possible);
+        assert_eq!(list.excluded, vec![LeftOut { path: "/var/home/a/Games".into(), rel: "Games".into(), left_out: true }]);
+        let home = "/var/home/a";
+        assert_eq!(
+            snapshot_exclude_command(Some(&list), "add", "/var/home/a/VMs", home),
+            Some(vec![AME.into(), "security".into(), "ransomware".into(), "exclude".into(), "add".into(), "/var/home/a/VMs".into()])
+        );
+        assert_eq!(snapshot_exclude_command(Some(&list), "add", "/var/home/a", home), None);
+        assert_eq!(snapshot_exclude_command(Some(&list), "add", "/var/home/b/VMs", home), None);
+        assert_eq!(snapshot_exclude_command(Some(&list), "add", "/var/home/a/../b", home), None);
+        assert!(snapshot_exclude_command(Some(&list), "remove", "/var/home/a/Games", home).is_some());
+        assert_eq!(snapshot_exclude_command(Some(&list), "remove", "/var/home/a/Docs", home), None);
+        assert_eq!(snapshot_exclude_command(None, "remove", "/var/home/a/Games", home), None);
+        assert_eq!(snapshot_exclude_command(Some(&list), "delete", "/var/home/a/Games", home), None);
+        assert_eq!(parse_snapshot_excludes("not json").excluded, vec![]);
     }
 
     #[test]

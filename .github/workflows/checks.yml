@@ -3,8 +3,10 @@ name: Checks
 # The quick checks a pull request has to pass before it merges, a few minutes in all beside the image
 # builds' hour: pre-commit and ShellCheck on the files the change touches, the just recipes' format, the
 # translations and the manual as 20-tests.sh checks them, actionlint on the workflows, the pull request's
-# title, and the dependencies the change brings in. They hold no secret and write nothing, so a fork's
-# pull request runs them as any other does. The main ruleset requires the three jobs by name: keep them.
+# title, the dependencies the change brings in, every commit signed off (DCO), the crates' licences and
+# sources, and what the change adds to the workflows' and the secrets' risk. They hold no secret and write
+# nothing, so a fork's pull request runs them as any other does. The main ruleset requires the jobs by name:
+# keep them.
 
 on:
   pull_request:
@@ -114,3 +116,99 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
+
+  # Each of the pull request's commits signed off by its author, the Developer Certificate of Origin
+  # (CONTRIBUTING.md). A merge group's commits were its pull requests'
+  dco:
+    name: DCO
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - if: github.event_name == 'pull_request'
+        name: Signed-off-by on every commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: bash build_files/shared/check-dco.sh "$(git merge-base "${BASE}" "${HEAD}")" "${HEAD}"
+
+  # The licences and sources of the crates built into the apps (apps/deny.toml). The image's packages are held to
+  # theirs by source-manifest.sh and 20-tests.sh in the image builds
+  licences:
+    name: Licences
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/install-cargo-deny
+
+      - name: The apps' crates
+        run: cargo-deny --manifest-path apps/Cargo.toml --locked check licenses bans sources
+
+  # What the change adds: a workflow finding zizmor does not make on the branch it starts from, a secret in one of
+  # its commits, and a crate with a known advisory. What main has already is a change of its own, and only said here
+  security:
+    name: Security
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find where the change starts
+        id: range
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: echo "base=$(git merge-base "${BASE}" HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: The workflows (zizmor)
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          ZIZMOR_VERSION: 1.32.0
+        run: |
+          mkdir "${RUNNER_TEMP}/base"
+          git archive "${BASE}" .github | tar -x -C "${RUNNER_TEMP}/base"
+          (cd "${RUNNER_TEMP}/base" && pipx run "zizmor==${ZIZMOR_VERSION}" --offline --no-exit-codes --format json .github) \
+            > "${RUNNER_TEMP}/zizmor-base.json"
+          pipx run "zizmor==${ZIZMOR_VERSION}" --offline --no-exit-codes --format json .github > "${RUNNER_TEMP}/zizmor.json"
+          node build_files/shared/zizmor-new.mjs "${RUNNER_TEMP}/zizmor-base.json" "${RUNNER_TEMP}/zizmor.json"
+
+      - name: Secrets in the change's commits (gitleaks)
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          archive="${RUNNER_TEMP}/gitleaks.tar.gz"
+          curl --fail --retry 3 -sSL -o "${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "${archive}" -C "${RUNNER_TEMP}" gitleaks
+          "${RUNNER_TEMP}/gitleaks" git --log-opts="${BASE}..HEAD" --redact --no-banner --exit-code 1 .
+
+      - uses: ./.github/actions/install-cargo-deny
+
+      # Blocking only for a change to the crates: an advisory against a crate main already has is fixed on its own
+      - name: The apps' crates against RustSec's advisories
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+        run: |
+          cargo-deny --manifest-path apps/Cargo.toml --locked check advisories && exit 0
+          if git diff --quiet "${BASE}" HEAD -- apps/Cargo.lock; then
+            echo "::warning title=RustSec::A crate main already has is named in an advisory (above): not this change's doing"
+            exit 0
+          fi
+          exit 1

@@ -7,7 +7,8 @@
 //!
 //! ```text
 //! {"v":1,"op":"session","origins":["https://vault.example.test:443"],"ca":PEM?,"pin":HEX?}   -> {"ok":true}
-//! {"v":1,"op":"request","method":"GET","url":"...","headers":[["Name","value"]],"body":B64} -> {"ok":true,"status":200,"body":B64}
+//! {"v":1,"op":"request","method":"GET","url":"...","headers":[["Name","value"]],"body":B64} -> {"ok":true,"status":200,"body":B64,"headers":[["dpop-nonce","..."]]}
+//!                                                                                            (`headers`: `http::ANSWER_HEADERS` only, names in lower case, values as written, [] if none)
 //! {"v":1,"op":"probe","origin":"https://vault.example.test:443"}                             -> {"ok":true,"trusted":bool,"chain":[...]}
 //! anything refused                                                                          -> {"ok":false,"why":"not-allowed"}
 //! ```
@@ -26,8 +27,8 @@ use zeroize::Zeroizing;
 use http::{Failure, Session};
 
 pub const SOCKET: &str = "/run/amethystora/vault-net.sock";
-/// A request's line: the largest body the Vault sends is one item, far under this
-pub const MOST_REQUEST: usize = 4 * 1024 * 1024;
+/// A request's line: a 16 MiB file of Kemlock's, in base64 and in a little JSON (an item of Bitwarden's is far under this)
+pub const MOST_REQUEST: usize = 24 * 1024 * 1024;
 /// An answer's line: the largest body, in base64, and a little JSON
 pub const MOST_ANSWER: usize = http::MOST_BODY / 3 * 4 + 4096;
 
@@ -90,8 +91,8 @@ fn answer(line: &[u8], session: &mut Option<Session>, make_session: &MakeSession
                 .take(32)
                 .collect();
             let Ok(sent) = B64.decode(body.get("body").and_then(Value::as_str).unwrap_or("")).map(Zeroizing::new) else { return refusal(Failure::NotAllowed) };
-            match session.request(method, url, &headers, &sent) {
-                Ok((status, received)) => json!({"ok": true, "status": status, "body": B64.encode(&received[..])}),
+            match session.request_full(method, url, &headers, &sent) {
+                Ok(reply) => json!({"ok": true, "status": reply.status, "body": B64.encode(&reply.body[..]), "headers": reply.headers}),
                 Err(why) => refusal(why),
             }
         }
@@ -104,5 +105,91 @@ fn answer(line: &[u8], session: &mut Option<Session>, make_session: &MakeSession
             None => refusal(Failure::NotAllowed),
         },
         _ => refusal(Failure::NotAllowed),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufReader, Read, Write};
+    use std::net::TcpListener;
+
+    /// A server that reads one whole request (head and body), answers it with a nonce and a cookie, and gives back what it read
+    fn server() -> (String, std::thread::JoinHandle<usize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let thread = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut got = Vec::new();
+            let mut chunk = vec![0u8; 64 * 1024];
+            let (head, length) = loop {
+                let count = socket.read(&mut chunk).unwrap();
+                got.extend_from_slice(&chunk[..count]);
+                if let Some(at) = got.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&got[..at]).to_string();
+                    let length = head.lines().find_map(|l| l.strip_prefix("Content-Length: ")).unwrap().parse::<usize>().unwrap();
+                    break (at + 4, length);
+                }
+            };
+            while got.len() < head + length {
+                let count = socket.read(&mut chunk).unwrap();
+                got.extend_from_slice(&chunk[..count]);
+            }
+            socket.write_all(b"HTTP/1.1 201 Created\r\nDPoP-Nonce: Nonce-AbC\r\nSet-Cookie: a=b\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}").unwrap();
+            length
+        });
+        (origin, thread)
+    }
+
+    fn talk(script: &[u8]) -> Vec<Value> {
+        let mut reader = BufReader::new(script);
+        let mut written = Vec::new();
+        serve(&mut reader, &mut written, &|origins, ca, pin| Session::new(origins, ca, pin));
+        String::from_utf8(written).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect()
+    }
+
+    fn lines(origin: &str, body: &[u8]) -> Vec<u8> {
+        let session = json!({"v": 1, "op": "session", "origins": [origin]});
+        let request = json!({"v": 1, "op": "request", "method": "POST", "url": format!("{origin}/kem/v1/items:batch"), "headers": [["Content-Type", "application/octet-stream"]], "body": B64.encode(body)});
+        format!("{session}\n{request}\n").into_bytes()
+    }
+
+    #[test]
+    fn the_answer_to_a_request_carries_the_allowed_headers() {
+        let (origin, thread) = server();
+        let answers = talk(&lines(&origin, b"abc"));
+        assert_eq!(thread.join().unwrap(), 3);
+        assert_eq!(answers[0], json!({"ok": true}));
+        assert_eq!(answers[1], json!({"ok": true, "status": 201, "body": B64.encode(b"{}"), "headers": [["dpop-nonce", "Nonce-AbC"], ["content-type", "application/json"]]}));
+    }
+
+    #[test]
+    fn the_answer_has_a_headers_array_even_when_there_is_none() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut got = [0u8; 4096];
+            let _ = socket.read(&mut got).unwrap();
+            socket.write_all(b"HTTP/1.1 204 No Content\r\n\r\n").unwrap();
+        });
+        let answers = talk(&lines(&origin, b""));
+        assert_eq!(answers[1], json!({"ok": true, "status": 204, "body": "", "headers": []}));
+    }
+
+    #[test]
+    fn a_line_between_four_and_twenty_four_mebibytes_is_taken_and_one_past_is_not() {
+        // The 14 MiB body is some 18.7 MiB in base64: past the 4 MiB that was the limit, under the 24 that is
+        let (origin, thread) = server();
+        let script = lines(&origin, &vec![7u8; 14 * 1024 * 1024]);
+        assert!(script.len() > 4 * 1024 * 1024 && script.len() < MOST_REQUEST);
+        let answers = talk(&script);
+        assert_eq!(thread.join().unwrap(), 14 * 1024 * 1024);
+        assert_eq!(answers[1]["status"], 201);
+        // One line past the limit is refused whole, and the connection ends
+        let mut past = vec![b'x'; MOST_REQUEST + 1];
+        past.push(b'\n');
+        let answers = talk(&past);
+        assert_eq!(answers, [json!({"ok": false, "why": "too-large"})]);
     }
 }

@@ -1,16 +1,26 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
-# CodeRabbit's review of pull requests, which takes AGENTS.md as the project's guidelines by itself.
-# It only comments: the checks and the maintainer's review decide what merges.
+# CodeRabbit's review of every pull request, which takes AGENTS.md as the project's guidelines by itself. It requests
+# changes while a blocking finding or a pre-merge check below is open and approves once they are settled; the main
+# ruleset has every review thread resolved before a merge, and a code owner's approval besides (CONTRIBUTING.md).
 language: en-US
 reviews:
   profile: chill
-  request_changes_workflow: false
+  auto_approvals:
+    enabled: true
+    # Its approval is its own: a pull request's author cannot have it approve or resolve by a command
+    allow_author_approval: false
   high_level_summary: true
   poem: false
   collapse_walkthrough: true
+  # A review that stops on an error fails its CodeRabbit check rather than passing it
+  fail_commit_status: true
   auto_review:
     enabled: true
     drafts: false
+    # Every push, however many came before
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    base_branches: ["beta"]
   # What Weblate writes from the English and what branding/*.mjs draws are not reviewed by hand
   path_filters:
     - "!po/*.po"
@@ -20,5 +30,56 @@ reviews:
     - "!**/*.png"
     - "!packaging/**/*.patch"
     - "!apps/Cargo.lock"
+  pre_merge_checks:
+    # The author cannot set a failing check aside
+    override_requested_reviewers_only: true
+    title:
+      mode: warning
+      requirements: >-
+        A Conventional Commits title (the Title check holds its form). A feat title is a line of What's new for people
+        who use the system: plain words, naming no command, path, Markdown or other maker's product.
+    description:
+      mode: warning
+    custom_checks:
+      - name: Licences and credits
+        mode: error
+        instructions: >-
+          Fail if the pull request adds a file, font, picture, sound, data set or code taken from another project and
+          does not both name it in NOTICE and ship its licence under system_files/shared/usr/share/licenses/<project>/.
+          Fail if it adds a Rust crate under a licence apps/deny.toml does not allow without adding the licence there
+          with the reason. Fail if it adds another maker's logo or trademark to the image, the icon packs or the
+          branding, or installs fedora-logos or fedora-release. Fail if it removes or rewrites a copyright line, a
+          licence text or a comment that credits an author (# Written by, # Modified by, # Source:). Fail if it ships
+          Firefox changed beyond what AGENTS.md's The browser allows. Pass otherwise, and when nothing comes from
+          another project.
+      - name: Tests with the change
+        mode: error
+        instructions: >-
+          Pass when the pull request changes only documentation, translations, comments, CI configuration or pinned
+          dependency versions. Otherwise pass only when each new or changed behaviour (a feature, a command, a
+          switch, a default, a fixed bug) comes with a check that would fail without it: a VM suite in
+          tests/vm/suites, a check in build_files/shared (test-*.sh, *.mjs) run by 20-tests.sh, or a Rust test in
+          apps. Fail when it deletes, skips or weakens an existing check, or makes one pass by changing what it
+          expects, without saying why in the description.
+      - name: Security defaults
+        mode: error
+        instructions: >-
+          Fail if the pull request: turns a security feature on by default, or adds one without a switch that is off
+          and costs nothing while off (AGENTS.md, Every security feature is a switch); puts a feature that sends
+          something off the machine into a security profile or turns it on without its explanation being shown first;
+          loosens a permission (a polkit rule that lets anyone through or adds `yes` or `keep`, a udev rule that gives
+          a device to every account or a group, sudoers, a new setuid or file capability); gives a workflow job a
+          secret, a write permission or the release environment it does not need, or interpolates `${{ }}` into a
+          run block; adds a package repository without pinning its key by fingerprint; or downloads anything outside
+          a package manager without pinning its SHA-256. Fail if it lets the AI agent's tools do something
+          apps/agent-tools/src/never.rs refuses. Fail if it names the duress feature anywhere the agents read. Pass
+          otherwise.
+      - name: Documentation kept accurate
+        mode: warning
+        instructions: >-
+          Fail if the pull request changes a command, recipe, hotkey, path, default, unit or setting that the manual
+          (system_files/shared/usr/share/amethystora/manual), AGENTS.md, the agents' skill or knowledge
+          (system_files/shared/usr/share/amethystora/agents) or CONTRIBUTING.md describe, and does not change them to
+          match. Pass otherwise.
 chat:
   auto_reply: true
