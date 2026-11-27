@@ -7,10 +7,11 @@
 //
 // 1. The ISO is started by the firmware, Secure Boot on with Microsoft's keys, from its own boot menu's first entry: its
 //    shim, GRUB, kernel and system start, and are looked at (the installer's, or the live session).
-// 2. It installs onto a blank 40 GiB disk with only the answers a person gives Anaconda (the disk, all of it,
-//    encrypted, and the keyboard and language): the installer ISO with its own kernel started with its entry's arguments
-//    and a kickstart of those answers that runs the ISO's own kickstart, the live ISO from the live session, with
-//    Anaconda on the kickstart its installer uses (interactive-defaults.ks) and the same answers.
+// 2. It installs onto a blank 40 GiB disk. The installer ISO, in the system step 1 started, through its web interface,
+//    page by page, as a person clicks through it (webui.mjs, a headless Chromium in the lab): the language, the
+//    keyboard, the disk, all of it, encrypted, the review, the installation, and Reboot. The live ISO from the live
+//    session, with Anaconda on the kickstart its installer uses (interactive-defaults.ks) and the answers a person gives
+//    (the disk, all of it, encrypted, and the keyboard and language).
 // 3. The disk alone is started under Secure Boot, the passphrase handed to systemd-cryptsetup as a credential, and
 //    looked at: the signed origin, the layout, SELinux, the firewall, the first boot's setup, GNOME Initial Setup; then
 //    once more after a restart.
@@ -23,6 +24,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 
 import { agent, credentials, decode, screendump } from './lab.mjs';
+import { browser } from './webui.mjs';
 
 const ROOT = process.env.VMLAB_DIR || '/vm';
 const VMS = `${ROOT}/vms`;
@@ -113,7 +115,7 @@ function stop() {
   }
 }
 // QEMU as the lab starts it (lab.mjs's vm_start): UEFI with its variables in QEMU, Secure Boot by those variables
-async function start({ cdrom = false, kernel, extra = [], creds = {}, memory = 8192 }) {
+async function start({ cdrom = false, kernel, extra = [], creds = {}, memory = 8192, forward }) {
   stop();
   for (const ext of ['pid', 'agent', 'qmp', 'console']) fs.rmSync(file(ext), { force: true });
   const args = ['-name', NAME, '-enable-kvm', '-machine', 'q35,smm=off', '-cpu', 'host', '-smp', '4', '-m', String(memory),
@@ -124,7 +126,7 @@ async function start({ cdrom = false, kernel, extra = [], creds = {}, memory = 8
       '-device', `ide-cd,drive=cd,bus=ide.0${kernel ? '' : ',bootindex=0'}`] : []),
     ...(kernel ? ['-kernel', kernel.kernel, '-initrd', kernel.initrd, '-append', kernel.append] : []),
     ...extra,
-    '-netdev', 'user,id=n0', '-device', 'virtio-net-pci,netdev=n0',
+    '-netdev', `user,id=n0${forward ? `,hostfwd=tcp:127.0.0.1:${forward}-:${forward}` : ''}`, '-device', 'virtio-net-pci,netdev=n0',
     '-device', 'virtio-serial-pci', '-chardev', `socket,id=lab,path=${file('agent')},server=on,wait=off`,
     '-device', 'virtserialport,chardev=lab,name=org.amethystora.vmtest',
     '-device', 'VGA,id=vga1,xres=1280,yres=800', '-device', 'qemu-xhci', '-device', 'usb-tablet', '-display', 'none',
@@ -221,6 +223,12 @@ async function installed(step) {
   say(await yes('! rpm -q fedora-logos fedora-release >/dev/null 2>&1 && rpm -q generic-release >/dev/null'), `${step}: no Fedora logo or release package`,
     await value('rpm -q fedora-logos fedora-release generic-release 2>&1'));
   say(await value('systemctl get-default') === 'graphical.target', `${step}: it starts to the desktop`, await value('systemctl get-default'));
+  if (kind === 'installer') {
+    const lang = await value('. /etc/locale.conf 2>/dev/null; echo "${LANG:-}"');
+    say(lang === `${LANGUAGE}.UTF-8`, `${step}: the language chosen in the installer is the system's (${LANGUAGE}.UTF-8)`, await value('cat /etc/locale.conf 2>&1'));
+    const keymap = await value('. /etc/vconsole.conf 2>/dev/null; echo "${KEYMAP:-}"');
+    say(keymap === KEYBOARD, `${step}: the keyboard layout chosen in the installer is the console's (${KEYBOARD})`, await value('cat /etc/vconsole.conf 2>&1'));
+  }
   if (kind === 'live') {
     say(await yes('grep -qw rhgb /proc/cmdline && grep -qw quiet /proc/cmdline && grep -q "vconsole.keymap=" /proc/cmdline'),
       `${step}: the splash and the keyboard's layout are in the kernel's arguments`, await value('cat /proc/cmdline'));
@@ -228,6 +236,161 @@ async function installed(step) {
     skip(`${step}: the kernel arguments of the installer ISO's ostree path are the image's to catch up (hook 32)`);
   }
   return true;
+}
+
+// --- 2, the installer ISO: its web interface, as a person goes through it --------------------------------------------------
+// cockpit-ws serves the web interface in the installer's system on the loopback alone, to the installer's own window. A
+// forwarder started there through the lab's helper opens it on WEBUI_PORT, which QEMU forwards to the lab, where a headless
+// Chromium (webui.mjs) clicks through every page. A language and a keyboard other than the defaults are chosen, so that the
+// installed system can show they were taken. The pages the ISO hides (iso/product/etc/anaconda/conf.d/99-amethystora.conf)
+// must not appear. Reboot ends QEMU, which runs with -no-reboot, and the disk is then started alone (step 3).
+const WEBUI_PORT = 9919;
+const LANGUAGE = 'en_GB';
+const KEYBOARD = 'gb';
+const HIDDEN = ['network', 'date-time', 'accounts'];
+const FORWARDER = `import socket, sys, threading
+
+def pipe(src, dst):
+    try:
+        while data := src.recv(65536):
+            dst.sendall(data)
+    except OSError:
+        pass
+    try:
+        dst.shutdown(socket.SHUT_WR)
+    except OSError:
+        pass
+
+server = socket.create_server(("0.0.0.0", int(sys.argv[1])))
+while True:
+    client, _ = server.accept()
+    try:
+        upstream = socket.create_connection(("127.0.0.1", int(sys.argv[2])))
+    except OSError:
+        client.close()
+        continue
+    for a, b in ((client, upstream), (upstream, client)):
+        threading.Thread(target=pipe, args=(a, b), daemon=True).start()
+`;
+const onPage = (id) => `location.hash === '#/anaconda-screen-${id}'`;
+const installerLog = async () => (await value('echo "--- anaconda.log"; grep -vE " DBG " /tmp/anaconda.log 2>/dev/null | tail -n 25 | cut -c1-300', 30).catch(() => '(the installer does not answer)'));
+
+async function webInstall() {
+  // The web interface starts after Anaconda's modules, slower under nested virtualization
+  // Its port by ss, or, in a system without ss, the ports cockpit-ws takes (80, 9090 before) once it runs
+  const port = await value('for i in $(seq 120); do p="$(ss -Hltnp 2>/dev/null | awk \'/cockpit-ws/ { n = split($4, a, ":"); print a[n]; exit }\')"; ' +
+    'if [ -z "$p" ] && ! command -v ss >/dev/null && pgrep -f cockpit-ws >/dev/null; then for q in 80 9090; do (echo >/dev/tcp/127.0.0.1/$q) 2>/dev/null && { p=$q; break; }; done; fi; ' +
+    '[ -n "$p" ] && { echo "$p"; exit; }; sleep 5; done', 660);
+  if (!say(/^\d+$/.test(port), 'the installer serves its web interface (cockpit-ws)',
+    await value('ps -eo args | grep -E "[c]ockpit|[a]naconda|[f]irefox" | cut -c1-200 | head; ss -Hltnp 2>/dev/null | head', 30))) return false;
+  note(`the web interface: cockpit-ws on the installer's port ${port}`);
+  await sh('mkdir -p /run/lab');
+  await write('/run/lab/forward.py', FORWARDER);
+  const forwarding = await sh(`systemd-run --unit=lab-webui-forward /usr/bin/python3 /run/lab/forward.py ${WEBUI_PORT} ${port}`, 30);
+  if (!say(forwarding.rc === 0, 'the web interface is forwarded to the lab', forwarding.err)) return false;
+
+  const b = await browser(`${DIR}/browser`);
+  let shots = 0;
+  const step = async (what, act) => {
+    const name = `2-${String(++shots).padStart(2, '0')}`;
+    try {
+      await act();
+      await b.shot(`${DIR}/${name}.png`);
+      return say(true, what);
+    } catch (error) {
+      await b.shot(`${DIR}/${name}-failed.png`);
+      await shot(`${name}-screen`);
+      const where = await b.evaluate('`${location.href}\\n${document.body.innerText.slice(0, 1200)}`').catch(() => '(no page)');
+      return say(false, what, `${error.message}\n--- the page\n${where}\n${await installerLog()}`);
+    }
+  };
+  const exists = async (selector) => b.evaluate(`Boolean(${b.q(selector)})`);
+  const checked = async (selector) => b.evaluate(`Boolean(${b.q(selector)}?.matches(':checked'))`);
+  const next = async () => b.click('#installation-next-btn', 'Next');
+  const optionOf = (prefix, id) => `[id^="${prefix}-option-"][id$="-${id}"]`;
+  try {
+    // The installer opened on the review, with no way past it, when its Localization module was off (iso/iso.toml)
+    const ok = await step('the web interface opens on its first page, the language', async () => {
+      await b.goto(`http://127.0.0.1:${WEBUI_PORT}/cockpit/@localhost/anaconda-webui/index.html`);
+      await b.until(`${b.usable('#installation-next-btn')} && location.hash.startsWith('#/anaconda-screen-')`, 'a page of the installer, with its Next button', 600);
+      await b.evaluate("window.labPages = [location.hash]; addEventListener('hashchange', () => labPages.push(location.hash)); true");
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      const at = await b.evaluate('location.hash');
+      if (at !== '#/anaconda-screen-language') throw new Error(`it opened on ${at}, not on the language page`);
+    })
+      && await step(`the language page lists the languages, and ${LANGUAGE} is chosen`, async () => {
+        const count = await b.evaluate('document.querySelectorAll(\'[id^="anaconda-screen-language-option-"]\').length');
+        if (!count) throw new Error('the page lists no language');
+        const option = optionOf('anaconda-screen-language', LANGUAGE);
+        if (!(await exists(option))) await b.type('.anaconda-screen-language-language-search input', 'United Kingdom', 'the language search');
+        await b.click(option, `the language ${LANGUAGE}`);
+        await b.until(`[...document.querySelectorAll(${JSON.stringify(option)})].some((e) => e.matches('.pf-m-selected') || e.querySelector('.pf-m-selected'))`, `${LANGUAGE} shown as chosen`, 30);
+      })
+      && await step(`the keyboard layout ${KEYBOARD} is chosen`, async () => {
+        await b.click('#anaconda-screen-language-change-system-keyboard-layout-modal-open-button', 'the button that changes the keyboard layout');
+        await b.until(b.usable('#anaconda-screen-language-change-system-keyboard-layout-modal'), 'the keyboard layout dialog', 30);
+        const option = optionOf('anaconda-screen-language-keyboard', KEYBOARD);
+        if (!(await exists(option))) await b.type('.anaconda-screen-language-keyboard-search input', 'English (UK)', 'the keyboard layout search');
+        await b.click(option, `the keyboard layout ${KEYBOARD}`);
+        await b.click('#anaconda-screen-language-change-system-keyboard-layout-modal-save-button', 'Save');
+        await b.until("/\\bgb\\b|\\bUK\\b|United Kingdom/i.test(document.querySelector('#anaconda-screen-language-selected-keyboards')?.textContent || '')",
+          `${KEYBOARD} shown as the layout`, 30);
+      })
+      && await step('Next leads to the installation method, the disk', async () => {
+        await next();
+        await b.until(onPage('method'), 'the installation method page');
+      })
+      && await step('the whole of the disk vda is chosen, to be erased', async () => {
+        if (!(await exists('#anaconda-screen-method-target-disk-vda'))) {
+          await b.click('#anaconda-screen-method-change-destination-button', 'the button that changes the disk');
+          const box = '#anaconda-screen-method-disk-selection-menu-item-vda input[type=checkbox]';
+          await b.until(`Boolean(${b.q(box)})`, 'the disk vda in the list', 60);
+          if (!(await checked(box))) await b.click(box, 'the disk vda in the list');
+          await b.clickButton('#anaconda-screen-method-change-destination-modal', 'Select');
+          await b.until(`Boolean(${b.q('#anaconda-screen-method-target-disk-vda')})`, 'vda as the disk', 60);
+        }
+        const erase = '#anaconda-screen-method-scenario-erase-all';
+        if (!(await checked(erase))) await b.click(erase, 'Use entire disk');
+        await b.until(`Boolean(${b.q(erase)}?.matches(':checked'))`, 'Use entire disk chosen', 30);
+      })
+      && await step('Next leads to the storage configuration, where the disk is encrypted with a passphrase given twice', async () => {
+        await next();
+        await b.until(onPage('storage-configuration'), 'the storage configuration page');
+        if (!(await checked('#disk-encryption-encrypt-devices'))) await b.click('#disk-encryption-encrypt-devices', 'Encrypt my data');
+        await b.type('#disk-encryption-password-field', PASSPHRASE, 'the passphrase');
+        await b.type('#disk-encryption-password-confirm-field', PASSPHRASE, 'the passphrase again');
+        await b.until(b.usable('#installation-next-btn'), 'Next, the passphrase accepted', 60);
+      })
+      && await step(`Next leads to the review, which shows ${LANGUAGE} and the disk vda, with no page the ISO hides on the way`, async () => {
+        await next();
+        await b.until(onPage('review'), 'the review page', 180);
+        const language = await b.evaluate("document.querySelector('#anaconda-screen-review-target-system-language')?.textContent || ''");
+        if (!/United Kingdom/.test(language)) throw new Error(`the review's language is ${JSON.stringify(language)}`);
+        const review = await b.evaluate("(document.querySelector('[class*=\"wizard__main\"]') || document.body).innerText");
+        if (!/\bvda\b/.test(review)) throw new Error('the review does not name the disk vda');
+        const shown = (await b.evaluate('labPages')).filter((h) => HIDDEN.some((page) => h === `#/anaconda-screen-${page}`));
+        if (shown.length) throw new Error(`it showed ${shown.join(', ')}`);
+      })
+      && await step('the erasure confirmed, the installation starts', async () => {
+        await b.click('#anaconda-screen-review-next-confirmation-checkbox', 'the box that confirms erasing the disk');
+        await next();
+        await b.until(`${onPage('progress')} || Boolean(document.querySelector('[class*="progress-stepper"]'))`, 'the progress page', 120);
+      })
+      && await step('Anaconda installs, and says it has', async () => {
+        const end = await b.until("document.querySelector('.anaconda-screen-progress-status-success') ? 'success' : " +
+          "(document.querySelector('.anaconda-screen-progress-status-danger, #critical-error-bz-report-modal, #anaconda-screen-progress-installation-error-dialog') ? 'failed' : '')",
+        'the end of the installation', 75 * 60);
+        if (end !== 'success') throw new Error('the installation failed');
+      })
+      && await step('Reboot ends the installer', async () => {
+        await b.clickButton('.anaconda-screen-progress-status-success', 'Reboot');
+        for (let i = 0; i < 300 && alive(); i++) await sleep(1000);
+        if (alive()) throw new Error('the machine still runs five minutes after Reboot');
+      });
+    return ok;
+  } finally {
+    await b.close();
+  }
 }
 
 // --- 1, 2: the ISO ----------------------------------------------------------------------------------------------------------
@@ -238,57 +401,24 @@ try {
   fs.copyFileSync(`${OVMF}/vars.secboot.json`, VARS);
 
   note('1. the ISO, from its boot menu, Secure Boot on');
-  await start({ cdrom: true });
+  // -no-reboot: the installer ISO's Reboot, at the end of the installation, ends QEMU, and the disk is started alone
+  await start({ cdrom: true, ...(kind === 'installer' ? { extra: ['-no-reboot'], forward: WEBUI_PORT } : {}) });
   const first = await answers(25);
   await shot('1-iso');
-  // The live session is where the installation starts from, so without it nothing more can be tried; the installer's
-  // system is looked at when it answers, and the installation below needs none of it
-  if (!say(first === 'answers', `the ${kind} ISO starts under Secure Boot from its own boot menu`, `${first}\n${serialTail()}`) && kind === 'live') {
-    throw new Error('stop');
-  }
-  if (first === 'answers') {
-    say(await yes(SECURE_BOOT), 'Secure Boot is on in the started ISO');
-    say(await yes('! rpm -q fedora-logos >/dev/null 2>&1'), 'the started system carries no Fedora logo package');
-  }
+  // The installation is driven from the system the ISO started (the installer's, or the live session), so without it
+  // nothing more can be tried
+  if (!say(first === 'answers', `the ${kind} ISO starts under Secure Boot from its own boot menu`, `${first}\n${serialTail()}`)) throw new Error('stop');
+  say(await yes(SECURE_BOOT), 'Secure Boot is on in the started ISO');
+  say(await yes('! rpm -q fedora-logos >/dev/null 2>&1'), 'the started system carries no Fedora logo package');
 
   if (kind === 'installer') {
-    if (first === 'answers') {
-      say(await yes('grep -q Amethystora /etc/os-release'), 'the installer names Amethystora (its product image)', await value('cat /etc/os-release'));
-      say(await yes('findmnt /run/install/repo >/dev/null'), 'the installer found the ISO it carries the image on');
-    }
-    await poweroff(1);
-
-    // Its own kernel, with its entry's arguments, and a kickstart of the answers that runs the ISO's own one
-    note('2. installing: the entry\'s kernel and arguments, the answers as a kickstart');
-    const ksArg = entry.args.find((a) => a.startsWith('inst.ks='));
-    const own = ksArg && ksArg.match(/^inst\.ks=hd:[^:]+:(\/.+)$/);
-    if (!say(Boolean(own), 'the boot entry runs a kickstart of the ISO\'s own', entry.args.join(' '))) throw new Error('stop');
-    const ownKs = `${work}/own.ks`;
-    if (!say(extract(own[1], ownKs), `the ISO carries ${own[1]}`)) throw new Error('stop');
-    const ownText = fs.readFileSync(ownKs, 'utf8');
-    // poweroff last, after the ISO's own kickstart, so that a reboot of its own cannot start the installation again
-    const ks = ['# The answers a person gives (tests/vm/iso.mjs), then the ISO\'s own kickstart', 'cmdline', ...answered(ownText, []), '',
-      ownText, '', 'poweroff', ''].join('\n');
-    fs.mkdirSync(`${work}/answers`, { recursive: true });
-    fs.writeFileSync(`${work}/answers/lab.ks`, ks);
-    execFileSync('xorriso', ['-as', 'mkisofs', '-quiet', '-V', 'LABKS', '-o', `${work}/answers.iso`, `${work}/answers`], { stdio: 'ignore' });
-    for (const [inside, local] of [[entry.kernel, `${work}/vmlinuz`], [entry.initrd, `${work}/initrd.img`]]) {
-      if (!extract(inside, local)) throw new Error(`the ISO has no ${inside}`);
-    }
-    const append = [...entry.args.filter((a) => !a.startsWith('inst.ks=') && a !== 'quiet'), 'inst.ks=hd:LABEL=LABKS:/lab.ks', 'console=tty0', 'console=ttyS0,115200'].join(' ');
-    // The installer starts under UEFI with Secure Boot off: the firmware checks no kernel it is handed directly. What
-    // it writes onto the disk is started under Secure Boot below
-    fs.copyFileSync(`${OVMF}/vars.blank.json`, VARS);
-    await start({
-      cdrom: true, kernel: { kernel: `${work}/vmlinuz`, initrd: `${work}/initrd.img`, append },
-      extra: ['-no-reboot', '-drive', `file=${work}/answers.iso,media=cdrom,if=none,id=ks,readonly=on,format=raw`, '-device', 'ide-cd,drive=ks,bus=ide.1'],
-    });
-    for (const until = Date.now() + 75 * 60000; alive() && Date.now() < until;) await sleep(10000);
-    await shot('2-install');
-    const done = !alive();
+    say(await yes('grep -q Amethystora /etc/os-release'), 'the installer names Amethystora (its product image)', await value('cat /etc/os-release'));
+    say(await yes('findmnt /run/install/repo >/dev/null'), 'the installer found the ISO it carries the image on');
+    // The ISO's own kickstart, which the web interface takes as given: the image to install and the switch to the signed one
+    say(entry.args.some((a) => /^inst\.ks=hd:[^:]+:\/.+$/.test(a)), 'the boot entry runs a kickstart of the ISO\'s own', entry.args.join(' '));
+    note('2. installing through the web interface, page by page');
+    if (!(await webInstall())) throw new Error('stop');
     stop();
-    if (!say(done, 'Anaconda installs with the answers alone, and powers the machine off', `still running after 75 minutes\n${serialTail()}`)) throw new Error('stop');
-    fs.copyFileSync(`${OVMF}/vars.secboot.json`, VARS);
   } else {
     // The live session, as it starts from the ISO
     const session = await value('for i in $(seq 120); do pgrep -u liveuser -x gnome-shell >/dev/null && break; sleep 5; done; pgrep -u liveuser -x gnome-shell', 660);
