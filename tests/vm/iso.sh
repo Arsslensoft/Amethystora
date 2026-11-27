@@ -22,7 +22,7 @@ shift 2
 LAB=/vm/iso-lab
 docker exec amevm mkdir -p "${LAB}"
 # The checkout's lab code, with LF endings: a run's copy in /opt can be older
-for f in iso.mjs lab.mjs agent.py; do tr -d '\r' <"${f}" | docker exec -i amevm sh -c "cat >${LAB}/${f}"; done
+for f in iso.mjs webui.mjs lab.mjs agent.py; do tr -d '\r' <"${f}" | docker exec -i amevm sh -c "cat >${LAB}/${f}"; done
 docker exec amevm sh -c "command -v xorriso >/dev/null || dnf -y -q install xorriso >/dev/null"
 if [[ -n "${VMLAB_VOLUME:-}" ]]; then
     sudo mkdir -p "${VMLAB_VOLUME}/iso-lab"
