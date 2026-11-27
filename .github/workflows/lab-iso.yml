@@ -227,7 +227,7 @@ jobs:
           overwrite: true
 
   # The live ISO, as build-iso.yml's live-iso job makes it (keep the two in step): the live session, its forensic start,
-  # and installing from the session
+  # and installing from the session through its web interface, page by page
   live:
     name: Live ISO
     needs: [plan, image]
