@@ -215,7 +215,7 @@ fn main() -> ExitCode {
         };
         let answer = if conf_text().ok().as_deref() != Some(first.as_str()) {
             json!({"id": id, "refused": "agent.conf changed since this helper started: ask again"})
-        } else if let Some(why) = never::refusal(&argv) {
+        } else if let Some(why) = never::refusal_as_root(&argv, PATH) {
             journal(&format!("{account} asked for {} as root, refused: {why}", history::words(&json!(argv))));
             json!({"id": id, "refused": why})
         } else {
