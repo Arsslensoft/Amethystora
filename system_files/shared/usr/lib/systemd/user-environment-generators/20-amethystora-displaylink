@@ -1,9 +1,11 @@
 #!/usr/bin/bash
-# A DisplayLink dock's screens stay dark on a machine whose graphics card draws the desktop in 10 bits (AMD and Intel
-# do): Mutter hands the card's picture to the dock's driver as it is, evdi takes the framebuffer and then refuses every
-# frame made of it ("invalid pixel format AR30" with drm.debug, "drmModeAtomicCommit: Invalid argument" in the shell's
-# journal), and Mutter falls back to copying only when the hand-over itself fails. Found on a ThinkPad Hybrid USB-C
-# dock, Mutter 51.1 and evdi 1.15.1 (2026-11-27). Telling Mutter to copy is the way around it until one of them is fixed.
+# A DisplayLink dock's screens stay dark with Mutter 51.0 and 51.1 where the graphics driver has no
+# EGL_KHR_partial_update (radeonsi): the path Mutter 51 then draws through picks a screen's format without asking the
+# dock's plane (create_bos_gbm), so it hands evdi 10-bit frames, evdi takes the framebuffer and refuses every frame
+# made of it ("invalid pixel format AR30" with drm.debug, "drmModeAtomicCommit: Invalid argument" in the shell's
+# journal). Mutter's issue 5100, fixed on its main branch by 9bc8cd84 (merge request 5372, to be backported to 51).
+# Telling Mutter to copy the frames is the way around it until the image's Mutter has that fix: 20-tests.sh fails
+# on Mutter 51.2 or newer, so that this file is taken out then. Found on a ThinkPad Hybrid USB-C dock (2026-11-27).
 #
 # Mutter reads the variable once, for every graphics device but the first, so it also costs a second graphics card
 # its own copy. Hence: always on a machine with one graphics card, where it changes nothing else, so a dock plugged

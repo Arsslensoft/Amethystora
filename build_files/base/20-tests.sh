@@ -5445,9 +5445,14 @@ fi
 grep -qx "StartLimitBurst=10" <<<"$(systemctl cat displaylink.service)"
 grep -qE '^CapabilityBoundingSet=~(.* )?CAP_SYS_MODULE( |$)' "${DL_SANDBOX}"
 grep -q "^d /var/log/displaylink " /usr/lib/tmpfiles.d/displaylink.conf
-# evdi refuses the 10-bit frames Mutter hands a dock as they are, and its screens stay dark: the session is told to
-# copy them, always with one graphics card, with several only when a dock is there, and before systemd's own
-# generator so that an account's environment.d still decides. A Mutter without the switch fails here
+# Mutter 51.0 and 51.1 hand a dock 10-bit frames that evdi refuses, and its screens stay dark (Mutter's issue 5100,
+# fixed on its main branch by 9bc8cd84): the session is told to copy them, always with one graphics card, with
+# several only when a dock is there, and before systemd's own generator so that an account's environment.d still
+# decides. A Mutter without the switch fails here, and so does one new enough to carry the fix
+if [[ "$(printf '%s\n' 51.2 "$(rpm -q --qf '%{VERSION}' mutter)" | sort -V | head -n 1)" == 51.2 ]]; then
+    echo "Mutter $(rpm -q --qf '%{VERSION}' mutter): check that it has 9bc8cd84, then take out 20-amethystora-displaylink (AGENTS.md, Drivers)"
+    exit 1
+fi
 DL_COPY=/usr/lib/systemd/user-environment-generators/20-amethystora-displaylink
 DL_ROOT="$(mktemp -d)"
 dl_device() { mkdir -p "${DL_ROOT}/sys/bus/$1/devices/$2" && echo "$4" >"${DL_ROOT}/sys/bus/$1/devices/$2/$3"; }

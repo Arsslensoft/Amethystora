@@ -340,16 +340,18 @@ with Universal Blue's key, which `ame security secure-boot` enrolls; `20-tests.s
   suspend hook's FIFOs), the host's network namespace (libusb's netlink), `/sys` writable (evdi) and real-time
   scheduling, which `20-tests.sh` holds. Its `modprobe` condition runs outside it (`+`). Tried with one real dock, a
   ThinkPad Hybrid USB-C with USB-A Dock (2026-11-27): its screens light with the sandbox on.
-- **A dock's screens need the session to copy their frames**
-  (`usr/lib/systemd/user-environment-generators/20-amethystora-displaylink`): where the graphics card draws in 10 bits
-  (AMD, Intel), Mutter hands its picture to evdi as it is, evdi takes the framebuffer and refuses every frame (`invalid
-  pixel format AR30` with `drm.debug`, `drmModeAtomicCommit: Invalid argument` in the shell's journal), and Mutter
-  falls back to copying only when the hand-over itself fails (Mutter 51.1, evdi 1.15.1). The generator sets
+- **A dock's screens need the session to copy their frames, until Mutter 51.2**
+  (`usr/lib/systemd/user-environment-generators/20-amethystora-displaylink`): Mutter 51.0 and 51.1, where the graphics
+  driver has no `EGL_KHR_partial_update` (radeonsi), pick a screen's format without asking the dock's plane
+  (`create_bos_gbm`) and hand evdi 10-bit frames, which it refuses one by one (`invalid pixel format AR30` with
+  `drm.debug`, `drmModeAtomicCommit: Invalid argument` in the shell's journal): Mutter's issue 5100, fixed on its main
+  branch by `9bc8cd84` (merge request 5372), to be backported to 51. Until then the generator sets
   `MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu`, which Mutter applies to every graphics device but the
   first: always with one graphics card (PCI class `0x03`), with several only when a dock is there as the session
   starts, so that a second card keeps its own copy otherwise (`displays.md` says to log in with the dock plugged
   in). It sorts before systemd's generator, so an account's `environment.d` decides. `20-tests.sh` holds the three
-  cases and fails on a Mutter without the switch. Take it out once Mutter or evdi is fixed.
+  cases, and fails on Mutter 51.2 or newer: check that it carries the fix, then take out the generator, its test,
+  this entry and the manual's paragraph.
 - **FireWire** is a switch of its own (`ame security firewire`), its modules in
   `usr/lib/modprobe.d/61-amethystora-firewire.conf`, apart from the blocked modules.
 - **Lockdown** stays as the gaps plan left it (the maintainer's choice of 2026-10-07, over this plan's of
