@@ -49,10 +49,18 @@ done
 mv /usr/lib/sysctl.d/60-amethystora-hardening.conf "${HIDDEN}/"
 
 export DRACUT_NO_XATTR=1
+# dracut compresses with zstd. When Fedora's updates carry a libzstd newer than the zstd command (1.6.0 against
+# 1.5.7, which a -devel package here brings in), the command stops with "incorrect library version" and the
+# initramfs is never made: then it is compressed with xz, which the kernel reads as well.
+COMPRESS=()
+if ! zstd -V >/dev/null 2>&1; then
+    echo "::warning::zstd does not run against its library, the initramfs is compressed with xz"
+    COMPRESS=(--xz)
+fi
 # Never multipath, which no image's initramfs had: dx's packages bring its tools (device-mapper-multipath), and they are
 # installed before this now (the packages-dx layer, plans/done/PLAN-build-layers.md), where they came after it before
 /usr/bin/dracut --no-hostonly --kver "$QUALIFIED_KERNEL" --reproducible -v \
-    --add "${DRACUT_MODULES[*]}" --omit multipath -f "/lib/modules/$QUALIFIED_KERNEL/initramfs.img"
+    "${COMPRESS[@]}" --add "${DRACUT_MODULES[*]}" --omit multipath -f "/lib/modules/$QUALIFIED_KERNEL/initramfs.img"
 chmod 0600 "/lib/modules/$QUALIFIED_KERNEL/initramfs.img"
 
 mv -f "${HIDDEN}/os-release" /etc/os-release

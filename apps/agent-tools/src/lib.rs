@@ -4,8 +4,11 @@
 //! state and journal. Level 2 acts, and asks first every time. plans/done/PLAN-agentic-os.md says why.
 
 pub mod act;
+pub mod agentcli;
+pub mod agents;
 pub mod checks;
 pub mod files;
+pub mod gitguard;
 pub mod handoff;
 pub mod history;
 pub mod index;
@@ -16,6 +19,7 @@ pub mod policy;
 pub mod root;
 pub mod routines;
 pub mod run;
+pub mod sandbox;
 pub mod server;
 pub mod state;
 pub mod text;

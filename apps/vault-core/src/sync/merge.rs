@@ -148,12 +148,15 @@ impl Connection {
         SymKey::from_slice(&Zeroizing::new(seal::unhex(&self.user_key)?))
     }
 
-    /// What the person chose for a kind: `on` or `off`; the kind's default until then. A `sealed` an earlier version kept is `on`.
+    /// What the person chose for a kind: `on` or `off`; the kind's default until then. A `sealed` an earlier version kept waits for the
+    /// person (`waiting`): `off` until they say, since what they said yes to was a copy only this vault opens. On a Kemlock server every
+    /// kind syncs by default but keys, certificates and files, which go only once chosen, as on Bitwarden's API: connecting says yes to
+    /// the account, not to sending a private key
     pub fn kind_choice(&self, kind: &str) -> &str {
         match self.kinds.get(kind).map(String::as_str) {
-            Some("on" | "sealed") => "on",
-            Some("off") => "off",
-            _ if self.kemlock.is_some() => "on",
+            Some("on") => "on",
+            Some("off" | "sealed") => "off",
+            _ if self.kemlock.is_some() && !kinds::OFF_BY_DEFAULT.contains(&kind) => "on",
             _ => kinds::default_choice(kind),
         }
     }
@@ -161,9 +164,18 @@ impl Connection {
     /// What the person chose for an item, which wins, or what its kind does: `on` or `off`
     pub fn choice(&self, kind: &str, id: &str) -> &str {
         match self.choices.get(&format!("{kind}.{id}")).map(String::as_str) {
-            Some("on" | "sealed") => "on",
-            Some("off") => "off",
+            Some("on") => "on",
+            Some("off" | "sealed") => "off",
             _ => self.kind_choice(kind),
+        }
+    }
+
+    /// Whether an item waits for the person: an earlier version synced it sealed, and nobody has said since whether it goes as the plain
+    /// item it would be now. Nothing is sent for it, and its sealed note is left as it is, until they turn it, or its kind, on or off
+    pub fn waiting(&self, kind: &str, id: &str) -> bool {
+        match self.choices.get(&format!("{kind}.{id}")).map(String::as_str) {
+            Some(choice) => choice == "sealed",
+            None => self.kinds.get(kind).map(String::as_str) == Some("sealed"),
         }
     }
 
@@ -335,6 +347,8 @@ pub struct Report {
     /// An organization's: never read, never shown as the person's
     pub organization: usize,
     pub sealed_elsewhere: usize,
+    /// Sealed notes of an earlier version whose items wait for the person to say whether they go as plain items: left as they are
+    pub sealed_waiting: usize,
     /// Items with something wrong, each with a stable word: the first few, since the count is what matters and a server may send any
     /// number. This goes into the connection's item, and a long list in it would lose the connection (the review's M8).
     pub refused: Vec<Value>,
@@ -1470,6 +1484,11 @@ fn steps(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connection, 
     let known: Vec<Link> = run.links.values().cloned().collect();
     for link in known {
         let Some(raw) = by_id.get(&link.cipher.to_ascii_lowercase()).map(|raw| (*raw).clone()) else { continue };
+        // A sealed note whose item waits for the person: neither made plain nor trashed, whatever its item does, until they say
+        if link.sealed && link.parts.iter().any(|part| connection.waiting(&part.kind, &part.id)) {
+            run.report.sealed_waiting += 1;
+            continue;
+        }
         one_link(session, run, connection, &link, raw)?;
     }
     // Ciphers new to the vault

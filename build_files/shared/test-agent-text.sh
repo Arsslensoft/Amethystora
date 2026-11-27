@@ -6,6 +6,12 @@
 #   bash test-agent-text.sh
 set -euo pipefail
 
+# The launcher drives the tool program's newer subcommands (agent-plan, profile, agent-run): see test-agent-ask-here.sh
+if ! /usr/libexec/amethystora-agent-tools 2>&1 | grep -q agent-run; then
+    echo "::warning::test-agent-text.sh waits for an image whose amethystora-agent-tools has agent-run"
+    exit 0
+fi
+
 T="$(mktemp -d)"
 trap '[[ -z ${pid:-} ]] || kill "${pid}" 2>/dev/null || true; rm -rf "${T}"' EXIT
 export HOME="${T}/home" XDG_CONFIG_HOME="" XDG_RUNTIME_DIR="${T}/run"

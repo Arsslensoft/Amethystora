@@ -675,16 +675,16 @@ fn both(run: &mut Run<'_>, id: &str, cached: &Cached, plain: &Value, local: &Loc
             return Ok(());
         }
         Taken::Untouched => {
+            // The server's copy no longer reads as the vault's item: neither is written over the other
             run.report.left_alone += 1;
+            let_go(run, id, local);
             return Ok(());
         }
         Taken::Conflict => {
-            // It no longer reads as the item it was: the vault's stays, nothing is deleted on either side
+            // It no longer reads as the item it was (another key under the same entry): the vault's stays, the server's stays, nothing is
+            // deleted on either side, and the vault's item is let go of this one, so that its next change is never written over the server's
             run.report.conflicts += 1;
-            run.by_part.insert(key_of(local), id.to_string());
-            if let Some(c) = run.cache.get_mut(id) {
-                c.part = Some(PartRef { kind: local.kind.clone(), id: local.id.clone(), hash: map::hash(local) });
-            }
+            let_go(run, id, local);
             return Ok(());
         }
     };
@@ -748,6 +748,19 @@ fn both(run: &mut Run<'_>, id: &str, cached: &Cached, plain: &Value, local: &Loc
         run.report.sent += 1;
     }
     Ok(())
+}
+
+/// The vault's item unpaired from a server item it did not take: the link to it goes, and the server's item stays as it is. Marked in step
+/// instead, the server's revision would read as the base of the vault's next change, which would then be written over it. A later revision
+/// of the server's is read and paired again; the vault's item, whose id the server's holds, is sent nowhere meanwhile
+fn let_go(run: &mut Run<'_>, id: &str, local: &Local) {
+    if run.by_part.get(&key_of(local)).is_some_and(|other| other == id) {
+        run.by_part.remove(&key_of(local));
+    }
+    if let Some(c) = run.cache.get_mut(id) {
+        c.part = None;
+    }
+    run.touched.insert(id.to_string());
 }
 
 /// The server holds less than the vault keeps (a counter that is higher here, a code spent here): it is sent the vault's
@@ -995,19 +1008,22 @@ fn sign_manifest(session: &mut Session<'_>, run: &Run<'_>, counter: &mut u64, sh
                 entries.insert(id.clone(), entry.clone());
             }
         }
-        let manifest = Manifest::new(run.owner, *counter + 1, entries.into_values().collect()).map_err(|_| Problem::Kemlock(word::MANIFEST_INVALID))?;
+        // A counter that cannot go one higher is a server that pushed it there: no manifest goes, whatever it says
+        let next = counter.checked_add(1).ok_or(Problem::Kemlock(word::MANIFEST_INVALID))?;
+        let manifest = Manifest::new(run.owner, next, entries.into_values().collect()).map_err(|_| Problem::Kemlock(word::MANIFEST_INVALID))?;
         let bytes = manifest.to_bytes();
         let signature = manifest.sign(&run.account.sig_private).map_err(|_| Problem::Kemlock(word::MANIFEST_INVALID))?;
         match session.call(|api| api.put_manifest(&run.owner_text, &bytes, &signature))? {
             Ok(()) => {
-                *counter += 1;
+                *counter = next;
                 *sha = Some(hex32(&sha256(&bytes)));
                 return Ok(());
             }
-            Err(held) => {
-                // Another device signed first: its counter is the one to go above, once its manifest checks out
+            Err(_) => {
+                // Another device signed first: its counter is the one to go above, once its manifest checks out. The counter the refusal
+                // names is the server's word, which nothing signed: only the verified manifest's counts (`spec-protocol.md` 6.4)
                 let checked = fetch_manifest(session, run, *counter, None)?;
-                *counter = checked.counter.max(held.unwrap_or(0));
+                *counter = checked.counter.max(*counter);
                 theirs = checked.listed;
             }
         }
@@ -1172,10 +1188,15 @@ fn steps(session: &mut Session<'_>, run: &mut Run<'_>, connection: &Connection, 
     let mut siblings = 0;
     // Read, from the stored cursor; from nothing when a person asked for it or the server says so, once
     let from = if accept || (full && run.cache.is_empty()) { None } else { run.state_cursor.clone() };
+    let (cache_before, touched_before) = (run.cache.clone(), run.touched.clone());
     let ok = read_pages(session, run, from.clone(), &mut fresh, &mut cursor, &mut siblings)?;
     if !ok {
         let mut again = None;
         fresh.clear();
+        // What the pages before the 410 put in the cache goes with them: kept, the same items read again from nothing would be at the
+        // revision the cache holds, pass as seen, and be neither held nor decided, and the manifest signed later would list them
+        run.cache = cache_before;
+        run.touched = touched_before;
         let ok = read_pages(session, run, None, &mut fresh, &mut again, &mut siblings)?;
         if !ok {
             return Err(Problem::Kemlock(word::BAD_ANSWER));

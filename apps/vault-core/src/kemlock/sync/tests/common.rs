@@ -102,7 +102,9 @@ pub fn connection_of(connected: &Connected, address: &Server, email: &str) -> Co
         ca: None,
         pin: None,
         choices: BTreeMap::new(),
-        kinds: BTreeMap::new(),
+        // Keys, certificates and files go only once chosen (Connection::kind_choice): the person here has turned them on, as the
+        // window's Export question does. every_kind_but_keys_certificates_and_files_is_on_by_default holds the default itself
+        kinds: crate::sync::kinds::OFF_BY_DEFAULT.iter().map(|kind| (kind.to_string(), "on".to_string())).collect(),
         no_files: None,
         files_read: false,
         pending: Vec::new(),

@@ -21,9 +21,10 @@ choose. A connection stays on the API it has: one made through Bitwarden's API m
 `ame vault sync connect ADDRESS bitwarden` uses the Bitwarden API of a Kemlock Server instead.
 
 - **What syncs.** Every kind, plain, as Kemlock's own items (a login, a code, backup codes, an SSH key, a key, a certificate, a note),
-  so the Kemlock app and web vault open what the vault wrote, and the vault opens what they wrote. **Every kind starts On**, keys,
-  certificates and protected files included (on Vaultwarden and Bitwarden those start Off); turn any off the same way. A file goes as
-  the item's own file, up to 16 MiB; a larger one stays here, with the reason on its page.
+  so the Kemlock app and web vault open what the vault wrote, and the vault opens what they wrote. **Every kind starts On but keys,
+  certificates and protected files**, which start Off as on Vaultwarden and Bitwarden: connecting an account is no yes to sending a
+  private key. Turn them On, and it asks first; turn any kind off the same way. A file goes as the item's own file, up to 16 MiB; a
+  larger one stays here, with the reason on its page.
 - **Signing in.** The master password makes a key with Argon2id and proves itself with OPAQUE, so the server never sees it. A key made
   with less work than Kemlock's default (64 MiB, three passes) is shown to you and asked about; far less is refused. A second step is
   an authenticator code, an email code (sent when asked for) or a recovery code, which turns the account's second steps off, so it says
@@ -53,7 +54,8 @@ takes the item's own away.
 | Certificate | A secure note: the chain in its text, the private key in a hidden field, its kind and expiry as plain fields | Off |
 | Protected file | A secure note named after it, the file as its attachment (a folder as a `.tar` of what it holds) | Off |
 
-That is Vaultwarden and Bitwarden. On a Kemlock Server (above) every kind is On from the start and goes as Kemlock's own item.
+That is Vaultwarden and Bitwarden. On a Kemlock Server (above) every kind but keys, certificates and files is On from the start,
+and each goes as Kemlock's own item.
 
 - **Never sent**, whatever is chosen: non-exportable keys, the root, your CA's key, the recovery key and a hidden vault. This
   computer's identity certificate is not covered by the Certificates switch; only its own choice sends it.
@@ -70,9 +72,11 @@ That is Vaultwarden and Bitwarden. On a Kemlock Server (above) every kind is On 
   and said, never deleted. An SSH key made in another app comes in as a key only while **Keys** is on; a certificate or file made
   elsewhere does not, since nothing says it is one.
 - **There is no sealed choice any more.** Earlier versions could send an item as a note only this vault opens. A kind or item set
-  that way now counts as **On**, and at its next sync the note on the server is replaced by the item's plain form: the plain copy is
-  written first, and only then the old note goes to the server's trash, never deleted. If the plain copy cannot be written, the note stays
-  and the vault tries again. `ame vault sync kind keys sealed` says so.
+  that way **waits for you**: nothing of it is sent, and its note on the server is left as it is, since what you said yes to was a
+  copy only this vault opens. `ame vault sync status` lists what waits. Turn it **On** (it asks first) and at the next sync the note is
+  replaced by the item's plain form: the plain copy is written first, and only then the old note goes to the server's trash, never
+  deleted; if the plain copy cannot be written, the note stays and the vault tries again. Turn it **Off** and the note goes to the
+  trash while the item stays here. `ame vault sync kind keys sealed` says so.
 
 ### Files
 

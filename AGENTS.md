@@ -460,7 +460,14 @@ agent cleaned and marked as data. Off costs nothing: no daemon, timer or service
   the duress feature, a security command that loosens protection or sends something away (only reads and
   turning protection on pass), deleting from a backup or a snapshot, erasing disks, the AUR, sudoers, polkit,
   PAM, the agent's own lock and root mode, the update boot guard and the lost-computer line, the Notes data, the Vault, and shells or wrappers that would run commands out
-  of sight. The tools that change things refuse while the agent runs with its own checks off (a flag from
+  of sight. It judges `ame`'s old names (`00-entry.just`'s aliases, read from the image) as the recipes they run, a path in
+  any spelling (relative from `/`, `//`, `/./`, `..`, after an `=`), and options of just it does not know as refused. The root
+  helper also runs only programs under `/usr`, by the name they resolve to, judges each path word by where its links lead,
+  and refuses programs that run a command in a container or on another machine. A list of words cannot see a link the
+  account swaps after the check, nor what a file the agent wrote does: for root, the person's yes is the lock, and the list
+  a rail. Root through an approval already given (`session`, `minutes`) is refused when the agent hands the tool server a pipe
+  for its requests (Codex does), which any program of the account can open through `/proc/PID/fd/0` and write to; a socket
+  cannot be opened so (`act::root_refusal`). `each` and `terminal` show the person every command and stay open to it. The tools that change things refuse while the agent runs with its own checks off (a flag from
   `agent-cli-flags` on the agent above the server, or a setting the security reader reports: besides a mode that never
   asks, an allow rule on one of the tools that change things in Claude Code's, Codex's, Opencode's, Copilot CLI's,
   Cursor CLI's or Antigravity CLI's own settings, which the reader says as Defense Evasion). They, and the root helper,
@@ -488,6 +495,64 @@ agent cleaned and marked as data. Off costs nothing: no daemon, timer or service
 - **Control's AI agent page** shows the root mode and the lock, each an `ame agent` command in a terminal:
   the maintainer's exception of 2026-10-18 to Security keeping every security setting, since they govern
   the agent, not a security feature.
+
+**Several accounts of one agent, and an agent held to its project** (`plans/done/PLAN-agent-accounts.md`, `plans/done/PLAN-agent-sandbox.md`;
+`ame agent profile`, `ame agent sandbox`, `ame agent hook`; manual `agent-profiles.md`, `agent-sandbox.md`). Where each agent keeps
+its folders, login, settings, program and a project's settings is one table, `/usr/share/amethystora/agent-paths` (its header says
+each kind of line: `ro`, `copy`, `layer` (a place of its folder it must write that a later plain session runs or reads, such as
+Claude Code's memory and shell snapshots), `keep` (the real place again inside a layer: this project's transcripts), `empty` (an
+empty folder of the launch's own: `.claude/ide`, `.claude/sessions`), `{project}` in a path for Claude Code's name of the project's
+folder, `hidden` with `*` within a name), which the launcher, `apps/agent-tools` (`agents.rs`, `sandbox.rs`, `agentcli.rs`,
+`gitguard.rs`), the watcher's credential rules and `20-tests.sh` read; the logins and keys are one list,
+`/usr/share/amethystora/credential-files`, which the watcher watches and a sandbox hides with the table's `hidden` lines. A new
+secret file gets a `hidden` line, a `credential-files` pattern and a place in the Vault's `USUAL` lists (`apps/vault-service/src/protect.rs`,
+`apps/vault/src/page/protect.rs`). A new agent, or a new place an agent writes, gets its lines there, checked on the installed agent first.
+- **A profile belongs to a launch, never to a file**: worked out when the launch starts (`--profile`, the terminal's pin, the folder's
+  in `~/.config/amethystora/agent-profiles.json`, else `default`, the home's) and kept in its environment (`CLAUDE_CONFIG_DIR`,
+  `CODEX_HOME`, seen on Claude Code 2.1.311 and Codex 0.169.0) or its own mount namespace (bubblewrap, the profile's folders over
+  the home's: Opencode, Cursor CLI, Antigravity CLI, where nothing setuid runs). Copilot CLI has none. Keep it so: a feature that
+  wants "the active profile" takes it from a process. **Profiles fail closed** (maintainer, 2026-11-26): on any profile but `default`
+  the agent's own key variables (its `env` lines: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+  `OPENAI_API_KEY`, `CODEX_API_KEY`) are taken from the launch and a line at its start names them (`agents::withheld_words`), since a
+  key wins over the profile's login; a key is used on `default` only, and there is no key of a profile's own. A folder, or the pill's
+  `ask`, mapped to a profile no longer there, and a map that cannot be read, start nothing, never `default`. The hook (`hook.sh`,
+  `amethystora-agent-hook.fish`) sends every agent typed in it through `agent-run`, which works the profile and the sandbox out
+  again at each start, so a rule given to the folder holds for the next command and `SANDBOX=always` covers typed commands too; it
+  refreshes at every prompt (zsh `precmd`), and what `profile env` cannot work out is said once and shows `agent ?`. A terminal from
+  `ame agent profile terminal` starts without the agents' key variables. The launcher starts an agent where it was opened in a terminal (a diagnosis,
+  a triage and a selection's question still from the home). **A protected login in several terminals** is `ame vault run --shared`
+  (`run_shared` in `apps/vault-service/src/tools.rs`, the launcher's only; plain `run` is untouched and still serves one command): the process the
+  person started asks and fetches, its child the keeper holds the lock, the place and a door (a socket of the runtime folder that hands a
+  later command of the same account the keeper's user, mount and process namespaces), the namespace's first process stays until no
+  session holds `ID.sessions`, a later command is asked for as every use is before it enters, and what all of them left is read and
+  sealed once. The keeper outlives its terminal: where sealing would ask there, it says so in a notification and waits. Suite 74 holds it.
+- **The sandbox is one recipe**, `sandbox::recipe`, printed by `ame agent sandbox show` and run by `agent-run` exactly so: bubblewrap
+  from the whole machine read-only, the project (a worktree's repository too) and the agent's folder writable, the
+  credentials, the other agents' and profiles' folders and `/var/home/.snapshots` hidden, the repository's hooks and settings, the
+  agents' settings in the project and their own read-only, a private copy of each file the table's `copy` lines name, `/run`
+  and `/tmp` its own, a PID namespace, and the seccomp filter `gen.c --agent` writes (`agent-sandbox.bpf`). It fails closed.
+  **The build caches are never writable**: each is read-only under a throwaway layer on disk in the launch's folder (`--overlay-src C --overlay UPPER WORK C`, removed with it; never `--tmp-overlay`, which would put a build's downloads in memory),
+  since a package or build script changed there runs at the next plain build with no diff; a launch that cannot make the layer is
+  refused, never given the cache (maintainer, 2026-11-26). In the agent's folder, every script its settings run (status line, hooks,
+  MCP servers, key helpers) and every file its instructions import (`@file`) is read-only with the `ro` lines; `layer` places are
+  throwaway layers, `keep` places real, `empty` places empty; a link on a path that must be read-only refuses the launch
+  (maintainer: keep refusing). In `.git`, `commondir`, `gitdir`, `config.worktree` and `info/attributes` are read-only too, and each
+  worktree's and submodule's repository is bound in place; what a mount cannot stop (a new `.git` in a subfolder, a new `commondir`,
+  a repository in `.git/modules`) is `gitguard.rs`'s: it marks git's settings, hooks and pointers before the launch (12 folders deep,
+  bounded, never running git or following a link) and names every new or changed one when it ends, and removes nothing (maintainer:
+  warn on all, never delete). The environment loses every variable whose name says secret (`sandbox.rs`'s rules, with
+  `MYSQL_PWD`, `DATABASE_URL`, `BW_SESSION`, `OP_SESSION_*`...) and every value with a password in an address (`secret_value`:
+  `scheme://user:pass@`), but a `*_PROXY`'s and the agent's own key.
+  Amethystora's tools start inside read-only (`AMETHYSTORA_READ_ONLY=1`); a sandbox's runner writes its session's file. The
+  network is the machine's (the default, kept at the maintainer's word on 2026-11-26) unless the folder holds it to a list (`ame agent sandbox network FOLDER list`): then the sandbox has a
+  network namespace with loopback alone, and the one way out is the plugins' proxy (`apps/net-proxy`, the crate both use) on a socket
+  the runner holds, behind `amethystora-agent-tools net-shim` inside: HTTPS by name to `/usr/share/amethystora/agent-network-hosts`
+  (each agent's maker, the registries, the code hosts) and the folder's `network=HOST`, nothing else, no count of bytes. Known and said
+  in the manual: unix sockets in the home stay reachable, and `localhost` and X11's abstract socket while the network is the machine's. `SANDBOX=always` in `agent.conf` is the
+  administrator's; the watcher says an agent run in a project outside a sandbox then, and records quietly one run with its checks
+  off inside one. `build_files/shared/test-agent-sandbox.sh`, `test-agent-gitguard.sh` (the recipe's git mounts, and gitguard's
+  warnings where the build has namespaces), `test-agent-profiles-hook.sh` (the dropped keys, a gone profile, the hook through
+  `agent-run`) and `tests/vm/suites/77-agent-sandbox.sh` hold all of it.
 
 **The knowledge and the index.** `system_files/shared/usr/share/amethystora/agents/knowledge` is written for
 agents: `architecture.md`, `by-design.md` (each default the image hardens, its symptom, how to confirm it and
@@ -1180,7 +1245,7 @@ approval**: those two halves are the whole design, and every rule below serves o
   the vault is open, and only through `amethystora-vault-net` (own user, the network, **no key, no state, no home**; a socket only the Vault's user opens). The
   connection and its links are items of the first vault (`SERVICE_ONLY`); the address is in `amethystora-sends` and never in `setup.json`, the manifest or an image's
   `policy/`. **Each kind is one switch** (`kinds` in the connection item, `ame vault sync kind KIND off|on`, the Sync page; `sync-kind`, approved once, `Export` to send and `Use` to stop, the two
-  sentences in `outside.rs` with their `# N_` lines): Off or On (a Login, or for a kind Bitwarden has no type for a plain secure note or SSH key item that Bitwarden's apps open). There is no sealed choice (removed 2026-11-25): a stored `sealed` reads as `on`, `sealed` as a new value is refused (`sealed-gone`), and an old sealed note on a server is replaced at the next sync by the item's plain cipher, written first, the note then moved to the server's trash (`Link.sealed`, `migrate` in `sync/merge.rs`; the code that reads such a note stays, the code that wrote it is gone). An item's own
+  sentences in `outside.rs` with their `# N_` lines): Off or On (a Login, or for a kind Bitwarden has no type for a plain secure note or SSH key item that Bitwarden's apps open). There is no sealed choice (removed 2026-11-25): a stored `sealed` waits for the person (`Connection::waiting`): it reads as `off` for what is new, its old sealed note is left as it is (`sealed_waiting` in the report, `waiting` in `sync-status`), and nothing goes plain until the person turns it on (the Export question) or off; `sealed` as a new value is refused (`sealed-gone`), and once turned on the old sealed note on a server is replaced at the next sync by the item's plain cipher, written first, the note then moved to the server's trash (`Link.sealed`, `migrate` in `sync/merge.rs`; the code that reads such a note stays, the code that wrote it is gone). An item's own
   choice wins and choosing its kind's takes it away; a kind covers items set to Ask every time and those added later, but a kind never said for leaves an Ask item off; a non-exportable key never goes. What needs
   libcrypto (an OpenSSH key written, a key or certificate read back) is `sync/convert.rs` and runs in `amethystora-vault-work` (`sync-ssh`, `sync-key`, `sync-certs`), never in this service. **Files** are
   attachments of the item's own note (`sync/attach.rs`, spec-attachments.md): made once, never changed (a changed file is a new cipher and the old one goes to the server's trash), built from the connected address and
@@ -1191,7 +1256,8 @@ approval**: those two halves are the whole design, and every rule below serves o
   Server, and a connection stays on the API it has: a Kemlock one never falls back to Bitwarden's login, and a Bitwarden one moves only when `kemlock` is chosen, after the CLI or the Sync page says that the copies stop being updated). The client is its author's own work, written from the server's documented byte formats and held to its CC0 test vectors, Apache-2.0, **nothing ported**
   (NOTICE says so): the formats and sign-in (OPAQUE, DPoP) and the engine (items under If-Match, the signed manifest, files, the move) are
   `apps/vault-core/src/kemlock` and `.../kemlock/sync`, the service's half `apps/vault-service/src/sync_kemlock.rs`, the network calls `apps/vault-net`. **Every kind is on by
-  default there** (Bitwarden's defaults stay), each as Kemlock's own item that its app and web vault open, files up to 16 MiB; connecting an account that holds the vault's Bitwarden
+  default there but keys, certificates and files** (`kinds::OFF_BY_DEFAULT`, off until chosen, as on Bitwarden: the connect
+  approval names the account, not a private key; Bitwarden's defaults stay), each as Kemlock's own item that its app and web vault open, files up to 16 MiB; connecting an account that holds the vault's Bitwarden
   copies, **chosen** as above, **moves** the items (same ids; the copies are left as they are, never updated and never deleted; kinds that were off stay off; turning a kind off deletes from the server only what the vault made, `made` on the link), and an account made through Bitwarden's API is enrolled once with
   the Bitwarden hash. Spaces, Sends, emergency access and live nudges are not done. `never.rs` needs nothing new (all `ame vault` is refused already); the Sync page and `amethystora-sends` read `backend`.
 - **There is no browser extension of its own** (the maintainer's choice of 2026-11-03): Bitwarden's works with the same Vaultwarden or Bitwarden account sync uses (not with a Kemlock Server's own items), so the Vault gives instructions instead, on the window's **In your browser** page, in `vault.md` and in the agents' knowledge. No native host, no recipe for one, no manifest and no ID of ours in the browser policy; Bitwarden's own IDs stay in its allowlist. `user-setup.hooks.d/29-retire-vault-browser.sh` takes away the manifest an earlier image wrote, only where it is exactly ours. Keep the page a fact and no more: it shows no Bitwarden logo and never claims to be Bitwarden.
@@ -1297,7 +1363,9 @@ report's `backup-runs` check reads `status`. Never work out a point, a path or a
   (`ame security ransomware exclude`, `/usr/libexec/amethystora-snapshot-exclude`,
   `/etc/amethystora/snapshot-excludes`, changed only from Security's **Ransomware protection** page, in a terminal
   with a password): a btrfs snapshot cannot skip a path, so a folder left out becomes a subvolume of its own
-  (a reflink copy swapped in under the same name, refused while one of the account's programs holds it), which
+  (a reflink copy swapped in under the same name, refused while one of the account's programs holds it; root moves
+  the folder by name into `/var/home/.amethystora-snapshot-exclude`, its own, and copies it there, so that a link the
+  account swaps in meanwhile cannot lead root's copy, chown or move out of the home), which
   every later snapshot shows empty. The watcher counts nothing under a listed folder and reads the hour in which
   the list changed as files moved, not deleted. Both are on the agent's never list but `list`.
   `test-snapshot-exclude.sh` holds both helpers to stand-ins, suite 70 the subvolume on a real disk.
@@ -1983,7 +2051,7 @@ crate (no GTK; only the host's `service.rs` links GLib) with two programs: `amet
   so that other accounts read nothing of its plugins or history; an update that raises a host's byte limit is "asks for more". The
   host reads grants.json again for every run and
   every proxy connection, so a revoke or block applies at once.
-- **The network is a proxy** (`proxy.rs`): the sandbox has only loopback, so a plugin with a `network=` permission gets a socket
+- **The network is a proxy** (`proxy.rs`, in `apps/net-proxy`, the crate an AI agent's sandbox uses too): the sandbox has only loopback, so a plugin with a `network=` permission gets a socket
   bound at `/proxy/proxy.sock` and `amethystora-plugin-host shim` (started inside the sandbox) forwards `HTTPS_PROXY`'s connections to
   it. It takes `CONNECT host:443` for granted, unblocked hosts, resolves the name itself and refuses if any address is private,
   loopback, link-local or reserved (`forbidden_ip`, IPv4-in-IPv6 judged by the IPv4 it carries), counts bytes sent per allowed entry, so a wildcard's hosts share one allowance (default

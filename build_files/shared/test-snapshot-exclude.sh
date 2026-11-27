@@ -68,6 +68,7 @@ snap add "${H}/alice/Games" >/dev/null || fail "leaving Games out"
 [[ -e "${H}/alice/Games/.amethystora-test-subvolume" ]] || fail "Games is not a subvolume"
 [[ "$(cat "${H}/alice/Games/Library/save.dat")" == save && "$(cat "${H}/alice/Games/readme")" == readme ]] || fail "Games lost its files"
 [[ -z "$(find "${H}/alice" -maxdepth 1 -name '.Games.amethystora-*')" ]] || fail "the swap left something behind"
+[[ ! -e "${H}/.amethystora-snapshot-exclude" ]] || fail "the swap left its folder behind"
 grep -qxF "${H}/alice/Games" "${T}/etc/snapshot-excludes" || fail "the list lacks Games"
 [[ "$(stat -c %a "${T}/etc/snapshot-excludes")" == 644 ]] || fail "the list is not readable by the accounts"
 snap list --json | jq -e --arg p "${H}/alice/Games" '.excluded == [{path: $p, rel: "alice/Games", left_out: true}]' >/dev/null ||
@@ -110,6 +111,33 @@ echo "${H}/alice/Docs" >>"${T}/etc/snapshot-excludes"
 snap list --json | jq -e '.excluded == [{path: "'"${H}"'/alice/Docs", rel: "alice/Docs", left_out: false}]' >/dev/null || fail "a listed plain folder"
 snap remove "${H}/alice/Docs" >/dev/null || fail "taking a plain folder off the list"
 [[ -d "${H}/alice/Docs" ]] || fail "the plain folder went"
+
+# The account swaps the folder around the one being left out for a link while root copies it, as any of its programs
+# can: root copies, chowns and moves nothing where the link leads (a stand-in for /etc), and the folder still ends a
+# subvolume with its files, where the account moved it
+mkdir -p "${H}/alice/Stuff/VMs" "${T}/outside/VMs"
+echo "disk" >"${H}/alice/Stuff/VMs/disk.img"
+: >"${T}/outside/VMs/keep"
+outside_before="$(stat -c %i "${T}/outside/VMs")"
+real_cp="$(command -v cp)"
+cat >"${T}/bin/cp" <<EOF
+#!/usr/bin/bash
+if [[ -f "${T}/swap" ]]; then
+    rm -f "${T}/swap"
+    mv -T "${H}/alice/Stuff" "${H}/alice/Stuff.real" && ln -s "${T}/outside" "${H}/alice/Stuff"
+fi
+exec "${real_cp}" "\$@"
+EOF
+chmod 0755 "${T}/bin/cp"
+: >"${T}/swap"
+snap add "${H}/alice/Stuff/VMs" >/dev/null 2>&1 || true
+[[ ! -e "${T}/swap" ]] || fail "the copy was never made, so the swap was not tried"
+[[ "$(ls -A "${T}/outside")" == VMs && "$(ls -A "${T}/outside/VMs")" == keep && "$(stat -c %i "${T}/outside/VMs")" == "${outside_before}" ]] ||
+    fail "root changed what the link led to: $(ls -lAR "${T}/outside")"
+[[ -e "${H}/alice/Stuff.real/VMs/.amethystora-test-subvolume" && "$(cat "${H}/alice/Stuff.real/VMs/disk.img")" == disk ]] ||
+    fail "the folder did not end a subvolume with its files: $(ls -lAR "${H}/alice/Stuff.real")"
+[[ ! -e "${H}/.amethystora-snapshot-exclude" ]] || fail "the swap left its folder behind"
+rm -f "${T}/bin/cp"
 
 # --- The backup -----------------------------------------------------------------------------------------------------------------
 

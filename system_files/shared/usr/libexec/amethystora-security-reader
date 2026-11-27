@@ -168,6 +168,9 @@ dev_hooks() {
 # off. ChainDrop (August 2026) planted exactly these. Only the user-level files: a repository's own are read
 # before opening it with an agent, as the manual says. Python reads them, isolated (-I), so that nothing of
 # the account's own Python, its .pth files included, runs inside it; and it parses, never runs, what it reads.
+#
+# Each profile of the agents (plans/done/PLAN-agent-accounts.md) is read as the home is: its folder has the home's layout, and a
+# finding names it by its path. A profile is never a place this does not look.
 agent_config() {
     # exec: Python is the one process holding the output, and it makes itself non-dumpable first (nothing else of
     # the account can then reach its output or memory) and keeps its own twenty seconds
@@ -187,13 +190,15 @@ try:
 except ImportError:
     tomllib = None
 
-HOME = os.environ["HOME"]
+# The folder read: the home, then each agent profile's (which has the home's layout); paths are said from the real home
+REAL_HOME = os.environ["HOME"]
+HOME = REAL_HOME
 # The file read last, which a section that fails names
 LAST = HOME
 
 
 def tilde(path):
-    return "~" + path[len(HOME):] if path.startswith(HOME + "/") else path
+    return "~" + path[len(REAL_HOME):] if path.startswith(REAL_HOME + "/") else path
 
 
 def read(path, limit=1 << 20):
@@ -363,16 +368,17 @@ def claude_code():
         data = load(path)
         if isinstance(data, dict) and isinstance(data.get("permissions"), dict):
             pre_allowed(path, data["permissions"].get("allow"), r"mcp__amethystora(?:__([^()]*))?")
-    path = f"{HOME}/.claude.json"
-    # Claude Code rewrites the rest of this file all the time: only its servers and project permissions count
-    data = load(path, limit=16 << 20)
-    if isinstance(data, dict):
-        servers(path, data.get("mcpServers"))
-        for project, settings in (data.get("projects") if isinstance(data.get("projects"), dict) else {}).items():
-            if isinstance(settings, dict):
-                servers(path, settings.get("mcpServers"))
-                trusted(path, f"lets Claude Code use tools without asking in {project}", settings.get("allowedTools"))
-                pre_allowed(path, settings.get("allowedTools"), r"mcp__amethystora(?:__([^()]*))?")
+    # ...where a profile's Claude Code keeps it inside its folder (CLAUDE_CONFIG_DIR moves it there)
+    for path in (f"{HOME}/.claude.json", f"{HOME}/.claude/.claude.json"):
+        # Claude Code rewrites the rest of this file all the time: only its servers and project permissions count
+        data = load(path, limit=16 << 20)
+        if isinstance(data, dict):
+            servers(path, data.get("mcpServers"))
+            for project, settings in (data.get("projects") if isinstance(data.get("projects"), dict) else {}).items():
+                if isinstance(settings, dict):
+                    servers(path, settings.get("mcpServers"))
+                    trusted(path, f"lets Claude Code use tools without asking in {project}", settings.get("allowedTools"))
+                    pre_allowed(path, settings.get("allowedTools"), r"mcp__amethystora(?:__([^()]*))?")
 
 
 def codex():
@@ -528,11 +534,13 @@ def copilot_cli():
         trusted(f"{HOME}/.copilot/config.json", "trusts", data.get("trustedFolders") or data.get("trusted_folders"))
 
 
-for section in (claude_code, codex, gemini_cli, antigravity_cli, opencode, cursor_cli, copilot_cli):
-    try:
-        section()
-    except Exception as error:  # a file of a shape the code did not expect, or nested too deeply: said, and the rest read
-        emit(LAST, "could not be read to the end", type(error).__name__, tactic="Defense Evasion")
+PROFILES = sorted(p.rstrip("/") for p in glob.glob(f"{REAL_HOME}/.local/share/amethystora/agent-profiles/*/") if not os.path.islink(p.rstrip("/")))
+for HOME in [REAL_HOME] + PROFILES:
+    for section in (claude_code, codex, gemini_cli, antigravity_cli, opencode, cursor_cli, copilot_cli):
+        try:
+            section()
+        except Exception as error:  # a file of a shape the code did not expect, or nested too deeply: said, and the rest read
+            emit(LAST, "could not be read to the end", type(error).__name__, tactic="Defense Evasion")
 PY
 }
 

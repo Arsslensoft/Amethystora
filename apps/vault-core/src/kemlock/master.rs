@@ -77,8 +77,10 @@ impl KdfParams {
 
 /// The password in its NFC form, as the bytes that are hashed
 pub fn nfc(password: &str) -> Zeroizing<Vec<u8>> {
+    // Moved, not copied: a password that was not in NFC is normalized into a String of its own, which would otherwise be
+    // dropped unwiped
     let normal = icu_normalizer::ComposingNormalizerBorrowed::new_nfc().normalize(password);
-    Zeroizing::new(normal.as_bytes().to_vec())
+    Zeroizing::new(normal.into_owned().into_bytes())
 }
 
 /// The master key from the typed password, the account's salt and the settings the server returned (checked first)

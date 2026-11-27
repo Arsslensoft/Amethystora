@@ -375,19 +375,31 @@ jobs:
           retention-days: 14
           overwrite: true
 
-  # The one check to require
+  # The one check to require. It runs whatever the plan did: a skipped job is a pass to a required check, so a plan that
+  # failed must fail here instead
   isos:
     name: ISOs
     needs: [plan, image, installer, live]
-    if: always() && needs.plan.outputs.run == 'true'
+    if: always()
     runs-on: ubuntu-24.04
     permissions: {}
     steps:
       - name: Both ISOs installed
         env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          RUN: ${{ needs.plan.outputs.run }}
           RESULTS: ${{ needs.image.result }} ${{ needs.installer.result }} ${{ needs.live.result }}
           REUSED: ${{ needs.plan.outputs.image_run }}
         run: |
+          if [[ "${PLAN_RESULT}" != success ]]; then
+            echo "::error::The plan ended with ${PLAN_RESULT}, so no ISO was tried"
+            exit 1
+          fi
+          # A plan that chose to run nothing (Markdown alone) passes
+          if [[ "${RUN}" != true ]]; then
+            echo "Nothing to try for this change."
+            exit 0
+          fi
           echo "Image, installer ISO, live ISO: ${RESULTS}"
           [[ -z "${REUSED}" ]] || RESULTS="${RESULTS/skipped/success}"
           [[ "${RESULTS}" == "success success success" ]]

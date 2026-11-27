@@ -132,3 +132,6 @@ lock when my usb key is pulled	manual/pull-the-key#*|knowledge/by-design#pulling
 power off the computer when a usb device is unplugged	manual/pull-the-key#*|knowledge/by-design#pulling-a-device-locks-or-powers-off-the-computer-only-with-pull-the-key-on
 st-link permission denied	knowledge/by-design#a-debug-probe-a-serial-adapter-or-a-logic-analyser-is-roots-until-lab-devices-are-on|manual/devices#lab-devices|manual/devices#lab-devices~2|playbook/device-does-nothing#*
 cannot open /dev/ttyUSB0 permission denied serial adapter	knowledge/by-design#a-debug-probe-a-serial-adapter-or-a-logic-analyser-is-roots-until-lab-devices-are-on|manual/devices#lab-devices|playbook/device-does-nothing#*
+use two accounts of claude code at the same time	manual/agent-profiles*|knowledge/agent#several-accounts-of-one-agent
+keep the agent inside my project and away from my ssh keys	manual/agent-sandbox*|knowledge/agent#an-agent-held-to-its-project
+the agent says read-only file system	manual/agent-sandbox#when-the-agent-says-read-only-file-system|manual/agent-sandbox#what-it-can-write|knowledge/agent#an-agent-held-to-its-project

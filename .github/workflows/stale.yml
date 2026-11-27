@@ -27,7 +27,9 @@ jobs:
           days-before-pr-stale: -1
           days-before-pr-close: -1
           stale-issue-label: stale
-          exempt-issue-labels: security,pinned,confirmed,help wanted,good first issue
+          # needs-triage: every form sets it, and the maintainer takes it off once the issue has been read, so nothing waiting
+          # on the maintainer is closed for the maintainer's silence
+          exempt-issue-labels: security,pinned,confirmed,help wanted,good first issue,needs-triage
           exempt-all-issue-milestones: true
           exempt-all-issue-assignees: true
           remove-stale-when-updated: true

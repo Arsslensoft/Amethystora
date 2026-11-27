@@ -547,11 +547,9 @@ pub fn tick(service: &mut Service, now: Instant) {
 
 pub(crate) fn load_connection(store: &mut Store) -> Option<Connection> {
     let value = store.get(KIND_CONNECTION, CONNECTION_ID).ok()?;
-    let mut connection: Connection = serde_json::from_value(value).ok()?;
-    // Sealed sync is gone: what an earlier version stored as `sealed` is `on`, and the next save says so
-    for choice in connection.kinds.values_mut().chain(connection.choices.values_mut()).filter(|choice| *choice == "sealed") {
-        *choice = "on".to_string();
-    }
+    // Sealed sync is gone. What an earlier version stored as `sealed` stays so: the item waits for the person (Connection::waiting), who
+    // said yes to a copy only this vault opens, not to a plain one, until they turn it on (the Export question) or off
+    let connection: Connection = serde_json::from_value(value).ok()?;
     Some(connection)
 }
 
@@ -1428,6 +1426,11 @@ fn status_next(service: &mut Service, peer: &Rc<Peer>, _body: &Value) -> Next {
             "choices": choices,
             "kinds": kinds::ALL.iter().map(|(word, kind)| (word.to_string(), connection.kind_choice(kind).to_string())).collect::<std::collections::BTreeMap<_, _>>(),
             "kinds_said": kinds::ALL.iter().filter(|(_, kind)| connection.kinds.contains_key(*kind)).map(|(word, _)| *word).collect::<Vec<_>>(),
+            // What an earlier version synced sealed and waits for the person: the kinds, and the items chosen one by one
+            "waiting": {
+                "kinds": kinds::ALL.iter().filter(|(_, kind)| connection.kinds.get(*kind).map(String::as_str) == Some("sealed")).map(|(word, _)| *word).collect::<Vec<_>>(),
+                "items": connection.choices.values().filter(|choice| *choice == "sealed").count(),
+            },
             "no_files": connection.no_files,
             "files_read": connection.files_read,
             "private_ca": connection.ca.is_some(),

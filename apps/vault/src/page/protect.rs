@@ -14,7 +14,7 @@ use super::{Page, Vault};
 use crate::rpc::Trouble;
 use crate::widgets::{self, btn};
 
-/// The usual places, from the watcher's own list (`CREDENTIAL_FILES` in `amethystora-audit-home-rules`): whatever is a file of its
+/// The usual places, from the watcher's own list (`/usr/share/amethystora/credential-files`, which `amethystora-audit-home-rules` reads): whatever is a file of its
 /// own and holds a login, not the browsers' profiles, which a browser has to keep open itself
 const USUAL: &[&str] = &[
     ".npmrc",
@@ -24,6 +24,34 @@ const USUAL: &[&str] = &[
     ".aws/credentials",
     ".docker/config.json",
     ".kube/config",
+    ".config/git/credentials",
+    ".yarnrc.yml",
+    ".cargo/credentials.toml",
+    ".cargo/credentials",
+    ".gem/credentials",
+    ".config/composer/auth.json",
+    ".composer/auth.json",
+    ".config/pypoetry/auth.toml",
+    ".m2/settings-security.xml",
+    ".pgpass",
+    ".my.cnf",
+    ".mylogin.cnf",
+    ".config/glab-cli/config.yml",
+    ".config/hub",
+    ".vault-token",
+    ".azure/msal_token_cache.json",
+    ".azure/service_principal_entries.json",
+    ".config/doctl/config.yaml",
+    ".config/hcloud/cli.toml",
+    ".fly/config.yml",
+    ".s3cfg",
+    ".boto",
+    ".terraform.d/credentials.tfrc.json",
+    ".terraformrc",
+    ".config/helm/registry/config.json",
+    ".config/ngrok/ngrok.yml",
+    ".config/stripe/config.toml",
+    ".config/sops/age/keys.txt",
     ".claude/.credentials.json",
     ".codex/auth.json",
     ".codex/.credentials.json",
@@ -265,5 +293,36 @@ mod tests {
         let found = found_files(&home);
         std::fs::remove_dir_all(&home).unwrap();
         assert_eq!(found, vec![home.join(".npmrc"), home.join(".ssh/id_ed25519")]);
+    }
+
+    #[test]
+    fn the_usual_places_are_the_watchers_less_the_browsers_and_the_keys() {
+        let Ok(root) = std::env::var("AMETHYSTORA_ROOT") else {
+            eprintln!("AMETHYSTORA_ROOT is not set: the watcher's list was not compared");
+            return;
+        };
+        // The watcher's list, less the browsers' cookies and passwords, and less ~/.ssh/id_*, which found_files reads itself
+        let list = std::fs::read_to_string(Path::new(&root).join("usr/share/amethystora/credential-files")).unwrap();
+        let theirs: Vec<&str> = list
+            .lines()
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty() && !entry.starts_with('#'))
+            .filter(|entry| !entry.contains(".mozilla") && !entry.starts_with(".var/app") && !entry.ends_with("Cookies"))
+            .filter(|entry| *entry != ".ssh/id_*")
+            .collect();
+        assert_eq!(theirs, USUAL, "the same places, in the same order");
+    }
+
+    #[test]
+    fn finds_a_database_password_and_a_file_in_a_tools_folder() {
+        let home = std::env::temp_dir().join(format!("amethystora-vault-protect-more-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/sops/age")).unwrap();
+        std::fs::create_dir_all(home.join(".azure")).unwrap();
+        for name in [".pgpass", ".config/sops/age/keys.txt", ".azure/azureProfile.json"] {
+            std::fs::write(home.join(name), "x").unwrap();
+        }
+        let found = found_files(&home);
+        std::fs::remove_dir_all(&home).unwrap();
+        assert_eq!(found, vec![home.join(".pgpass"), home.join(".config/sops/age/keys.txt")]);
     }
 }

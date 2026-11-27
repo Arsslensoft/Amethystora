@@ -49,6 +49,8 @@ D = {
     "extended": "06 00 ff 0b 06 00 01 00 a1 01 15 00 25 01 75 01 95 08 81 02 c0",
     # usage page 0xFF00, a vendor usage, and a 4-byte usage on the keyboard page inside it
     "extended-page": "06 00 ff 09 61 a1 01 0b 04 00 07 00 15 00 25 01 75 01 95 08 81 02 c0",
+    # a vendor collection whose keys are on a 4-byte Usage Page, 0x00010007, which the kernel takes as the keyboard page
+    "wide-page": "06 00 ff 09 01 a1 01 07 07 00 01 00 19 e0 29 e7 15 00 25 01 75 01 95 08 81 02 c0",
 }
 data = {name: bytes.fromhex(value) for name, value in D.items()}
 
@@ -69,6 +71,7 @@ expected = {
     "pad-keys": (False, True),
     "extended": (False, True),
     "extended-page": (False, True),
+    "wide-page": (False, True),
 }
 for name, want in expected.items():
     got = answer(name)

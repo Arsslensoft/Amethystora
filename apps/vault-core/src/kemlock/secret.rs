@@ -21,7 +21,7 @@ impl<const N: usize> Secret<N> {
     /// Exactly `N` bytes, or none
     pub fn from_slice(bytes: &[u8]) -> Option<Self> {
         let bytes: &[u8; N] = bytes.try_into().ok()?;
-        Some(Self::new(*bytes))
+        Some(Self::build(|out| out.copy_from_slice(bytes)))
     }
 
     /// Made in place, so that no copy of it is left on the stack

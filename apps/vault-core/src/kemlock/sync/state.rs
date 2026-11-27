@@ -101,7 +101,8 @@ impl KemlockState {
         if news.cursor.is_some() {
             self.cursor = news.cursor;
         }
-        if let Some(counter) = news.manifest_counter {
+        // The highest counter seen never goes back: it is what a server rolling the manifest back is held to
+        if let Some(counter) = news.manifest_counter.filter(|counter| *counter >= self.manifest_counter) {
             self.manifest_counter = counter;
             self.manifest_sha256 = news.manifest_sha256;
         }

@@ -1360,7 +1360,7 @@ fn keep_entry(from: &OwnedFd, to: &OwnedFd, name: &str, shown: String, keeping: 
     }
 }
 
-/// Where the usual credentials are, from the watcher's own list (`CREDENTIAL_FILES` in `amethystora-audit-home-rules`, and a test holds
+/// Where the usual credentials are, from the watcher's own list (`/usr/share/amethystora/credential-files`, which `amethystora-audit-home-rules` reads, and a test holds
 /// the two together). What a browser keeps is left out: a browser that is running holds those open, and no command is started for it.
 pub const USUAL: &[&str] = &[
     ".ssh/id_*",
@@ -1371,6 +1371,34 @@ pub const USUAL: &[&str] = &[
     ".aws/credentials",
     ".docker/config.json",
     ".kube/config",
+    ".config/git/credentials",
+    ".yarnrc.yml",
+    ".cargo/credentials.toml",
+    ".cargo/credentials",
+    ".gem/credentials",
+    ".config/composer/auth.json",
+    ".composer/auth.json",
+    ".config/pypoetry/auth.toml",
+    ".m2/settings-security.xml",
+    ".pgpass",
+    ".my.cnf",
+    ".mylogin.cnf",
+    ".config/glab-cli/config.yml",
+    ".config/hub",
+    ".vault-token",
+    ".azure/msal_token_cache.json",
+    ".azure/service_principal_entries.json",
+    ".config/doctl/config.yaml",
+    ".config/hcloud/cli.toml",
+    ".fly/config.yml",
+    ".s3cfg",
+    ".boto",
+    ".terraform.d/credentials.tfrc.json",
+    ".terraformrc",
+    ".config/helm/registry/config.json",
+    ".config/ngrok/ngrok.yml",
+    ".config/stripe/config.toml",
+    ".config/sops/age/keys.txt",
     ".claude/.credentials.json",
     ".codex/auth.json",
     ".codex/.credentials.json",
@@ -1582,10 +1610,14 @@ mod tests {
             eprintln!("AMETHYSTORA_ROOT is not set: the watcher's list was not compared");
             return;
         };
-        let script = std::fs::read_to_string(Path::new(&root).join("usr/libexec/amethystora-audit-home-rules")).unwrap();
-        let start = script.find("CREDENTIAL_FILES=(").unwrap() + "CREDENTIAL_FILES=(".len();
-        let list = &script[start..start + script[start..].find(')').unwrap()];
-        let theirs: Vec<&str> = list.split_whitespace().filter(|entry| !entry.contains(".mozilla") && !entry.starts_with(".var/app") && !entry.contains("google-chrome")).collect();
+        // The watcher's list, one with an agent's sandbox's (plans/done/PLAN-agent-sandbox.md), less the browsers' cookies and passwords
+        let list = std::fs::read_to_string(Path::new(&root).join("usr/share/amethystora/credential-files")).unwrap();
+        let theirs: Vec<&str> = list
+            .lines()
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty() && !entry.starts_with('#'))
+            .filter(|entry| !entry.contains(".mozilla") && !entry.starts_with(".var/app") && !entry.ends_with("Cookies"))
+            .collect();
         assert_eq!(theirs.len(), USUAL.len(), "{theirs:?}");
         for entry in theirs {
             assert!(USUAL.contains(&entry), "{entry} is in the watcher's list and not here");
@@ -1603,5 +1635,23 @@ mod tests {
         symlink("/etc/passwd", home.0.join(".npmrc")).unwrap();
         let found = usual_places(&home.0);
         assert_eq!(found, [(".aws/credentials".to_string(), 3), (".ssh/id_ed25519".to_string(), 1)]);
+    }
+
+    #[test]
+    fn the_usual_places_take_the_databases_the_registries_and_a_file_in_a_tools_folder() {
+        let home = Home::new();
+        home.put(".pgpass", "db:5432:*:u:p");
+        home.put(".cargo/credentials.toml", "ab");
+        home.put(".config/sops/age/keys.txt", "abc");
+        // What sits beside a secret in its tool's folder is not one
+        home.put(".azure/azureProfile.json", "abcd");
+        home.put(".config/glab-cli/aliases.yml", "abcd");
+        // A folder in the place of a file is no file
+        std::fs::create_dir_all(home.0.join(".config/hub")).unwrap();
+        let found = usual_places(&home.0);
+        assert_eq!(
+            found,
+            [(".cargo/credentials.toml".to_string(), 2), (".config/sops/age/keys.txt".to_string(), 3), (".pgpass".to_string(), 13)]
+        );
     }
 }

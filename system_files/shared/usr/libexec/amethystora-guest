@@ -97,12 +97,13 @@ place() {
 
 enable() {
     need_root
+    # Made locked (useradd's way), or unlocked again from what disable left: no expiry, its shell back
     if ! getent passwd "${USER_NAME}" >/dev/null; then
         useradd --comment Guest --home-dir "${HOME_DIR}" --no-create-home --shell /bin/bash --user-group \
             "${USER_NAME}" || return 1
+    else
+        usermod --expiredate '' --shell /bin/bash "${USER_NAME}" || return 1
     fi
-    # No password: the authselect feature below lets that through at the login screen alone
-    passwd -d "${USER_NAME}" >/dev/null || return 1
     # The folder the memory is mounted on, root's and closed: nothing the guest writes can land under it
     mkdir -p "${HOME_DIR}"
     chown root:root "${HOME_DIR}"
@@ -112,6 +113,9 @@ enable() {
         place "${rel}" || return 1
     done < <(files)
     grep -qx "${FEATURE}" "${CONF}" 2>/dev/null || authselect enable-feature "${FEATURE}" >/dev/null || return 1
+    # No password, only now that the feature refuses it everywhere but the login screen: before, `su amethystora-guest`
+    # from any account would take the empty password, and its process would outlive every guest session
+    passwd -d "${USER_NAME}" >/dev/null || return 1
     systemctl daemon-reload
     # logind and sshd read their settings again; a running sshd only if it runs
     systemctl reload systemd-logind 2>/dev/null || kill -HUP "$(systemctl show -p MainPID --value systemd-logind)" 2>/dev/null
@@ -123,8 +127,10 @@ disable() {
     need_root
     local uid rel
     uid="$(uid_of)"
-    # A guest still logged in is logged out: what it did goes with it
+    # A guest still logged in is logged out: what it did goes with it. The account is locked and expired first, so that if
+    # userdel fails below (a process still holds it) what is left takes no empty password once the feature is gone
     if [[ -n "${uid}" ]]; then
+        usermod --lock --expiredate 1 --shell /usr/sbin/nologin "${USER_NAME}" >/dev/null || return 1
         loginctl terminate-user "${USER_NAME}" 2>/dev/null
         systemctl stop "user@${uid}.service" "${MOUNT_UNIT}" 2>/dev/null
     fi
@@ -176,12 +182,15 @@ prepare() {
     mountpoint -q "${HOME_DIR}" || { echo "${HOME_DIR} is not mounted: the guest does not log in." >&2; return 1; }
     # The guest never lingers (polkit refuses it too): a lingering manager would keep this home and never run cleanup
     rm -f "${ROOT}/var/lib/systemd/linger/${USER_NAME}"
-    install -d -o "${uid}" -g "${gid}" -m 0700 "${HOME_DIR}/.config" "${HOME_DIR}/.local" "${HOME_DIR}/.local/state" \
-        "${HOME_DIR}/.local/state/amethystora"
-    install -o "${uid}" -g "${gid}" -m 0600 /dev/null "${HOME_DIR}/.config/gnome-initial-setup-done"
-    echo yes >"${HOME_DIR}/.config/gnome-initial-setup-done"
-    install -o "${uid}" -g "${gid}" -m 0600 /dev/null "${HOME_DIR}/.local/state/amethystora/first-look.json"
-    echo '{"guest": true}' >"${HOME_DIR}/.local/state/amethystora/first-look.json"
+    # Made by the guest itself, in a home emptied first (a tmpfs a crashed manager left mounted keeps the last visitor's
+    # files): root writing there would follow any link a process of the guest's had put in it
+    setpriv --reuid="${uid}" --regid="${gid}" --clear-groups --reset-env -- /usr/bin/bash -c '
+        umask 077
+        find "$1" -mindepth 1 -delete &&
+            mkdir -p -- "$1/.config" "$1/.local/state/amethystora" &&
+            echo yes >"$1/.config/gnome-initial-setup-done" &&
+            echo "{\"guest\": true}" >"$1/.local/state/amethystora/first-look.json"' bash "${HOME_DIR}" ||
+        { echo "amethystora-guest: could not set up the guest's home." >&2; return 1; }
     # The Bluetooth devices paired before the guest comes in, which its logout leaves alone
     if paired="$(bluetooth_paired)"; then
         install -d -m 0700 "${BLUETOOTH_BEFORE%/*}"
@@ -209,10 +218,14 @@ cleanup() {
     uid="$(uid_of)"
     [[ "${uid}" =~ ^[0-9]+$ ]] || return 0
     rm -f "${ROOT}/var/lib/systemd/linger/${USER_NAME}"
-    # A FUSE mount of the guest's in a shared temporary folder outlives the program that served it and hides what is under it
-    mapfile -t mounts < <(findmnt -lJ -o TARGET,FSTYPE,FS-OPTIONS | jq -r --arg option "user_id=${uid}" '.filesystems[] |
+    # Any process of the guest's still running, whatever started it: its user manager has stopped, or has not started yet,
+    # and one in another account's session would outlive every logout and see the next visitor's home
+    pkill -KILL -U "${uid}" 2>/dev/null
+    # A FUSE mount of the guest's in a shared temporary folder outlives the program that served it and hides what is under it.
+    # One name to a NUL, as the kernel has it: a name with a newline in it would otherwise read as two, the second any path
+    mapfile -d '' -t mounts < <(findmnt -lJ -o TARGET,FSTYPE,FS-OPTIONS | jq -j --arg option "user_id=${uid}" '.filesystems[] |
         select((.fstype | startswith("fuse")) and (.["fs-options"] | split(",") | index($option)) and
-            (.target | test("^(/tmp|/var/tmp|/dev/shm)/"))) | .target')
+            (.target | test("^(/tmp|/var/tmp|/dev/shm)/"))) | .target + "\u0000"')
     for target in "${mounts[@]}"; do
         umount -l -- "${target}" || echo "amethystora-guest: could not unmount ${target}" >&2
     done

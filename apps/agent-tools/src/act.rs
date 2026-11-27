@@ -366,12 +366,36 @@ fn argv_of(args: &Value) -> Result<Vec<String>, String> {
         .collect()
 }
 
-pub fn run_command(jobs: &Jobs, root: &std::sync::Arc<Root>, policy: &Policy, args: &Value) -> Result<String, String> {
+/// Why a root command is refused for how the request came: down a pipe (`over_pipe`), any program of this account may have written
+/// it, since opening /proc/<server>/fd/0 gives it the pipe the agent writes to. A root helper already approved (session, minutes)
+/// would run it with no password and no prompt of the agent's; a socket cannot be opened that way. A password for each command, or
+/// a terminal, shows the person every one
+pub fn root_refusal(as_root: bool, over_pipe: bool, mode: RootMode) -> Option<String> {
+    (as_root && over_pipe && matches!(mode, RootMode::Session | RootMode::Minutes)).then(|| {
+        format!(
+            "Refused: this agent talks to Amethystora's tools over a pipe, which any program of this account can write requests into, so root \
+             commands do not go through the {} root mode's open approval. Name the command for the user to run, or the user can choose \
+             `ame agent root each` (a password every time) or `ame agent root terminal`.",
+            mode.word()
+        )
+    })
+}
+
+/// Whether file descriptor `fd` is a socket: what an agent that hands the tool server one gives it, which no other program can open
+pub fn fd_is_socket(fd: i32) -> bool {
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    unsafe { libc::fstat(fd, &mut stat) == 0 && (stat.st_mode & libc::S_IFMT) == libc::S_IFSOCK }
+}
+
+pub fn run_command(jobs: &Jobs, root: &std::sync::Arc<Root>, policy: &Policy, args: &Value, over_pipe: bool) -> Result<String, String> {
     let argv = argv_of(args)?;
     let reason = string(args, "reason").ok_or("run needs a reason: one sentence the user reads before saying yes")?.to_string();
     let as_root = args.get("root").and_then(Value::as_bool).unwrap_or(false);
     if let Some(why) = never::refusal(&argv) {
         return Err(format!("Refused: {why}. Name the command for the user to run instead."));
+    }
+    if let Some(why) = root_refusal(as_root, over_pipe, policy.conf.root) {
+        return Err(why);
     }
     let command = argv.clone();
     let id = history::new_id();
@@ -524,5 +548,27 @@ mod tests {
         assert!(argv_of(&json!({"argv": "rm -rf /"})).is_err());
         assert!(argv_of(&json!({"argv": ["a", 1]})).is_err());
         assert_eq!(argv_of(&json!({"argv": ["rpm-ostree", "status"]})).unwrap(), ["rpm-ostree", "status"]);
+    }
+
+    #[test]
+    fn root_through_an_open_approval_only_over_a_socket() {
+        // Down a pipe, which another program of the account can open and write to: no root through an approval already given
+        for mode in [RootMode::Session, RootMode::Minutes] {
+            assert!(root_refusal(true, true, mode).is_some_and(|why| why.contains(mode.word())), "{mode:?}");
+            assert_eq!(root_refusal(true, false, mode), None, "{mode:?} over a socket");
+        }
+        // A password for each command, or a terminal, shows the person every one; and a command as the account is no root
+        assert_eq!(root_refusal(true, true, RootMode::Each), None);
+        assert_eq!(root_refusal(true, true, RootMode::Terminal), None);
+        assert_eq!(root_refusal(false, true, RootMode::Session), None);
+        // What the server is handed is told apart: a socketpair is a socket, a pipe is not
+        let mut pair = [0; 2];
+        assert_eq!(unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, pair.as_mut_ptr()) }, 0);
+        let mut pipe = [0; 2];
+        assert_eq!(unsafe { libc::pipe(pipe.as_mut_ptr()) }, 0);
+        assert!(fd_is_socket(pair[0]) && !fd_is_socket(pipe[0]) && !fd_is_socket(-1));
+        for fd in pair.into_iter().chain(pipe) {
+            unsafe { libc::close(fd) };
+        }
     }
 }
