@@ -75,10 +75,7 @@ else
     echo "::warning::dracut has no tpm2-tss module, TPM disk unlock will not work"
 fi
 export DRACUT_NO_XATTR=1
-COMPRESS=()
-# A libzstd newer than the zstd command stops dracut's own compression (19-initramfs.sh): xz then
-zstd -V >/dev/null 2>&1 || COMPRESS=(--xz)
-dracut --no-hostonly --kver "${KERNEL}" --reproducible -v "${COMPRESS[@]}" --add "${DRACUT_MODULES[*]}" \
+dracut --no-hostonly --kver "${KERNEL}" --reproducible -v --add "${DRACUT_MODULES[*]}" \
     --install "/etc/passwd /etc/group" -f "/usr/lib/modules/${KERNEL}/initramfs.img"
 
 # The packages changed, so the list of where their source is is written again (20-tests.sh checks it

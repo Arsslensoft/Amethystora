@@ -34,6 +34,10 @@ dnf5 -y install \
 # TODO: Figure out why akmods cache is pulling in akmods/kernel-devel
 dnf5 -y install \
     /tmp/kernel-rpms/kernel-devel-*.rpm
+# kernel-devel brings libzstd-devel, which takes libzstd to the version in updates while the base image's zstd
+# command stays behind: then it stops with "incorrect library version", in dracut (19-initramfs.sh) and in
+# amethystora-translate. Both come from one source package, so the command is upgraded to its library's version.
+dnf5 -y upgrade zstd
 
 dnf5 versionlock add kernel kernel-devel kernel-devel-matched kernel-core kernel-modules kernel-modules-core kernel-modules-extra
 

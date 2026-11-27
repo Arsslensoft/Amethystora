@@ -1464,6 +1464,8 @@ jq -e --arg v "$(. /etc/os-release; echo "${VERSION_ID}")" '.engine.images[$v] |
     echo "::warning::translate/models.json has no engine image for this Fedora release: the translator cannot be built here"
 command -v podman >/dev/null
 test -s /usr/bin/zstd
+# The command runs against the libzstd the image ships (03-install-kernel-akmods.sh upgrades both together)
+zstd -V >/dev/null || { echo "the zstd command does not run against its library"; exit 1; }
 grep -q "bergamot-translator" /usr/share/licenses/amethystora/NOTICE
 grep -q 'translate-to' /usr/libexec/amethystora-setup && { echo "the translator's key is in the setup file"; exit 1; }
 bash /ctx/build_files/shared/test-translate.sh
