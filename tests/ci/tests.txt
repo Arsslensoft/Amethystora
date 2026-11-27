@@ -33,6 +33,9 @@ unit	$NODE $CTX/build_files/shared/test-your-year.mjs
 unit	$NODE $CTX/build_files/shared/check-guides.mjs "$UI" /usr/share/amethystora/manual /usr/lib /usr/share/applications
 integration	HELPER=/usr/libexec/amethystora-charge-limit bash $CTX/build_files/shared/test-charge-limit.sh
 integration	bash $CTX/build_files/shared/test-agent-ask-here.sh
+integration	bash $CTX/build_files/shared/test-agent-gitguard.sh
+integration	bash $CTX/build_files/shared/test-agent-profiles-hook.sh
+integration	bash $CTX/build_files/shared/test-agent-sandbox.sh
 integration	bash $CTX/build_files/shared/test-agent-text.sh
 integration	bash $CTX/build_files/shared/test-app-integrity.sh
 integration	bash $CTX/build_files/shared/test-audit-home-rules.sh

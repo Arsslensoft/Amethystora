@@ -8,6 +8,13 @@
 # git's says nothing. Where it does not, tests/vm/suites/77-agent-sandbox.sh runs that.
 set -euo pipefail
 
+# Needs the tool program's newer subcommands (profile, sandbox, agent-run): in the Unit and Integration workflows, which run the last
+# published image with only this change's system_files over it, this waits for the image that has them (tests/ci/in-image.sh)
+if ! /usr/libexec/amethystora-agent-tools 2>&1 | grep -q agent-run; then
+    echo "::warning::test-agent-gitguard.sh waits for an image whose amethystora-agent-tools has agent-run"
+    exit 0
+fi
+
 TOOLS=/usr/libexec/amethystora-agent-tools
 fail() { echo "test-agent-gitguard: $*" >&2; exit 1; }
 

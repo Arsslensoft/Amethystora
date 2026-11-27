@@ -4,6 +4,13 @@
 # what it says (`sandbox show --json`, the same function `agent-run` runs), and tests/vm/suites/77-agent-sandbox.sh runs it.
 set -euo pipefail
 
+# Needs the tool program's newer subcommands (profile, sandbox, agent-run): in the Unit and Integration workflows, which run the last
+# published image with only this change's system_files over it, this waits for the image that has them (tests/ci/in-image.sh)
+if ! /usr/libexec/amethystora-agent-tools 2>&1 | grep -q agent-run; then
+    echo "::warning::test-agent-sandbox.sh waits for an image whose amethystora-agent-tools has agent-run"
+    exit 0
+fi
+
 TOOLS=/usr/libexec/amethystora-agent-tools
 TABLE=/usr/share/amethystora/agent-paths
 CREDENTIALS=/usr/share/amethystora/credential-files
