@@ -21,6 +21,9 @@ When the driver cannot load, a notification says so as the dock arrives, once fo
 - **Secure Boot off:** enrolling cannot help, since kernel lockdown refuses the driver, so it offers
   `ame security lockdown off`. Turning Secure Boot on and enrolling is the choice that keeps lockdown.
 
+On a machine with two graphics cards, plug the dock in before you log in, or log out and in once it is plugged in:
+its screens need the session to copy each picture for them, which such a machine does only when it starts with a dock.
+
 ## Thunderbolt docks and devices
 
 They read and write memory by themselves unless the IOMMU keeps each to what it was given. The

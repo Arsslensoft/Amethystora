@@ -5445,6 +5445,28 @@ fi
 grep -qx "StartLimitBurst=10" <<<"$(systemctl cat displaylink.service)"
 grep -qE '^CapabilityBoundingSet=~(.* )?CAP_SYS_MODULE( |$)' "${DL_SANDBOX}"
 grep -q "^d /var/log/displaylink " /usr/lib/tmpfiles.d/displaylink.conf
+# evdi refuses the 10-bit frames Mutter hands a dock as they are, and its screens stay dark: the session is told to
+# copy them, always with one graphics card, with several only when a dock is there, and before systemd's own
+# generator so that an account's environment.d still decides. A Mutter without the switch fails here
+DL_COPY=/usr/lib/systemd/user-environment-generators/20-amethystora-displaylink
+DL_ROOT="$(mktemp -d)"
+dl_device() { mkdir -p "${DL_ROOT}/sys/bus/$1/devices/$2" && echo "$4" >"${DL_ROOT}/sys/bus/$1/devices/$2/$3"; }
+dl_copy() { AMETHYSTORA_DISPLAYLINK_ROOT="${DL_ROOT}" "${DL_COPY}"; }
+test -x "${DL_COPY}"
+test -x /usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator
+grep -q MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE /usr/lib64/libmutter-[0-9]*.so.0
+grep -q primary-gpu-cpu /usr/lib64/libmutter-[0-9]*.so.0
+dl_device pci 0000:00:02.0 class 0x030000
+dl_device pci 0000:00:1f.0 class 0x060100
+dl_device usb 1-1 idVendor 046d
+[[ "$(dl_copy)" == MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu ]] ||
+    { echo "${DL_COPY}: one graphics card, and a dock plugged in later would stay dark"; exit 1; }
+dl_device pci 0000:01:00.0 class 0x030200
+[[ -z "$(dl_copy)" ]] || { echo "${DL_COPY}: two graphics cards and no dock, and the second one pays for the copy"; exit 1; }
+dl_device usb 2-1.2 idVendor 17e9
+[[ "$(dl_copy)" == MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu ]] ||
+    { echo "${DL_COPY}: two graphics cards and a dock, whose screens would stay dark"; exit 1; }
+rm -rf "${DL_ROOT}"
 # DisplayLinkManager is proprietary. Its licence lets it be redistributed unmodified, and only with
 # the licence itself beside it
 test -s /usr/share/licenses/displaylink/LICENSE

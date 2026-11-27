@@ -1,0 +1,28 @@
+#!/usr/bin/bash
+# A DisplayLink dock's screens stay dark on a machine whose graphics card draws the desktop in 10 bits (AMD and Intel
+# do): Mutter hands the card's picture to the dock's driver as it is, evdi takes the framebuffer and then refuses every
+# frame made of it ("invalid pixel format AR30" with drm.debug, "drmModeAtomicCommit: Invalid argument" in the shell's
+# journal), and Mutter falls back to copying only when the hand-over itself fails. Found on a ThinkPad Hybrid USB-C
+# dock, Mutter 51.1 and evdi 1.15.1 (2026-11-27). Telling Mutter to copy is the way around it until one of them is fixed.
+#
+# Mutter reads the variable once, for every graphics device but the first, so it also costs a second graphics card
+# its own copy. Hence: always on a machine with one graphics card, where it changes nothing else, so a dock plugged
+# in later lights up; with several, only when a dock (USB vendor 17e9) is there as the session starts. It sorts
+# before systemd's own generator, so an account's environment.d has the last word.
+# AMETHYSTORA_DISPLAYLINK_ROOT is a stand-in /sys, for 20-tests.sh.
+
+set -euo pipefail
+shopt -s nullglob
+
+ROOT="${AMETHYSTORA_DISPLAYLINK_ROOT:-}"
+dock=0
+cards=0
+for file in "${ROOT}"/sys/bus/usb/devices/*/idVendor; do
+    if [[ "$(<"${file}")" == 17e9 ]]; then dock=1; fi
+done
+for file in "${ROOT}"/sys/bus/pci/devices/*/class; do
+    if [[ "$(<"${file}")" == 0x03* ]]; then cards=$((cards + 1)); fi
+done
+if ((dock || cards < 2)); then
+    echo MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu
+fi

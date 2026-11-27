@@ -338,7 +338,18 @@ with Universal Blue's key, which `ame security secure-boot` enrolls; `20-tests.s
   2026-11-17 over a switch): any USB device can claim vendor `17e9`, and the closed manager parses it as root. The
   sandbox was drawn from what the package and the program name and tried without a dock: keep `/tmp` shared (the
   suspend hook's FIFOs), the host's network namespace (libusb's netlink), `/sys` writable (evdi) and real-time
-  scheduling, which `20-tests.sh` holds. Its `modprobe` condition runs outside it (`+`). Not tried with a real dock.
+  scheduling, which `20-tests.sh` holds. Its `modprobe` condition runs outside it (`+`). Tried with one real dock, a
+  ThinkPad Hybrid USB-C with USB-A Dock (2026-11-27): its screens light with the sandbox on.
+- **A dock's screens need the session to copy their frames**
+  (`usr/lib/systemd/user-environment-generators/20-amethystora-displaylink`): where the graphics card draws in 10 bits
+  (AMD, Intel), Mutter hands its picture to evdi as it is, evdi takes the framebuffer and refuses every frame (`invalid
+  pixel format AR30` with `drm.debug`, `drmModeAtomicCommit: Invalid argument` in the shell's journal), and Mutter
+  falls back to copying only when the hand-over itself fails (Mutter 51.1, evdi 1.15.1). The generator sets
+  `MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu`, which Mutter applies to every graphics device but the
+  first: always with one graphics card (PCI class `0x03`), with several only when a dock is there as the session
+  starts, so that a second card keeps its own copy otherwise (`displays.md` says to log in with the dock plugged
+  in). It sorts before systemd's generator, so an account's `environment.d` decides. `20-tests.sh` holds the three
+  cases and fails on a Mutter without the switch. Take it out once Mutter or evdi is fixed.
 - **FireWire** is a switch of its own (`ame security firewire`), its modules in
   `usr/lib/modprobe.d/61-amethystora-firewire.conf`, apart from the blocked modules.
 - **Lockdown** stays as the gaps plan left it (the maintainer's choice of 2026-10-07, over this plan's of
