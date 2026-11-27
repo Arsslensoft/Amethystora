@@ -5446,32 +5446,18 @@ grep -qx "StartLimitBurst=10" <<<"$(systemctl cat displaylink.service)"
 grep -qE '^CapabilityBoundingSet=~(.* )?CAP_SYS_MODULE( |$)' "${DL_SANDBOX}"
 grep -q "^d /var/log/displaylink " /usr/lib/tmpfiles.d/displaylink.conf
 # Mutter 51.0 and 51.1 hand a dock 10-bit frames that evdi refuses, and its screens stay dark (Mutter's issue 5100,
-# fixed on its main branch by 9bc8cd84): the session is told to copy them, always with one graphics card, with
-# several only when a dock is there, and before systemd's own generator so that an account's environment.d still
-# decides. A Mutter without the switch fails here, and so does one new enough to carry the fix
+# fixed on its main branch by 9bc8cd84): every session is told to copy them, from a file that sorts early so that
+# /etc and an account's own environment.d still decide. A Mutter without the switch fails here, and so does one new
+# enough to carry the fix
 if [[ "$(printf '%s\n' 51.2 "$(rpm -q --qf '%{VERSION}' mutter)" | sort -V | head -n 1)" == 51.2 ]]; then
-    echo "Mutter $(rpm -q --qf '%{VERSION}' mutter): check that it has 9bc8cd84, then take out 20-amethystora-displaylink (AGENTS.md, Drivers)"
+    echo "Mutter $(rpm -q --qf '%{VERSION}' mutter): check that it has 9bc8cd84, then take out 10-amethystora-displaylink.conf (AGENTS.md, Drivers)"
     exit 1
 fi
-DL_COPY=/usr/lib/systemd/user-environment-generators/20-amethystora-displaylink
-DL_ROOT="$(mktemp -d)"
-dl_device() { mkdir -p "${DL_ROOT}/sys/bus/$1/devices/$2" && echo "$4" >"${DL_ROOT}/sys/bus/$1/devices/$2/$3"; }
-dl_copy() { AMETHYSTORA_DISPLAYLINK_ROOT="${DL_ROOT}" "${DL_COPY}"; }
-test -x "${DL_COPY}"
-test -x /usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator
 grep -q MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE /usr/lib64/libmutter-[0-9]*.so.0
 grep -q primary-gpu-cpu /usr/lib64/libmutter-[0-9]*.so.0
-dl_device pci 0000:00:02.0 class 0x030000
-dl_device pci 0000:00:1f.0 class 0x060100
-dl_device usb 1-1 idVendor 046d
-[[ "$(dl_copy)" == MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu ]] ||
-    { echo "${DL_COPY}: one graphics card, and a dock plugged in later would stay dark"; exit 1; }
-dl_device pci 0000:01:00.0 class 0x030200
-[[ -z "$(dl_copy)" ]] || { echo "${DL_COPY}: two graphics cards and no dock, and the second one pays for the copy"; exit 1; }
-dl_device usb 2-1.2 idVendor 17e9
-[[ "$(dl_copy)" == MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu ]] ||
-    { echo "${DL_COPY}: two graphics cards and a dock, whose screens would stay dark"; exit 1; }
-rm -rf "${DL_ROOT}"
+[[ "$(XDG_CONFIG_HOME=/nonexistent /usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator |
+    grep '^MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=')" == MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu ]] ||
+    { echo "a session is not told to copy a dock's frames (/usr/lib/environment.d/10-amethystora-displaylink.conf)"; exit 1; }
 # DisplayLinkManager is proprietary. Its licence lets it be redistributed unmodified, and only with
 # the licence itself beside it
 test -s /usr/share/licenses/displaylink/LICENSE
