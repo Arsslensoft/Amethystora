@@ -339,6 +339,17 @@ impl Rig {
         self.talk().ask(self.connection_request())
     }
 
+    /// Keys, certificates and files turned on, as a person does with the Export question: on Kemlock they start off, as on Bitwarden.
+    /// After the first run, then a run that sends them
+    fn choose_kept_off(&self) {
+        self.synced();
+        for word in ["keys", "certificates", "files"] {
+            assert_eq!(self.ask(json!({"op": "sync-kind", "kind": word, "choice": "on"}))["ok"], json!(true), "{word}");
+        }
+        self.synced();
+        self.sync_now();
+    }
+
     fn talk(&self) -> Talk {
         let stream = UnixStream::connect(&self.socket).unwrap();
         stream.set_read_timeout(Some(Duration::from_secs(180))).unwrap();
@@ -493,9 +504,15 @@ fn the_service_picks_kemlock_on_its_own_and_every_kind_goes_by_default() {
 
     let status = rig.synced();
     assert_eq!((status["backend"].clone(), status["email"].clone()), (json!("kemlock"), json!(EMAIL)));
-    for word in ["passwords", "codes", "backup-codes", "keys", "certificates", "files"] {
+    for word in ["passwords", "codes", "backup-codes"] {
         assert_eq!(status["kinds"][word], json!("on"), "{word}: {status}");
     }
+    // Connecting says yes to the account, not to sending a private key: keys, certificates and files wait to be chosen
+    for word in ["keys", "certificates", "files"] {
+        assert_eq!(status["kinds"][word], json!("off"), "{word}: {status}");
+    }
+    rig.choose_kept_off();
+    let status = rig.synced();
     assert_eq!(status["problem"], Value::Null, "{status}");
     // The login, the authenticator account, the backup codes, the key and the file: five items, no more
     assert_eq!(status["linked"], json!(5), "{status}");
@@ -611,7 +628,7 @@ fn a_kind_and_an_item_are_switched_with_the_kemlock_sentences_and_the_server_fol
     let (value, _) = key_value();
     rig.put("key", "k1", "A key", json!({"key_kind": "exchange", "exportable": true}), value);
     assert_eq!(rig.connect()["ok"], json!(true));
-    rig.synced();
+    rig.choose_kept_off();
     assert_eq!(rig.server_items().len(), 3);
     let asked = |rig: &Rig| rig.outside.said.lock().unwrap().asked.last().unwrap().message;
 
@@ -793,6 +810,7 @@ fn a_protected_file_goes_through_the_network_service_whole() {
     let (meta, value) = protected_file(b"small");
     rig.inject("protected", "small", "small.bin", &meta, &value);
     assert_eq!(rig.connect()["ok"], json!(true));
+    rig.choose_kept_off();
     let status = rig.synced();
     assert_eq!(status["problem"], Value::Null, "{status}");
     assert_eq!(status["last"]["report"]["refused_total"], json!(0), "{status}");
@@ -821,6 +839,7 @@ fn a_file_the_server_refuses_as_too_large_is_said_with_its_reason_and_the_rest_g
     rig.inject("protected", "ok", "ok.bin", &meta, &value);
     rig.password("p1", "Example", "person", "pw", "");
     assert_eq!(rig.connect()["ok"], json!(true));
+    rig.choose_kept_off();
     let status = until(|| {
         let status = rig.status();
         (status["last"].is_object() && status["running"] != json!(true)).then_some(status)

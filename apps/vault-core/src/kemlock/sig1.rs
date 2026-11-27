@@ -119,7 +119,10 @@ impl Sig1PrivateKey {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Sig1PrivateKey> {
         let bytes: &[u8; PRIVATE_KEY] = bytes.try_into().map_err(|_| Error::Malformed("a sig1 private key is 64 bytes"))?;
-        Ok(Sig1PrivateKey(Zeroizing::new(*bytes)))
+        // Copied into memory that wipes itself, never through a plain array on the stack
+        let mut key = Zeroizing::new([0u8; PRIVATE_KEY]);
+        key.copy_from_slice(bytes);
+        Ok(Sig1PrivateKey(key))
     }
 
     pub fn as_bytes(&self) -> &[u8; PRIVATE_KEY] {
@@ -127,7 +130,8 @@ impl Sig1PrivateKey {
     }
 
     fn ml_key(&self) -> MlSigningKey {
-        let mut xi = ml_dsa::Seed::default();
+        // The ML-DSA seed, wiped once the key is made from it, as the key it is copied from is
+        let mut xi = Zeroizing::new(ml_dsa::Seed::default());
         xi.copy_from_slice(&self.0[..32]);
         MlSigningKey::from_seed(&xi)
     }

@@ -160,6 +160,12 @@ pub enum Attack {
     FileTampered,
     /// Files are offered pre-signed, to a bucket
     Presigned,
+    /// The next read of the changes from a cursor that a page with more to come handed out is answered 410 (`full-sync-required`), once: the
+    /// cursor lost halfway through a run's read
+    GoneAfterAPage,
+    /// The next manifest written is refused as stale (409 `stale-manifest`) with this `currentCounter`, which no manifest has: the server's word
+    /// alone, once
+    StaleManifestClaims(u64),
 }
 
 struct LoginState {
@@ -437,6 +443,8 @@ pub struct FakeKemlock {
     /// What `GET /kem/v1/config` says instead, for a server that is not one
     pub config_override: Option<(u16, Value)>,
     attacks: Vec<Attack>,
+    /// The cursor the last page with more to come handed out (GoneAfterAPage)
+    more_cursor: Option<String>,
     setup: ServerSetup<Suite>,
     pub accounts: Vec<FakeAccount>,
     nonce_epoch: u64,
@@ -465,6 +473,7 @@ impl FakeKemlock {
             real_argon2: false,
             config_override: None,
             attacks: Vec::new(),
+            more_cursor: None,
             setup: ServerSetup::<Suite>::new(&mut Kernel),
             accounts: Vec::new(),
             nonce_epoch: 1,
@@ -491,6 +500,11 @@ impl FakeKemlock {
 
     pub fn attack(&mut self, attack: Attack) {
         self.attacks.push(attack);
+    }
+
+    /// The attacks not yet used: one that happens once is gone once it did
+    pub fn attacks_left(&self) -> &[Attack] {
+        &self.attacks
     }
 
     pub fn clear_attacks(&mut self) {
@@ -1356,6 +1370,9 @@ impl FakeKemlock {
     }
 
     fn sync(&mut self, at: usize, since: Option<String>, limit: Option<usize>) -> R<Reply> {
+        if since.is_some() && since == self.more_cursor && self.take_attack(|a| *a == Attack::GoneAfterAPage).is_some() {
+            return Err(Reply::problem(410, "full-sync-required", "the cursor cannot be used"));
+        }
         let reply = self.changes(at, since, limit);
         if let Some(Attack::WriteAfterSync(plain)) = self.take_attack(|a| matches!(a, Attack::WriteAfterSync(_))) {
             let email = self.accounts[at].email.clone();
@@ -1394,6 +1411,8 @@ impl FakeKemlock {
         let mut reply = Reply::json(200, json!({"items": items, "cursor": cursor, "more": more, "siblings": siblings}));
         if !more {
             reply = reply.header("etag", &format!("\"{cursor}\""));
+        } else {
+            self.more_cursor = Some(cursor);
         }
         Ok(reply)
     }
@@ -1544,6 +1563,9 @@ impl FakeKemlock {
         if self.take_attack(|a| *a == Attack::StaleManifest).is_some() {
             let current = self.sign_manifest_at(at);
             return Err(Reply::problem(409, "stale-manifest", "another device signed first").with(json!({"currentCounter": current})));
+        }
+        if let Some(Attack::StaleManifestClaims(claimed)) = self.take_attack(|a| matches!(a, Attack::StaleManifestClaims(_))) {
+            return Err(Reply::problem(409, "stale-manifest", "another device signed first").with(json!({"currentCounter": claimed})));
         }
         let account = &self.accounts[at];
         if owner != account.owner().to_string() {
