@@ -104,7 +104,7 @@ Linux's driver for MT7612U Wi-Fi sticks from loading.
 Secure Boot on: the user runs `ame security secure-boot` (root) (restart), and accepts the key on the blue
 screen. Secure Boot off: enrolling alone does nothing. The user turns Secure Boot on in the firmware and enrolls,
 or runs `ame security lockdown off` (root) (restart), which costs protection; never run either yourself.
-Driver loaded and still dark: DisplayLink's program runs in a sandbox drawn without a dock
+Driver loaded and still dark: DisplayLink's program runs in a sandbox tried with one dock only
 (`displaylink.service.d/20-amethystora-sandbox.conf`). Read `journalctl -u displaylink.service` first. The manual's
 common problems page gives the user the way to try without the sandbox, a link in `/etc` that they make and remove
 themselves. Never take the sandbox away yourself.

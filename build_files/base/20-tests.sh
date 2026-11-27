@@ -5445,6 +5445,19 @@ fi
 grep -qx "StartLimitBurst=10" <<<"$(systemctl cat displaylink.service)"
 grep -qE '^CapabilityBoundingSet=~(.* )?CAP_SYS_MODULE( |$)' "${DL_SANDBOX}"
 grep -q "^d /var/log/displaylink " /usr/lib/tmpfiles.d/displaylink.conf
+# Mutter 51.0 and 51.1 hand a dock 10-bit frames that evdi refuses, and its screens stay dark (Mutter's issue 5100,
+# fixed on its main branch by 9bc8cd84): every session is told to copy them, from a file that sorts early so that
+# /etc and an account's own environment.d still decide. A Mutter without the switch fails here, and so does one new
+# enough to carry the fix
+if [[ "$(printf '%s\n' 51.2 "$(rpm -q --qf '%{VERSION}' mutter)" | sort -V | head -n 1)" == 51.2 ]]; then
+    echo "Mutter $(rpm -q --qf '%{VERSION}' mutter): check that it has 9bc8cd84, then take out 10-amethystora-displaylink.conf (AGENTS.md, Drivers)"
+    exit 1
+fi
+grep -q MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE /usr/lib64/libmutter-[0-9]*.so.0
+grep -q primary-gpu-cpu /usr/lib64/libmutter-[0-9]*.so.0
+[[ "$(XDG_CONFIG_HOME=/nonexistent /usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator |
+    grep '^MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=')" == MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu ]] ||
+    { echo "a session is not told to copy a dock's frames (/usr/lib/environment.d/10-amethystora-displaylink.conf)"; exit 1; }
 # DisplayLinkManager is proprietary. Its licence lets it be redistributed unmodified, and only with
 # the licence itself beside it
 test -s /usr/share/licenses/displaylink/LICENSE

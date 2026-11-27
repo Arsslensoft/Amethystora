@@ -338,7 +338,19 @@ with Universal Blue's key, which `ame security secure-boot` enrolls; `20-tests.s
   2026-11-17 over a switch): any USB device can claim vendor `17e9`, and the closed manager parses it as root. The
   sandbox was drawn from what the package and the program name and tried without a dock: keep `/tmp` shared (the
   suspend hook's FIFOs), the host's network namespace (libusb's netlink), `/sys` writable (evdi) and real-time
-  scheduling, which `20-tests.sh` holds. Its `modprobe` condition runs outside it (`+`). Not tried with a real dock.
+  scheduling, which `20-tests.sh` holds. Its `modprobe` condition runs outside it (`+`). Tried with one real dock, a
+  ThinkPad Hybrid USB-C with USB-A Dock (2026-11-27): its screens light with the sandbox on.
+- **A dock's screens need the session to copy their frames, until Mutter 51.2**
+  (`usr/lib/environment.d/10-amethystora-displaylink.conf`): Mutter 51.0 and 51.1, where the graphics driver has no
+  `EGL_KHR_partial_update` (radeonsi), pick a screen's format without asking the dock's plane (`create_bos_gbm`) and
+  hand evdi 10-bit frames, which it refuses one by one (`invalid pixel format AR30` with `drm.debug`,
+  `drmModeAtomicCommit: Invalid argument` in the shell's journal): Mutter's issue 5100, fixed on its main branch by
+  `9bc8cd84` (merge request 5372), to be backported to 51. Until then every session has
+  `MUTTER_DEBUG_MULTI_GPU_FORCE_COPY_MODE=primary-gpu-cpu` (the maintainer's choice of 2026-11-27 over setting it
+  only where a dock is plugged in, which left a dock that arrives later dark): Mutter applies it to every graphics
+  device but the first, so a second graphics card's screens are copied by the processor meanwhile. The file sorts
+  early, so `/etc/environment.d` and an account's own decide. `20-tests.sh` holds that a session gets it, and fails
+  on Mutter 51.2 or newer: check that it carries the fix, then take out the file, its test and this entry (issue 30).
 - **FireWire** is a switch of its own (`ame security firewire`), its modules in
   `usr/lib/modprobe.d/61-amethystora-firewire.conf`, apart from the blocked modules.
 - **Lockdown** stays as the gaps plan left it (the maintainer's choice of 2026-10-07, over this plan's of
