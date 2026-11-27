@@ -1,7 +1,7 @@
 # The installer ISO, built by .github/workflows/build-iso.yml with bootc-image-builder.
 #
-# The image is carried on the ISO, so installing needs no network. Anaconda asks only for the disk,
-# where it offers encryption; GNOME Initial Setup creates the user on first boot, as on Silverblue.
+# The image is carried on the ISO, so installing needs no network. Anaconda asks only for the language
+# and keyboard and for the disk, where it offers encryption; GNOME Initial Setup creates the user on first boot, as on Silverblue.
 # The workflow replaces @IMAGE@ with the repository of the image the ISO carries (ghcr.io/arsslensoft/amethystora,
 # or an image of one's own, whose template runs the same steps).
 
@@ -36,8 +36,12 @@ fi
 %end
 """
 
+# The builder hands Anaconda only the modules enabled here, as its activatable_modules. Localization owns the
+# language and the keyboard: without it the web interface's language page cannot load, the language stays
+# unset, and the installation cannot go past the review.
 [customizations.installer.modules]
 enable = [
+  "org.fedoraproject.Anaconda.Modules.Localization",
   "org.fedoraproject.Anaconda.Modules.Storage",
   "org.fedoraproject.Anaconda.Modules.Runtime"
 ]
