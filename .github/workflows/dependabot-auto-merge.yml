@@ -1,0 +1,49 @@
+name: Dependabot auto-merge
+
+# Approves a Dependabot pull request that is a patch or minor update and a security update, and turns on
+# auto-merge (squash), so the merge queue takes it once the main ruleset's required checks pass. A major
+# update is never handled here. The repository variable AUTOMERGE_ALL_UPDATES, set to "true", extends this to
+# every patch and minor update, security or not.
+#
+# The approval is github-actions', which works because the repository setting "Allow GitHub Actions to create
+# and approve pull requests" is on. The ruleset on main also asks for a code owner's review (.github/CODEOWNERS),
+# which this approval is not: a pull request that touches a file the code owner owns still waits for them.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  automerge:
+    name: Auto-merge
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ github.token }}
+          alert-lookup: true
+
+      # Only when the user who started this run is Dependabot too: a person who pushes to a Dependabot branch
+      # or reruns the workflow is not.
+      - name: Approve and enable auto-merge
+        if: >-
+          github.actor == 'dependabot[bot]' &&
+          (steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+           steps.meta.outputs.update-type == 'version-update:semver-minor' ||
+           steps.meta.outputs.dependency-group != '') &&
+          (steps.meta.outputs.ghsa-id != '' || vars.AUTOMERGE_ALL_UPDATES == 'true')
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --squash "$PR_URL"
