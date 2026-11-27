@@ -7,6 +7,14 @@
 
 set -euo pipefail
 
+# The launcher drives the tool program's newer subcommands (agent-plan, profile, agent-run). The Unit and Integration workflows run the
+# last published image with only this change's system_files over it, so with a program that lacks them this waits for the image that has
+# them (tests/ci/in-image.sh); 20-tests.sh runs it against the program of the build, which has them
+if ! /usr/libexec/amethystora-agent-tools 2>&1 | grep -q agent-run; then
+    echo "::warning::test-agent-ask-here.sh waits for an image whose amethystora-agent-tools has agent-run"
+    exit 0
+fi
+
 AGENT="${1:-/usr/bin/amethystora-agent}"
 T="$(mktemp -d)"
 trap 'rm -rf "${T}"' EXIT
