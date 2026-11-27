@@ -52,6 +52,8 @@ EOF
 cat >"${R}/bin/journalctl" <<EOF
 #!/usr/bin/bash
 [[ " \$* " == *" MESSAGE_ID=8811e6df2a8e40f58a94cea26f8ebf14 "* ]] || exit 1
+# Only root's record: an account can log the same message id
+[[ " \$* " == *" _UID=0 "* ]] || exit 1
 [[ -e "${T}/journal-fails" ]] && exit 1
 [[ -e "${T}/wake-us" ]] && printf '{"__MONOTONIC_TIMESTAMP":"%s"}\n' "\$(<"${T}/wake-us")"
 exit 0

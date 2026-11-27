@@ -8,10 +8,11 @@
 #
 # A btrfs snapshot cannot skip a path, but it stops at a subvolume: a subvolume inside /var/home is an empty
 # folder in every snapshot taken after it was made. So leaving a folder out makes it a subvolume of its own,
-# and snapshotting it again makes it a plain folder. Either way its files are copied into the new one with
-# reflinks, which share the disk's blocks, so neither takes space, then the two are swapped under the same name
-# and the old one is removed. Nothing may hold the folder meanwhile, or what it writes during the copy is lost:
-# the folder is refused while one of the account's programs holds anything in it (amethystora-what-uses).
+# and snapshotting it again makes it a plain folder. Either way the folder is moved into a folder only root can
+# open, its files are copied there into the new one with reflinks, which share the disk's blocks, so neither takes
+# space, the new one is moved back under the same name and the old one is removed. Nothing may hold the folder
+# meanwhile, or what it writes during the copy is lost: the folder is refused while one of the account's programs
+# holds anything in it (amethystora-what-uses).
 #
 # The snapshots taken before keep the folder as it was, so what it held is still there for up to two weeks;
 # only what changes in it from now on is not kept. Which folders are left out is root's, in
@@ -27,6 +28,8 @@
 set -euo pipefail
 
 HOMES="${AMETHYSTORA_SNAPSHOT_HOMES:-/var/home}"
+# Where a folder is while it is copied: root's, in the homes' own subvolume, so that it is moved there and back by name
+STAGE="${HOMES}/.amethystora-snapshot-exclude"
 LIST="${AMETHYSTORA_SNAPSHOT_EXCLUDES:-/etc/amethystora/snapshot-excludes}"
 WHAT_USES="${AMETHYSTORA_WHAT_USES:-/usr/libexec/amethystora-what-uses}"
 TEST="${AMETHYSTORA_SNAPSHOT_TEST:-}"
@@ -143,43 +146,67 @@ note() {
 
 # The folder's owner, mode, times and SELinux label given to the one that takes its place
 same_as() {
-    chown --reference="$1" -- "$2"
-    chmod --reference="$1" -- "$2"
+    chown --reference="$1" -- "$2" && chmod --reference="$1" -- "$2" || return 1
     if command -v selinuxenabled >/dev/null && selinuxenabled; then
         chcon --reference="$1" -- "$2" 2>/dev/null || restorecon -- "$2" 2>/dev/null || true
     fi
 }
 
-# SOURCE's files into NEW, which is made by MAKE, then the two swapped and the old one removed by REMOVE
+# SOURCE's files into a new folder made by MAKE, which takes SOURCE's place, and the old one removed by REMOVE.
+# The account can rename and link anything in its home while this runs, so root never reaches SOURCE by its path
+# again once it was checked: a copy, chown or move made through a folder the account had swapped for a link would
+# have been made wherever the link led, as root. The parent is held as the working directory, SOURCE moved from it
+# by name into a folder of root's, checked there to be the folder that was checked, copied there, and the copy
+# moved back by name; the account's renames meanwhile can move only its own folders
 swap_in() {
-    local source="$1" make="$2" remove="$3" parent name new old
+    local source="$1" make="$2" remove="$3" parent name id work
     parent="$(dirname -- "${source}")"
     name="$(basename -- "${source}")"
-    new="${parent}/.${name}.amethystora-new"
-    old="${parent}/.${name}.amethystora-old"
-    [[ ! -e "${new}" && ! -e "${old}" ]] || fail "${new} or ${old} is in the way: a change to ${source} was cut short. Look at both, then remove them."
+    id="$(stat -c %d:%i -- "${source}")" || fail "${source} could not be read, so nothing was changed."
+    mkdir -p -m 0700 -- "${STAGE}" || fail "${STAGE} could not be made, so nothing was changed."
+    [[ -d "${STAGE}" && ! -L "${STAGE}" && "$(stat -c %u:%a -- "${STAGE}")" == "${EUID}:700" ]] ||
+        fail "${STAGE} is not root's own folder: look at what it is, then remove it."
+    work="$(mktemp -d -- "${STAGE}/XXXXXX")" || fail "${STAGE} has no room for a change, so nothing was changed."
+    # One file system and one subvolume, so that each move is a rename and never a copy through the account's folders
+    if ! cd -- "${parent}" || [[ "$(pwd -P)" != "${parent}" || "$(stat -c %d -- .)" != "$(stat -c %d -- "${work}")" ]]; then
+        rmdir -- "${work}"
+        fail "${parent} changed while it was checked, so nothing was changed."
+    fi
+    if ! mv -T -- "${name}" "${work}/old"; then
+        rmdir -- "${work}"
+        fail "${source} could not be moved aside, so nothing was changed."
+    fi
+    if [[ -L "${work}/old" || ! -d "${work}/old" || "$(stat -c %d:%i -- "${work}/old")" != "${id}" ]]; then
+        undo "${source} changed while it was checked"
+    fi
     if [[ "${make}" == subvolume ]]; then
-        btrfs subvolume create -- "${new}" >/dev/null
+        btrfs subvolume create -- "${work}/new" >/dev/null || undo "A subvolume for ${source} could not be made"
     else
-        mkdir -- "${new}"
+        mkdir -- "${work}/new" || undo "A folder for ${source} could not be made"
     fi
-    same_as "${source}" "${new}"
+    same_as "${work}/old" "${work}/new" || undo "${source}'s owner could not be given to its copy"
     # A reflink shares the blocks, so the copy takes no space; the stand-ins of the test run where the disk has none
-    if ! cp -a --reflink="${REFLINK}" -- "${source}/." "${new}/"; then
-        remove_tree "${make}" "${new}"
-        fail "The files of ${source} could not be copied with shared blocks, so nothing was changed."
-    fi
+    cp -a --reflink="${REFLINK}" -- "${work}/old/." "${work}/new/" ||
+        undo "The files of ${source} could not be copied with shared blocks"
     # The copy carries the stand-in's mark across: the new one is what the change says it is, not the old one
-    [[ -z "${TEST}" ]] || rm -f -- "${new}/${TEST_MARK}"
-    [[ -z "${TEST}" || "${make}" != subvolume ]] || : >"${new}/${TEST_MARK}"
-    touch --reference="${source}" -- "${new}"
-    mv -T -- "${source}" "${old}"
-    if ! mv -T -- "${new}" "${source}"; then
-        mv -T -- "${old}" "${source}"
-        remove_tree "${make}" "${new}"
-        fail "${source} could not be put in place, so nothing was changed."
+    [[ -z "${TEST}" ]] || rm -f -- "${work}/new/${TEST_MARK}"
+    [[ -z "${TEST}" || "${make}" != subvolume ]] || : >"${work}/new/${TEST_MARK}"
+    touch --reference="${work}/old" -- "${work}/new" || undo "${source}'s times could not be given to its copy"
+    mv -T -- "${work}/new" "${name}" || undo "${source} could not be put in place"
+    remove_tree "${remove}" "${work}/old" && rmdir -- "${work}" ||
+        echo "${work} could not be removed: ${source} is in place, and what is left there is its old copy." >&2
+    rmdir -- "${STAGE}" 2>/dev/null || true
+    cd /
+}
+
+# The folder swap_in moved aside put back where it was, and its copy removed: swap_in's own variables
+undo() {
+    [[ ! -e "${work}/new" ]] || remove_tree "${make}" "${work}/new" || true
+    if mv -T -- "${work}/old" "${name}"; then
+        rmdir -- "${work}" 2>/dev/null || true
+        fail "$1, so nothing was changed."
     fi
-    remove_tree "${remove}" "${old}"
+    fail "$1, and ${source} could not be put back: what was moved aside is in ${work}/old."
 }
 
 remove_tree() {

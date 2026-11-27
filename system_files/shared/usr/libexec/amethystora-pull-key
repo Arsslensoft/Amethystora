@@ -279,9 +279,10 @@ def now_ms():
 
 def woke_recently():
     """Whether the computer left a sleep state in the last few seconds. A journal that cannot be read says no: a removal
-    must not be ignored for want of knowing"""
+    must not be ignored for want of knowing. Only root's record counts (_UID, which the journal sets itself): any account
+    can log the message id, and logging it every few seconds would keep every pull from locking"""
     done = run([f"{BIN}/journalctl", "-b", "--no-pager", "-o", "json", "--output-fields=__MONOTONIC_TIMESTAMP",
-                f"MESSAGE_ID={LEFT_SLEEP}"])
+                f"MESSAGE_ID={LEFT_SLEEP}", "_UID=0"])
     if not done or done.returncode != 0:
         return False
     last = None

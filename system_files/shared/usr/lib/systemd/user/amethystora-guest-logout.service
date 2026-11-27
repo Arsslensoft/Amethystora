@@ -1,0 +1,19 @@
+[Unit]
+# The guest login (amethystora-guest): when the guest's desktop session ends, its user manager ends with it, at once. logind keeps
+# a user manager for UserStopDelaySec (10 s) after its last session, and a guest who logs in within that time would take over the
+# running one: the last visitor's home in memory, its browser's sessions and services, with neither cleanup nor prepare run. Once
+# the manager is gone, its ExecStopPost cleans up and the home is unmounted, and the next login starts from nothing.
+Description=The guest's session ends its user manager
+Documentation=file:///usr/share/amethystora/manual/logins.md
+ConditionUser=amethystora-guest
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+ExecStop=/usr/bin/systemctl --user --no-block exit
+
+[Install]
+WantedBy=graphical-session.target
