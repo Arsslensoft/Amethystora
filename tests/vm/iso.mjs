@@ -245,7 +245,9 @@ const HIDDEN = kind === 'installer' ? ['network', 'date-time', 'accounts'] : ['a
 const PASSED = ['network', 'date-time', 'installation-source', 'software-selection'];
 // Two hours from the live ISO: the copy it installs is read from the squashed system on a virtual DVD
 const INSTALL_MINUTES = kind === 'live' ? 120 : 75;
-const LAUNCHER = 'ls /usr/share/applications/liveinst.desktop /usr/share/applications/*anaconda*.desktop 2>/dev/null | head -n 1';
+// The live session's Install entry, which runs liveinst. Only that one: anaconda-live also installs
+// anaconda-gnome-control-center.desktop, which a glob of *anaconda* finds first, and which is not the installer
+const LAUNCHER = '/usr/share/applications/liveinst.desktop';
 const FORWARDER = `import socket, sys, threading
 
 def pipe(src, dst):
@@ -278,7 +280,7 @@ async function webInstall() {
     // In the live account's session, in a scope of its own so that it outlives the helper's command: its launcher's entry,
     // which runs liveinst, which asks polkit to run Anaconda as root, as a click on it does
     const a = await agent(NAME, { op: 'exec', user: 'liveuser', session: true, timeout: 60,
-      command: `d="$(${LAUNCHER})" && systemd-run --user --scope --unit=lab-liveinst gio launch "$d"` }, 60);
+      command: `systemd-run --user --scope --unit=lab-liveinst gio launch ${LAUNCHER}` }, 60);
     if (!say(a.rc === 0, 'the installer starts from its launcher in the live session', `${decode(a.stderr)}${a.error || ''}`)) return false;
   }
   // The web interface starts after Anaconda's modules, slower under nested virtualization
@@ -287,7 +289,11 @@ async function webInstall() {
     'if [ -z "$p" ] && ! command -v ss >/dev/null && pgrep -f cockpit-ws >/dev/null; then for q in 80 9090; do (echo >/dev/tcp/127.0.0.1/$q) 2>/dev/null && { p=$q; break; }; done; fi; ' +
     '[ -n "$p" ] && { echo "$p"; exit; }; sleep 5; done', 660);
   if (!say(/^\d+$/.test(port), 'the installer serves its web interface (cockpit-ws)',
-    await value('ps -eo args | grep -E "[c]ockpit|[a]naconda|[l]iveinst|[f]irefox" | cut -c1-200 | head; ss -Hltnp 2>/dev/null | head; ' +
+    await value('ps -eo args | grep -E "[c]ockpit|[a]naconda|[l]iveinst|[f]irefox|[w]ebui" | cut -c1-200 | head -n 40; ' +
+      'echo "--- listening"; ss -Hltnp 2>&1 | head; echo "--- webui-cockpit-ws"; systemctl status --no-pager -l -n 0 webui-cockpit-ws 2>&1 | head -n 12; ' +
+      'journalctl -b --no-pager -o cat -n 30 -u webui-cockpit-ws 2>&1; echo "--- /tmp/webui-cockpit-ws.env"; cat /tmp/webui-cockpit-ws.env 2>&1; ' +
+      'echo "--- SELinux: $(getenforce 2>&1)"; journalctl -b --no-pager -o cat -t audit -g "avc:.*denied" -n 10 2>&1 | cut -c1-300; ' +
+      'echo "--- /tmp/webui-browser.log"; tail -n 15 /tmp/webui-browser.log 2>&1; ' +
       'journalctl -b --no-pager -n 15 -t polkitd -t pkexec -t liveinst 2>/dev/null', 30))) return false;
   note(`the web interface: cockpit-ws on the installer's port ${port}`);
   await sh('mkdir -p /run/lab');
@@ -440,7 +446,7 @@ try {
     // The live session, as it starts from the ISO
     const session = await value('for i in $(seq 120); do pgrep -u liveuser -x gnome-shell >/dev/null && break; sleep 5; done; pgrep -u liveuser -x gnome-shell', 660);
     say(session !== '', 'the live session starts, signed in as the live account', await value('loginctl list-sessions --no-legend; systemctl --failed --no-pager --plain'));
-    say(await yes('test -e /usr/share/applications/liveinst.desktop || ls /usr/share/applications/*anaconda*.desktop >/dev/null 2>&1'),
+    say(await yes(`test -e ${LAUNCHER}`),
       'the installer has its launcher in the live session');
     const store = await value('podman images --format "{{.Repository}}:{{.Tag}} {{.ReadOnly}}"', 120);
     say(store.split('\n').includes(`${FOLLOWS} true`), 'the image to install is in the live system, read-only', store);
