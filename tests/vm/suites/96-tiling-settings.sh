@@ -36,6 +36,7 @@ user_bus gsettings set "${TILING}" enabled true >/dev/null 2>&1
 defaults_ok=true
 for entry in window-gap=8 horizontal-margin=8 vertical-margin=8 vertical-margin-bottom=8 selection-border-size=10 \
     animation-time=0.25 default-focus-mode=0 open-window-position=0 edge-preview-enable=true gesture-enabled=true \
+    screen-follows-pointer=true \
     gesture-horizontal-fingers=3 maximize-within-tiling=true "winprops=@as []" show-workspace-indicator=false \
     show-window-position-bar=false use-default-background=true overview-ensure-viewport-animation=1; do
     key="${entry%%=*}" want="${entry#*=}"
@@ -57,7 +58,8 @@ changes=(
     open-window-position 4 open-window-position-option-up true animation-time 0.5 drift-speed 5
     drag-drift-speed 5 minimap-scale 0.0 minimap-shade-opacity 0 edge-preview-enable false
     edge-preview-scale 0.3 edge-preview-click-enable false edge-preview-timeout-enable true
-    edge-preview-timeout 300 edge-preview-timeout-continual true gesture-enabled false
+    edge-preview-timeout 300 edge-preview-timeout-continual true screen-follows-pointer false
+    gesture-enabled false
     gesture-horizontal-fingers 4 gesture-workspace-fingers 0 swipe-sensitivity "[1.0, 1.0]" swipe-friction "[1.0, 0.5]"
     show-focus-mode-icon false show-open-position-icon false default-show-top-bar false
     topbar-mouse-scroll-enable true window-switcher-preview-scale 0.3

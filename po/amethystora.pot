@@ -24414,6 +24414,18 @@ msgid "And on to the next, while the pointer stays"
 msgstr ""
 
 #: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/prefs.js
+msgid "Several screens"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/prefs.js
+msgid "The screen the pointer goes to gets the keyboard"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/prefs.js
+msgid "Off, the keyboard stays where you type until you click on the other screen"
+msgstr ""
+
+#: usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/prefs.js
 msgid "Swipes move the strip"
 msgstr ""
 

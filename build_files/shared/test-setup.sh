@@ -18,6 +18,20 @@ export XDG_STATE_HOME="${T}/home/.local/state"
 export PATH="${T}/bin:${PATH}" LOG="${T}/log"
 : >"${LOG}"
 
+# In the Unit and Integration workflows the schemas' XML is this change's while the compiled ones are the last
+# published image's (tests/ci/run.sh lays system_files over / and compiles nothing), so a key the change adds was
+# in its table here and in no schema. They are compiled again then, the extension's own over the system's as
+# build-gnome-extensions.sh installs them, and every gsettings below reads those
+UI_SCHEMAS=/usr/share/gnome-shell/extensions/amethystora-ui@arsslensoft.github.io/schemas
+SYSTEM_SCHEMAS=/usr/share/glib-2.0/schemas
+if [[ -n "$(find "${UI_SCHEMAS}" -name '*.gschema.xml' -newer "${SYSTEM_SCHEMAS}/gschemas.compiled" -print -quit 2>/dev/null)" ]]; then
+    mkdir "${T}/schemas"
+    find "${SYSTEM_SCHEMAS}" -maxdepth 1 -type f \( -name '*.xml' -o -name '*.gschema.override' \) -exec cp -t "${T}/schemas" {} +
+    cp "${UI_SCHEMAS}"/*.gschema.xml "${T}/schemas/"
+    glib-compile-schemas "${T}/schemas" 2>"${T}/schemas.log" || { cat "${T}/schemas.log"; false; }
+    export GSETTINGS_SCHEMA_DIR="${T}/schemas"
+fi
+
 # The tiling has taken Super+N out of GNOME's focus-active-notification, which is the account's own and was
 # not changed by it, and says so in its state file
 mkdir -p "${XDG_STATE_HOME}/amethystora"

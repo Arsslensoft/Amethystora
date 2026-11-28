@@ -61,7 +61,7 @@ TILING_KEYS=(window-gap horizontal-margin vertical-margin vertical-margin-bottom
     open-window-position-option-end open-window-position-option-down open-window-position-option-up
     animation-time drift-speed drag-drift-speed minimap-scale minimap-shade-opacity edge-preview-enable
     edge-preview-scale edge-preview-click-enable edge-preview-timeout-enable edge-preview-timeout
-    edge-preview-timeout-continual gesture-enabled gesture-horizontal-fingers gesture-workspace-fingers
+    edge-preview-timeout-continual screen-follows-pointer gesture-enabled gesture-horizontal-fingers gesture-workspace-fingers
     swipe-sensitivity swipe-friction show-focus-mode-icon show-open-position-icon default-show-top-bar
     topbar-mouse-scroll-enable window-switcher-preview-scale show-workspace-indicator show-window-position-bar
     only-scratch-in-overview disable-scratch-in-overview overview-ensure-viewport-animation use-default-background

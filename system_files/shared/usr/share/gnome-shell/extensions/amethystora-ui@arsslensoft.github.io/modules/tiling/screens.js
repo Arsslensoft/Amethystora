@@ -1,7 +1,8 @@
 // With two screens or more, each screen shows a workspace of its own, and a workspace is shown on one screen at most.
 // GNOME has one workspace at a time, the one of the screen with the keyboard; the others show theirs through live
 // pictures of its windows, in a layer just above the background, with the focus frame as it is when the keyboard is
-// elsewhere. The pointer moving to a screen makes its workspace GNOME's, with no animation. GNOME's own ways to another
+// elsewhere. The pointer moving to a screen makes its workspace GNOME's, with no animation (or, with
+// screen-follows-pointer off, a click or a touch on that screen does). GNOME's own ways to another
 // workspace show it on the screen it was last on; the tiling's keys and gestures show it on the screen with the
 // keyboard; a workspace already shown on another screen comes with a swap. A workspace keeps its screen by the
 // screen's connector, so that it goes back there when the screen is plugged in again. With dynamic workspaces, GNOME
@@ -15,6 +16,8 @@ import Meta from 'gi://Meta';
 import {gettext as _, ngettext} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {EventEmitter} from 'resource:///org/gnome/shell/misc/signals.js';
+
+import {config} from './config.js';
 
 // What survives the tiling being stopped and started in the same session (a screen lock): which workspace each
 // screen showed, by its connector
@@ -510,7 +513,9 @@ export class Screens extends EventEmitter {
 }
 
 // A screen's workspace while GNOME has another: a picture of each of its windows where the strip has it, and the focus
-// frame, none of which takes the pointer (the pointer coming to this screen makes the workspace GNOME's anyway)
+// frame, none of which takes the pointer (the pointer coming to this screen makes the workspace GNOME's anyway).
+// With screen-follows-pointer off the pointer does not, and the whole picture takes a click or a touch instead: the
+// workspace becomes GNOME's and the window that was clicked gets the keyboard. That click is not the app's.
 class Mirror {
     constructor(engine, monitor, workspace) {
         this._engine = engine;
@@ -518,8 +523,11 @@ class Mirror {
         this.workspace = workspace;
         const m = Main.layoutManager.monitors[monitor];
         this.actor = new Clutter.Actor({
-            x: m.x, y: m.y, width: m.width, height: m.height, clip_to_allocation: true, reactive: false,
+            x: m.x, y: m.y, width: m.width, height: m.height, clip_to_allocation: true,
+            reactive: !config.screenFollows,
         });
+        this.actor.connect('button-press-event', (actor, event) => this._pressed(event));
+        this.actor.connect('touch-event', (actor, event) => this._pressed(event));
         // Over the workspaces' own pictures (backgrounds.js), else right over GNOME's backgrounds
         const background = engine.backgrounds?.layer ?? Main.layoutManager._backgroundGroup;
         if (background?.get_parent() === global.window_group)
@@ -535,6 +543,7 @@ class Mirror {
             return;
         this.actor.set_position(m.x, m.y);
         this.actor.set_size(m.width, m.height);
+        this.actor.reactive = !config.screenFollows;
         this.actor.destroy_all_children();
         const strip = engine.strip(this.workspace, this._monitor);
         const windows = global.display.sort_windows_by_stacking(this.workspace.list_windows().filter(window =>
@@ -568,6 +577,25 @@ class Mirror {
         }
         if (box && !box.get_parent())
             box.destroy();
+    }
+
+    // A click or a touch on the picture (it takes them only with screen-follows-pointer off): this screen gets the
+    // keyboard, on the window under the click if there is one, else on its strip's own
+    _pressed(event) {
+        const type = event.type();
+        if (type !== Clutter.EventType.BUTTON_PRESS && type !== Clutter.EventType.TOUCH_BEGIN)
+            return Clutter.EVENT_PROPAGATE;
+        const engine = this._engine;
+        if (config.screenFollows || Main.overview.visible || engine.session || Main.modalCount > 0)
+            return Clutter.EVENT_PROPAGATE;
+        try {
+            const point = event.get_coords();
+            engine.screens.bring(this.workspace, this._monitor);
+            engine.tiling.actions?.activateUnderPointer(point);
+        } catch (e) {
+            console.error(`Amethystora UI: the tiling could not give a clicked screen the keyboard: ${e.message}`);
+        }
+        return Clutter.EVENT_STOP;
     }
 
     destroy() {

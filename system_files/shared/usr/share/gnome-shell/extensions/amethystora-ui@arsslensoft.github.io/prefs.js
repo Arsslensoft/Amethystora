@@ -236,6 +236,10 @@ function motionPage(settings) {
     edges.add(spinRow(settings, 'edge-preview-timeout', _('After this many milliseconds'), 100, 5000, 50));
     edges.add(switchRow(settings, 'edge-preview-timeout-continual', _('And on to the next, while the pointer stays')));
 
+    const screens = group(page, _('Several screens'));
+    screens.add(switchRow(settings, 'screen-follows-pointer', _('The screen the pointer goes to gets the keyboard'),
+        _('Off, the keyboard stays where you type until you click on the other screen')));
+
     const touchpad = group(page, _('Touchpad'));
     touchpad.add(switchRow(settings, 'gesture-enabled', _('Swipes move the strip'),
         _('Sideways slides the strip, down opens the workspaces you were on, up opens the overview')));

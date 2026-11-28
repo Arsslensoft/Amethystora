@@ -160,6 +160,10 @@
       <summary>Keeping the pointer there goes on to the next window, and the next</summary>
     </key>
 
+    <key name="screen-follows-pointer" type="b">
+      <default>true</default>
+      <summary>With several screens, the screen the pointer goes to gets the keyboard; off, a click on it does</summary>
+    </key>
     <key name="gesture-enabled" type="b">
       <default>true</default>
       <summary>Touchpad swipes move the strip and open the workspaces</summary>

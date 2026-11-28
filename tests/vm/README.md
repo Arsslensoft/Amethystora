@@ -119,14 +119,26 @@ bash tests/vm/iso.sh live amethystora.iso [--digest sha256:...]
 ```
 
 `iso.mjs` starts the ISO under Secure Boot from its own boot menu and looks at what it started (the installer's system,
-or the live session with the image it installs, read-only), installs onto a blank 40 GiB disk with only the answers a
-person gives (the whole disk, encrypted, the language and keyboard: the installer ISO's own kernel with its entry's
-arguments and a kickstart of those answers that runs the ISO's own kickstart, under UEFI with Secure Boot off since the
-firmware checks no kernel it is handed directly; the live ISO from its session, Anaconda on `interactive-defaults.ks`
-with the same answers), then starts the disk alone under Secure Boot with the passphrase as a credential, twice: every
-unit started, the signed origin, `--digest`'s image running, btrfs on LUKS2, SELinux and its labels, the firewall,
-no Fedora logo, the new installation's snapshots, GNOME Initial Setup. Its lines are in `/vm/iso/KIND/results.tap`, with
-a screenshot after each step. Written on 2026-11-23 and not run yet.
+or the live session with the image it installs, read-only), and installs onto a blank 40 GiB disk.
+
+Both are installed in the system they started, through Anaconda's web interface, as a person clicks through it. The
+installer ISO's system starts the interface by itself; the live session starts it from the installer's launcher, in the
+live account's session, as a click on it in the dash or the welcome window does. A forwarder started there through the
+lab's helper opens cockpit-ws, which serves the interface on the loopback alone, on a port QEMU forwards to the lab (the
+live system's firewall is opened to it for the session), and a headless Chromium (`webui.mjs`, over the DevTools protocol,
+the lab's `chromium-headless`) goes through every page. It opens on the language page with languages listed, chooses
+English (United Kingdom) and the `gb` keyboard, then the disk, all of it, encrypted with a passphrase given twice, passing
+with Next any other page the ISO shows on the way (the live ISO's network or date and time); the review must show the
+language and the disk, and no page the ISO hides may have appeared (network, date and time and account on the installer
+ISO, account on the live ISO); the installation runs to "Successfully installed", and Reboot ends QEMU. A screenshot of the
+page follows each step, and one of the page and the screen when a step fails.
+
+Then the disk is started alone under Secure Boot with the passphrase as a credential, twice: every unit started, the
+signed origin, `--digest`'s image running, btrfs on LUKS2, SELinux and its labels, the firewall, no Fedora logo, the
+language and keyboard chosen in the web interface (and, from the live ISO, the `gb` keymap and the splash in the kernel's
+arguments), the new installation's snapshots, GNOME Initial Setup. Its
+lines are in `/vm/iso/KIND/results.tap`, with a screenshot after each step. The web interface's walk-through was written
+on 2026-11-27 from the selectors of anaconda-webui's own tests, and not run yet.
 
 The lab shares one Linux VM with every other container (WSL 2's, 13.3 GB here), and when a build and a VM ran
 beside other containers it ran out of memory and Docker stopped answering (2026-10-29). So `vm_start` refuses while
