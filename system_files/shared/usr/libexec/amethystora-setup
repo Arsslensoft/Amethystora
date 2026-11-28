@@ -123,6 +123,7 @@ TILING_KEYS='{
     "minimap-scale": ["d", 0, 0.5], "minimap-shade-opacity": ["i", 0, 255],
     "edge-preview-enable": ["b"], "edge-preview-scale": ["d", 0.05, 0.5], "edge-preview-click-enable": ["b"],
     "edge-preview-timeout-enable": ["b"], "edge-preview-timeout": ["i", 100, 5000], "edge-preview-timeout-continual": ["b"],
+    "screen-follows-pointer": ["b"],
     "gesture-enabled": ["b"], "gesture-horizontal-fingers": ["i", 0, 4], "gesture-workspace-fingers": ["i", 0, 4],
     "swipe-sensitivity": ["ad"], "swipe-friction": ["ad"],
     "show-focus-mode-icon": ["b"], "show-open-position-icon": ["b"], "default-show-top-bar": ["b"],

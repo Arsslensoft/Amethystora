@@ -87,6 +87,9 @@ export class Tiling {
             this.topBar?.applyTopBar();
         } else if (/^(gesture|edge-preview|topbar-mouse)/.test(key)) {
             this.pointer?.rebuild();
+        } else if (key === 'screen-follows-pointer') {
+            // The other screens' pictures take a click, or stop taking it
+            this.engine.screens?.queueMirrors();
         } else if (/^(workspace-|default-background)/.test(key)) {
             this.engine.backgrounds?.sync();
         }

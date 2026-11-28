@@ -12,6 +12,8 @@
 #   - a window on screen 2 is still on screen 2's workspace after the tiling is turned off and on again;
 #   - a window on a screen without the keyboard is drawn on glass, and the top bar is solid while a window of the
 #     workspace its screen shows reaches it;
+#   - with screen-follows-pointer off the keyboard stays where it is while the pointer is on another screen, and a
+#     click there gives that screen the keyboard;
 #   - nothing of Amethystora UI throws meanwhile.
 # vmlab-paths: @ui/extension.js @ui/*tiling* @ui/*glass* @ui/*bars* @ui/*workspaces* @ui/*desks*
 source "$(dirname "$0")/lib.sh"
@@ -234,6 +236,27 @@ check "...and still there with the pointer on screen 2" files_on 1
 user_systemctl stop "vmlab-files3-$$"
 keys "move:${bar_at}"
 sleep 1
+
+# The keyboard stays where it is once the account turns screen-follows-pointer off: the pointer on another screen brings
+# nothing, a click there does
+TILING=org.gnome.shell.extensions.amethystora-ui.tiling
+keyboard_on() { [[ "$(ev "(() => { const s = ${UI}.get('tiling').engine.screens; return s.monitorShowing(global.workspace_manager.get_active_workspace()); })()")" == "$1" ]]; }
+keys move:0.36,0.45 move:0.375,0.5
+if wait_for 10 keyboard_on 1; then
+    user_bus gsettings set "${TILING}" screen-follows-pointer false
+    sleep 1
+    keys move:0.14,0.45 move:0.125,0.5
+    sleep 2
+    check "with screen-follows-pointer off, the pointer on another screen leaves the keyboard where it was" keyboard_on 1
+    keys click:0.125,0.5
+    check "...and a click on that screen gives it the keyboard" wait_for 10 keyboard_on 0
+    user_bus gsettings reset "${TILING}" screen-follows-pointer
+    keys move:0.36,0.45 move:0.375,0.5
+    check "set back, the screen the pointer goes to has the keyboard again" wait_for 10 keyboard_on 1
+else
+    not_ok "the pointer on screen 2 did not give it the keyboard"
+fi
+user_bus gsettings reset "${TILING}" screen-follows-pointer
 
 # A JS error whose stack goes through the extension, or the extension's own word that a module failed (GNOME's own
 # errors while the session is ended for a restart are not its)

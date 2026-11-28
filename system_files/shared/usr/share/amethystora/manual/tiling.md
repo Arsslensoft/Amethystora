@@ -52,6 +52,11 @@ With two monitors or more, each shows a workspace of its own, and a workspace is
 monitor the pointer is on is the one you work on: move the pointer there and its workspace is the current one, with
 no animation.
 
+If typing into a window stops whenever the pointer drifts onto another monitor, turn off **The screen the pointer
+goes to gets the keyboard** under **Several screens** in the tiling settings (below). The keyboard then stays where
+you type, and a monitor becomes the one you work on when you click on it, or go to it with a key. That first click
+only chooses the monitor and the window under it; the next one is the app's.
+
 ### Choosing workspaces across monitors
 
 - `Super+Page Up` and `Super+Page Down` go through the workspaces of the monitor you are on and the empty ones, and

@@ -505,9 +505,9 @@ export class Actions {
         Main.activateWindow(last);
     }
 
-    // The keyboard to the window under the pointer
-    activateUnderPointer() {
-        const [x, y] = global.get_pointer();
+    // The keyboard to the window under the pointer, or under `point` ([x, y], a click on another screen: screens.js)
+    activateUnderPointer(point = global.get_pointer()) {
+        const [x, y] = point;
         const workspace = global.workspace_manager.get_active_workspace();
         const windows = global.display.sort_windows_by_stacking(workspace.list_windows()).reverse();
         const hit = windows.find(window => {

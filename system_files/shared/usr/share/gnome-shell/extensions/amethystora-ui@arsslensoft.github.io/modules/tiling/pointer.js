@@ -1,7 +1,8 @@
 // The tiling under the mouse, the touchpad and the touchscreen: the edges of the screen show the window beyond them
 // and bring it in on a click; a tiled window dragged by its title bar scrolls the strip, or, lifted away from it,
 // is carried to a place in the strip shown as it is reached; three fingers sideways slide the strip; and with
-// several screens, the screen the pointer goes to gets the keyboard.
+// several screens, the screen the pointer goes to gets the keyboard (screen-follows-pointer; off, a click on that
+// screen gives it the keyboard, screens.js, and the pointer alone only while it carries a window there).
 
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
@@ -78,6 +79,7 @@ export class Pointer {
 
     disable() {
         this._endDrag(true);
+        this._moving = null;
         this._hidePreview();
         for (const edge of this._edges ?? [])
             edge.destroy();
@@ -317,6 +319,8 @@ export class Pointer {
         // A window being resized keeps its workspace: the pointer crossing onto another screen on the way does not
         // bring that screen's (_followPointer)
         this._resizing = moving ? null : window;
+        // Any window being moved, tiled or not: its screen is followed whatever screen-follows-pointer says
+        this._moving = moving ? window : null;
         if (!moving || !this._engine.isTiled(window))
             return;
         const strip = this._engine.stripOf(window);
@@ -574,6 +578,8 @@ export class Pointer {
     _grabEnded(window) {
         if (this._resizing === window)
             this._resizing = null;
+        if (this._moving === window)
+            this._moving = null;
         if (this._drag?.window === window)
             this._endDrag(false);
     }
@@ -1038,6 +1044,11 @@ export class Pointer {
                 this._engine.float(this._resizing, {glide: false});
             return true;
         }
+        // The person's choice (screen-follows-pointer off): the keyboard stays where it is while the pointer is on
+        // another screen, which gets it by a click (screens.js, the Mirror) or a key. A window being moved there
+        // still brings that screen's workspace, or it could not be dropped on it.
+        if (!config.screenFollows && !this._moving)
+            return false;
         // The search box (search.js) is not modal, and a window on a screen the pointer crosses on its way there
         // would take the keyboard from it and close it: the screen is followed once the box is gone
         if (Main.overview.visible || this._engine.session || Main.modalCount > 0 ||

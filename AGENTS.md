@@ -1679,7 +1679,7 @@ The modules, and what each replaced:
   session, so the image's are in that section of zz1 too, and `20-tests.sh` reads them with
   `XDG_CURRENT_DESKTOP=GNOME`; `tests/vm/suites/29-screens.sh` runs on four screens): GNOME's active
   workspace is the screen with the keyboard's, the others are drawn as live clones of their windows in a layer over
-  the background, the pointer moving to a screen makes its workspace GNOME's, GNOME's slide is skipped but for a
+  the background, the pointer moving to a screen makes its workspace GNOME's (the key `screen-follows-pointer`, on as shipped; off, the keyboard stays where it is, the clones' layer takes a click or a touch that makes that screen's workspace GNOME's with the window under it focused, and a window being moved still brings the screen it is carried to), GNOME's slide is skipped but for a
   workspace no screen showed, and a workspace keeps its screen by connector (the screen of GNOME's workspace unplugged,
   the most recent one still shown becomes GNOME's); a workspace has one strip, on the screen showing it (`engine.strip()`
   ignores the monitor there). With one screen none of it runs. `workspace-colors`, `workspace-backgrounds` and
