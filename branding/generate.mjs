@@ -857,8 +857,9 @@ function bootScript() {
     global.${name}.sprite.SetOpacity(o);
     global.${name}.opacity = o;
   }`;
-  const sides = SIDES.map((s, i) => `side[${i}].image = sized(Image("side-${i}.png"), ${num(s.side * B.unit)} * scale, ${num(s.side * B.unit)} * scale);
-side[${i}].sprite = Sprite(side[${i}].image);
+  const sides = SIDES.map((s, i) => `side[${i}].source = Image("side-${i}.png");
+side[${i}].size = ${num(s.side * B.unit)};
+side[${i}].sprite = Sprite();
 side[${i}].sprite.SetZ(3);
 side[${i}].sprite.SetOpacity(0);
 side[${i}].x = ${num(s.c[0] - 128)};
@@ -872,15 +873,6 @@ side[${i}].diry = ${num(s.diry)};`).join("\n");
 
 Window.SetBackgroundTopColor(${rgb01(B.sky)});
 Window.SetBackgroundBottomColor(${rgb01(B.sky)});
-
-# The mark and everything round it are laid out for a 1920x1080 screen and scaled to fit this one.
-screen_x = Window.GetX();
-screen_y = Window.GetY();
-screen_w = Window.GetWidth();
-screen_h = Window.GetHeight();
-scale = Math.Min(screen_w / 1920, screen_h / 1080);
-origin_x = screen_x + screen_w / 2;
-origin_y = screen_y + screen_h * ${num(B.centerY)};
 
 fun sized(image, width, height) {
   if (width < 1) { width = 1; }
@@ -896,9 +888,11 @@ fun clamp01(v) {
 
 # ------------------------------------------------------------------- scene --
 
-halo.image = sized(Image("halo.png"), ${B.halo} * scale, ${B.halo} * scale);
-halo.sprite = Sprite(halo.image);
-halo.sprite.SetPosition(origin_x - halo.image.GetWidth() / 2, origin_y - halo.image.GetHeight() / 2, 1);
+# The pictures are loaded once and the sprites made once; layout() below sizes and places them for the
+# screens Plymouth has, and runs again when that changes.
+halo.source = Image("halo.png");
+halo.sprite = Sprite();
+halo.sprite.SetZ(1);
 halo.sprite.SetOpacity(0);
 halo.opacity = 0;
 
@@ -906,42 +900,155 @@ side_count = ${SIDES.length};
 ${sides}
 
 # The stem keeps its place in the mark and grows from its foot
-stem.image = sized(Image("stem.png"), ${num(STEM.width * B.unit)} * scale, ${num(STEM.height * B.unit)} * scale);
-stem.grown = stem.image;
+stem.source = Image("stem.png");
 stem.height = 0;
-stem.foot = origin_y + ${num((STEM.y + STEM.height - 128) * B.unit)} * scale;
-stem.sprite = Sprite(stem.image);
-stem.sprite.SetX(origin_x + ${num((STEM.x - 128) * B.unit)} * scale);
+stem.sprite = Sprite();
 stem.sprite.SetZ(3);
 stem.sprite.SetOpacity(0);
 
-gem.image = sized(Image("gem.png"), ${num(GEM_PX)} * scale, ${num(GEM_PX)} * scale);
-gem.sprite = Sprite(gem.image);
-gem.sprite.SetPosition(origin_x - gem.image.GetWidth() / 2, origin_y - gem.image.GetHeight() / 2, 4);
+gem.source = Image("gem.png");
+gem.sprite = Sprite();
+gem.sprite.SetZ(4);
 gem.sprite.SetOpacity(0);
 
-light.image = sized(Image("light.png"), ${num(GEM_PX)} * scale, ${num(GEM_PX)} * scale);
-light.sprite = Sprite(light.image);
-light.sprite.SetPosition(origin_x - light.image.GetWidth() / 2, origin_y - light.image.GetHeight() / 2, 5);
+light.source = Image("light.png");
+light.sprite = Sprite();
+light.sprite.SetZ(5);
 light.sprite.SetOpacity(0);
 light.opacity = 0;
 
-wordmark.image = sized(Image("wordmark.png"), ${WORDMARK.box[0]} * scale, ${WORDMARK.box[1]} * scale);
-wordmark.sprite = Sprite(wordmark.image);
-wordmark_y = screen_y + screen_h * ${WORDMARK_Y};
-wordmark.sprite.SetPosition(origin_x - wordmark.image.GetWidth() / 2, wordmark_y - wordmark.image.GetHeight() / 2, 6);
+wordmark.source = Image("wordmark.png");
+wordmark.sprite = Sprite();
+wordmark.sprite.SetZ(6);
 
-credit.image = sized(Image("credit.png"), ${TEXT.credit.box[0]} * scale, ${TEXT.credit.box[1]} * scale);
-credit.sprite = Sprite(credit.image);
-credit.sprite.SetPosition(origin_x - credit.image.GetWidth() / 2, wordmark_y + ${CREDIT_BELOW} * scale - credit.image.GetHeight() / 2, 6);
+credit.source = Image("credit.png");
+credit.sprite = Sprite();
+credit.sprite.SetZ(6);
 credit.sprite.SetOpacity(${TEXT.credit.opacity});
+
+# The password field under the gem, the lock drawn inside it, and the prompt above
+field_source = Image("field.png");
+dot_source = Image("dot.png");
+dialog.field = Sprite();
+dialog.field.SetZ(10);
+dialog.prompt = Sprite();
+dialog.prompt.SetZ(10);
+dialog.text = Sprite();
+dialog.text.SetZ(11);
+# What the dialog shows, so it can be drawn again when the screens change: "", "password" or "question"
+dialog.shown = "";
+
+message = Sprite();
+message.SetZ(10);
+message_text = "";
+
+# Offline updates and upgrades: what is happening and how far along, under the gem
+mode = Plymouth.GetMode();
+updating = 0;
+if (mode == "updates" || mode == "system-upgrade" || mode == "firmware-upgrade") {
+  updating = 1;
+  status.title = Sprite();
+  status.title.SetZ(10);
+  status.progress = Sprite();
+  status.progress.SetZ(10);
+}
+progress_seen = -1;
+
+# ------------------------------------------------------------------ layout --
+
+# The mark and everything round it are laid out for a 1920x1080 screen and scaled to fit this one.
+# Plymouth can start on one screen and gain others later, as a dock's or a second GPU's screens come up
+# after the laptop's own: all of them then show one scene, the size of the largest, with the smaller ones
+# in its middle. So the geometry is read again on every frame, and the scene laid out again when it changes.
+fun layout() {
+  global.screen_x = Window.GetX();
+  global.screen_y = Window.GetY();
+  global.screen_w = Window.GetWidth();
+  global.screen_h = Window.GetHeight();
+  global.scale = Math.Min(global.screen_w / 1920, global.screen_h / 1080);
+  global.origin_x = global.screen_x + global.screen_w / 2;
+  global.origin_y = global.screen_y + global.screen_h * ${num(B.centerY)};
+  scale = global.scale;
+  origin_x = global.origin_x;
+  origin_y = global.origin_y;
+
+  global.halo.image = sized(global.halo.source, ${B.halo} * scale, ${B.halo} * scale);
+  global.halo.sprite.SetImage(global.halo.image);
+  global.halo.sprite.SetPosition(origin_x - global.halo.image.GetWidth() / 2, origin_y - global.halo.image.GetHeight() / 2, 1);
+
+  # The sides are placed by the timeline while they come in
+  for (i = 0; i < global.side_count; i++) {
+    global.side[i].image = sized(global.side[i].source, global.side[i].size * scale, global.side[i].size * scale);
+    global.side[i].sprite.SetImage(global.side[i].image);
+  }
+
+  global.stem.image = sized(global.stem.source, ${num(STEM.width * B.unit)} * scale, ${num(STEM.height * B.unit)} * scale);
+  global.stem.foot = origin_y + ${num((STEM.y + STEM.height - 128) * B.unit)} * scale;
+  global.stem.sprite.SetImage(global.stem.image);
+  global.stem.sprite.SetX(origin_x + ${num((STEM.x - 128) * B.unit)} * scale);
+  global.stem.sprite.SetY(global.stem.foot - global.stem.image.GetHeight());
+  # Makes the timeline grow it again from this size
+  global.stem.height = 0;
+
+  global.gem.image = sized(global.gem.source, ${num(GEM_PX)} * scale, ${num(GEM_PX)} * scale);
+  global.gem.sprite.SetImage(global.gem.image);
+  global.gem.sprite.SetPosition(origin_x - global.gem.image.GetWidth() / 2, origin_y - global.gem.image.GetHeight() / 2, 4);
+
+  global.light.image = sized(global.light.source, ${num(GEM_PX)} * scale, ${num(GEM_PX)} * scale);
+  global.light.sprite.SetImage(global.light.image);
+  global.light.sprite.SetPosition(origin_x - global.light.image.GetWidth() / 2, origin_y - global.light.image.GetHeight() / 2, 5);
+
+  global.wordmark.image = sized(global.wordmark.source, ${WORDMARK.box[0]} * scale, ${WORDMARK.box[1]} * scale);
+  wordmark_y = global.screen_y + global.screen_h * ${WORDMARK_Y};
+  global.wordmark.sprite.SetImage(global.wordmark.image);
+  global.wordmark.sprite.SetPosition(origin_x - global.wordmark.image.GetWidth() / 2, wordmark_y - global.wordmark.image.GetHeight() / 2, 6);
+
+  global.credit.image = sized(global.credit.source, ${TEXT.credit.box[0]} * scale, ${TEXT.credit.box[1]} * scale);
+  global.credit.sprite.SetImage(global.credit.image);
+  global.credit.sprite.SetPosition(origin_x - global.credit.image.GetWidth() / 2, wordmark_y + ${CREDIT_BELOW} * scale - global.credit.image.GetHeight() / 2, 6);
+
+  global.field_image = sized(global.field_source, ${FIELD.width} * scale, ${FIELD.height} * scale);
+  global.dot_image = sized(global.dot_source, ${FIELD.dot} * scale, ${FIELD.dot} * scale);
+  global.field_x = origin_x - global.field_image.GetWidth() / 2;
+  global.field_y = origin_y + 210 * scale - global.field_image.GetHeight() / 2;
+  global.text_x = global.field_x + ${FIELD.textX} * scale;
+  global.dot_step = (${FIELD.dot} + ${FIELD.gap}) * scale;
+  global.dot_room = Math.Int((global.field_image.GetWidth() - ${FIELD.textX + FIELD.height / 2} * scale) / global.dot_step);
+  global.dialog.field.SetImage(global.field_image);
+  global.dialog.field.SetPosition(global.field_x, global.field_y, 10);
+  for (i = 0; global.dialog.dot[i]; i++) {
+    global.dialog.dot[i].SetImage(global.dot_image);
+    global.dialog.dot[i].SetX(global.text_x + i * global.dot_step);
+    global.dialog.dot[i].SetY(global.field_y + global.field_image.GetHeight() / 2 - global.dot_image.GetHeight() / 2);
+  }
+
+  # Whatever is showing is drawn again at the new size and place
+  if (global.dialog.shown == "password") {
+    display_password_callback(global.dialog.shown_prompt, global.dialog.shown_bullets);
+  } else if (global.dialog.shown == "question") {
+    display_question_callback(global.dialog.shown_prompt, global.dialog.shown_entry);
+  }
+  if (global.message_text != "") {
+    message_callback(global.message_text);
+  }
+  if (global.updating) {
+    draw_status_title();
+    if (global.progress_seen >= 0) {
+      system_update_callback(global.progress_seen);
+    }
+  }
+}
+
+fun screens_changed() {
+  return Window.GetX() != global.screen_x || Window.GetY() != global.screen_y ||
+    Window.GetWidth() != global.screen_w || Window.GetHeight() != global.screen_h;
+}
 
 # ---------------------------------------------------------------- timeline --
 
 # Shutdown and reboot skip the first part and start in the second, with the mark whole and the glow at
 # its height
 tick = 0;
-mode = Plymouth.GetMode();
 if (mode == "shutdown" || mode == "reboot") {
   tick = Math.Int(${num(B.hold + B.whole + B.cycle)} * 50);
 }
@@ -949,6 +1056,10 @@ grown = 0;
 
 # Called 50 times a second
 fun refresh_callback() {
+  if (screens_changed()) {
+    layout();
+  }
+
   t = global.tick / 50 - ${num(B.hold)};
   if (t < 0) { t = 0; }
   global.tick = global.tick + 1;
@@ -1013,22 +1124,6 @@ fun font(size) {
   return "Inter " + points;
 }
 
-# The field under the gem, the lock drawn inside it, and the prompt above
-field_image = sized(Image("field.png"), ${FIELD.width} * scale, ${FIELD.height} * scale);
-dot_image = sized(Image("dot.png"), ${FIELD.dot} * scale, ${FIELD.dot} * scale);
-field_x = origin_x - field_image.GetWidth() / 2;
-field_y = origin_y + 210 * scale - field_image.GetHeight() / 2;
-text_x = field_x + ${FIELD.textX} * scale;
-dot_step = (${FIELD.dot} + ${FIELD.gap}) * scale;
-dot_room = Math.Int((field_image.GetWidth() - ${FIELD.textX + FIELD.height / 2} * scale) / dot_step);
-
-dialog.field = Sprite(field_image);
-dialog.field.SetPosition(field_x, field_y, 10);
-dialog.prompt = Sprite();
-dialog.prompt.SetZ(10);
-dialog.text = Sprite();
-dialog.text.SetZ(11);
-
 fun hide_dots() {
   for (i = 0; global.dialog.dot[i]; i++) {
     global.dialog.dot[i].SetOpacity(0);
@@ -1036,6 +1131,7 @@ fun hide_dots() {
 }
 
 fun hide_dialog() {
+  global.dialog.shown = "";
   global.dialog.field.SetOpacity(0);
   global.dialog.prompt.SetOpacity(0);
   global.dialog.text.SetOpacity(0);
@@ -1044,6 +1140,7 @@ fun hide_dialog() {
 hide_dialog();
 
 fun show_dialog(prompt) {
+  global.dialog.shown_prompt = prompt;
   global.dialog.field.SetOpacity(1);
   image = Image.Text(prompt, 0.93, 0.89, 1, 1, font(12));
   global.dialog.prompt.SetImage(image);
@@ -1054,6 +1151,8 @@ fun show_dialog(prompt) {
 
 fun display_password_callback(prompt, bullets) {
   show_dialog(prompt);
+  global.dialog.shown = "password";
+  global.dialog.shown_bullets = bullets;
   global.dialog.text.SetOpacity(0);
   for (i = 0; global.dialog.dot[i] || i < bullets; i++) {
     if (!global.dialog.dot[i]) {
@@ -1073,6 +1172,8 @@ Plymouth.SetDisplayPasswordFunction(display_password_callback);
 
 fun display_question_callback(prompt, entry) {
   show_dialog(prompt);
+  global.dialog.shown = "question";
+  global.dialog.shown_entry = entry;
   hide_dots();
   image = Image.Text(entry, 1, 1, 1, 1, font(12));
   global.dialog.text.SetImage(image);
@@ -1089,9 +1190,8 @@ Plymouth.SetDisplayNormalFunction(display_normal_callback);
 
 # ------------------------------------------------------ messages, updates --
 
-message = Sprite();
-message.SetZ(10);
 fun message_callback(text) {
+  global.message_text = text;
   image = Image.Text(text, 0.86, 0.8, 0.96, 1, font(11));
   global.message.SetImage(image);
   global.message.SetX(global.origin_x - image.GetWidth() / 2);
@@ -1099,25 +1199,26 @@ fun message_callback(text) {
 }
 Plymouth.SetMessageFunction(message_callback);
 
-# Offline updates and upgrades: what is happening and how far along, under the gem
-if (mode == "updates" || mode == "system-upgrade" || mode == "firmware-upgrade") {
+fun draw_status_title() {
   title = "Installing updates";
-  if (mode == "system-upgrade") { title = "Upgrading the system"; }
-  if (mode == "firmware-upgrade") { title = "Upgrading firmware"; }
-  title_image = Image.Text(title + " - do not turn off your computer", 0.93, 0.89, 1, 1, font(14));
-  status.title = Sprite(title_image);
-  status.title.SetPosition(origin_x - title_image.GetWidth() / 2, origin_y + 190 * scale, 10);
-  status.progress = Sprite();
-  status.progress.SetZ(10);
+  if (global.mode == "system-upgrade") { title = "Upgrading the system"; }
+  if (global.mode == "firmware-upgrade") { title = "Upgrading firmware"; }
+  image = Image.Text(title + " - do not turn off your computer", 0.93, 0.89, 1, 1, font(14));
+  global.status.title.SetImage(image);
+  global.status.title.SetPosition(global.origin_x - image.GetWidth() / 2, global.origin_y + 190 * global.scale, 10);
 }
 
 fun system_update_callback(progress) {
+  global.progress_seen = progress;
   image = Image.Text(Math.Int(progress) + "%", 0.86, 0.8, 0.96, 1, font(12));
   global.status.progress.SetImage(image);
   global.status.progress.SetX(global.origin_x - image.GetWidth() / 2);
   global.status.progress.SetY(global.origin_y + 230 * global.scale);
 }
 Plymouth.SetSystemUpdateFunction(system_update_callback);
+
+# Everything is defined: lay the scene out for the screens there are now
+layout();
 `;
 }
 
